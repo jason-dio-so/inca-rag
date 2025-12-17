@@ -14,6 +14,7 @@
 | 분석 | doc_type별 coverage 매칭 품질 분석 | 분석/검토 | ✅ 완료 |
 | Step A-1 | 약관 전용 coverage 태깅 분리 | 구현 | ✅ 완료 |
 | 검증 | A-1 적용 후 비교 질의 품질 검증 | 분석/검토 | ✅ 완료 |
+| **Step D** | **전체 보험사 Ingestion + 품질 검증** | **구현** | ✅ 완료 |
 
 ---
 
@@ -182,6 +183,65 @@ ONTOLOGY_TO_STANDARD = {
 
 ---
 
+### 7. Step D: 전체 보험사 Ingestion + 품질 검증 [구현]
+
+**작업 내용:**
+- 8개 보험사 전체 ingestion 실행
+- A-1 정책(약관 clause_header) 적용 확인
+- 보험사별 품질 편차 분석
+
+**보험사별 Ingestion 결과:**
+
+| insurer_code | doc_count | chunk_count | 상태 |
+|--------------|-----------|-------------|------|
+| LOTTE | 8 | 2,038 | ✅ |
+| MERITZ | 4 | 1,937 | ✅ |
+| HYUNDAI | 4 | 1,343 | ✅ |
+| SAMSUNG | 5 | 1,279 | ✅ |
+| DB | 5 | 1,259 | ✅ |
+| HANWHA | 4 | 1,114 | ✅ |
+| KB | 4 | 1,003 | ✅ |
+| HEUNGKUK | 4 | 977 | ✅ |
+| **합계** | **38** | **10,950** | - |
+
+**보험사 × doc_type 매칭률:**
+
+| insurer_code | 가입설계서 | 상품요약서 | 사업방법서 | 약관 |
+|--------------|------------|------------|------------|------|
+| DB | 89.47% | 98.72% | 90.77% | 1.82% |
+| HANWHA | 60.00% ⚠️ | 84.72% | 75.96% | 25.18% |
+| HEUNGKUK | 84.62% | 97.50% | 91.30% | 42.03% |
+| HYUNDAI | 77.78% | 93.41% | 84.21% | 12.94% |
+| KB | 100.00% | 98.53% | 92.31% | 10.78% |
+| LOTTE | 77.78% | 91.67% | 87.78% | 33.98% |
+| MERITZ | 76.92% | 88.30% | 80.31% | 13.01% |
+| SAMSUNG | 77.78% | 96.59% | 98.44% | 44.45% |
+
+**coverage_standard JOIN 성공률:** 전 보험사 **100%**
+
+**보험사별 판정:**
+
+| insurer_code | 판정 | 비고 |
+|--------------|------|------|
+| DB | PASS | - |
+| HANWHA | **FAIL** | 가입설계서 60% (기준 70% 미달) |
+| HEUNGKUK | PASS | - |
+| HYUNDAI | PASS | - |
+| KB | PASS | - |
+| LOTTE | PASS | - |
+| MERITZ | PASS | - |
+| SAMSUNG | PASS | - |
+
+**API 구현 리스크:**
+
+| # | 리스크 | 우선순위 |
+|---|--------|----------|
+| 1 | HANWHA 가입설계서 매칭률 60% → 비교조회 시 담보 누락 | 🔴 High |
+| 2 | 약관 clause_header 비율 편차 (1.8%~44.5%) → 검색 품질 불균형 | 🟡 Medium |
+| 3 | 보험사별 chunk 수 편차 (977~2,038) → quota 병합 시 쏠림 | 🟡 Medium |
+
+---
+
 ## 📁 생성된 파일 목록
 
 ### 구현 파일
@@ -207,25 +267,32 @@ ONTOLOGY_TO_STANDARD = {
 
 ## 📊 현재 DB 상태
 
-```sql
--- chunk 통계
-SELECT doc_type, COUNT(*) AS chunks,
-       COUNT(CASE WHEN meta->'entities'->>'coverage_code' IS NOT NULL THEN 1 END) AS with_coverage
-FROM chunk GROUP BY doc_type;
-```
+**전체 통계:**
+| 지표 | 값 |
+|------|-----|
+| 보험사 수 | 8 |
+| 문서 수 | 38 |
+| Chunk 수 | 10,950 |
+| Coverage 매칭 chunk | 3,535 (32.3%) |
+| coverage_standard JOIN 성공률 | 100% |
 
-| doc_type | chunks | with_coverage |
-|----------|--------|---------------|
-| 약관 | 1,118 | 497 (44.5%) |
-| 상품요약서 | 88 | 85 (96.6%) |
-| 사업방법서 | 64 | 63 (98.4%) |
-| 가입설계서 | 9 | 7 (77.8%) |
+**보험사별 chunk 수:**
+| insurer_code | chunks |
+|--------------|--------|
+| LOTTE | 2,038 |
+| MERITZ | 1,937 |
+| HYUNDAI | 1,343 |
+| SAMSUNG | 1,279 |
+| DB | 1,259 |
+| HANWHA | 1,114 |
+| KB | 1,003 |
+| HEUNGKUK | 977 |
 
 ---
 
 ## 🔜 다음 단계 (예정)
 
-1. 다른 보험사 데이터 ingestion (롯데손보, DB손보 등)
-2. Retrieval API 구현 (FastAPI)
-3. 비교조회 API 구현 (quota 기반 병합)
-4. plan_selector 연동 (성별/나이 기반 plan 자동 선택)
+1. Retrieval API 구현 (FastAPI)
+2. 비교조회 API 구현 (quota 기반 병합)
+3. plan_selector 연동 (성별/나이 기반 plan 자동 선택)
+4. HANWHA 가입설계서 alias 보강 (매칭률 개선)
