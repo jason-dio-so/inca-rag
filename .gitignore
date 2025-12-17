@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data files (PDF, Excel 등 원본 문서)
+data/**/*.pdf
+data/**/*.xlsx
+data/**/*.xls
+data/**/*.docx
+data/**/*.doc
+
+# Keep folder structure
+!data/**/
+!data/**/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# Local config
+*.local
