@@ -1,0 +1,26 @@
+schema_version: manifest_v1
+insurer_code: MERITZ
+doc_type: 상품요약서
+
+product:
+  product_name: null
+  product_version: null
+  product_code: null
+
+plan:
+  plan_name: null
+  gender: U
+  age_min: null
+  age_max: null
+  meta: {}
+
+document:
+  title: null
+  effective_date: null
+  meta:
+    subtype: standard
+
+ingestion:
+  chunk_strategy: null
+  chunk_tokens: null
+  notes: null
