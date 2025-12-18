@@ -1,0 +1,306 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ChatMessage, CompareRequest } from "@/lib/types";
+import { ChevronDown, ChevronUp, Send } from "lucide-react";
+
+const ALL_INSURERS = [
+  "SAMSUNG",
+  "LOTTE",
+  "DB",
+  "KB",
+  "MERITZ",
+  "HANWHA",
+  "HYUNDAI",
+  "HEUNGKUK",
+];
+
+const INSURER_NAMES: Record<string, string> = {
+  SAMSUNG: "삼성",
+  LOTTE: "롯데",
+  DB: "DB",
+  KB: "KB",
+  MERITZ: "메리츠",
+  HANWHA: "한화",
+  HYUNDAI: "현대",
+  HEUNGKUK: "흥국",
+};
+
+interface ChatPanelProps {
+  messages: ChatMessage[];
+  onSendMessage: (request: CompareRequest) => void;
+  isLoading: boolean;
+}
+
+export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps) {
+  const [query, setQuery] = useState("");
+  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
+    "SAMSUNG",
+    "MERITZ",
+  ]);
+  const [age, setAge] = useState<string>("");
+  const [gender, setGender] = useState<"M" | "F" | "">("");
+  const [topK, setTopK] = useState<number>(5);
+  const [coverageCodes, setCoverageCodes] = useState("");
+  const [policyKeywords, setPolicyKeywords] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when new messages arrive
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const toggleInsurer = (insurer: string) => {
+    setSelectedInsurers((prev) =>
+      prev.includes(insurer)
+        ? prev.filter((i) => i !== insurer)
+        : [...prev, insurer]
+    );
+  };
+
+  const handleSend = () => {
+    if (!query.trim() || selectedInsurers.length === 0 || isLoading) return;
+
+    const request: CompareRequest = {
+      insurers: selectedInsurers,
+      query: query.trim(),
+      top_k_per_insurer: topK,
+    };
+
+    if (age) {
+      request.age = parseInt(age, 10);
+    }
+    if (gender) {
+      request.gender = gender;
+    }
+    if (coverageCodes.trim()) {
+      request.coverage_codes = coverageCodes
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+    }
+    if (policyKeywords.trim()) {
+      request.policy_keywords = policyKeywords
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+    }
+
+    onSendMessage(request);
+    setQuery("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Messages Area */}
+      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <div className="space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center text-muted-foreground py-8">
+              <p className="text-lg font-medium">보험 담보 비교 챗봇</p>
+              <p className="text-sm mt-2">
+                질문을 입력하고 보험사를 선택해서 담보를 비교해보세요
+              </p>
+            </div>
+          )}
+
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${
+                message.role === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              <div
+                className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                  message.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted"
+                }`}
+              >
+                {message.isLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-[200px]" />
+                    <Skeleton className="h-4 w-[150px]" />
+                  </div>
+                ) : message.error ? (
+                  <div className="text-destructive">{message.error}</div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+
+      {/* Input Area */}
+      <div className="border-t bg-background p-4 space-y-3">
+        {/* Advanced Options */}
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between"
+            >
+              <span>Advanced 옵션</span>
+              {advancedOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3 pt-3">
+            {/* Insurers Selection */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                보험사 선택
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_INSURERS.map((insurer) => (
+                  <Badge
+                    key={insurer}
+                    variant={
+                      selectedInsurers.includes(insurer) ? "default" : "outline"
+                    }
+                    className="cursor-pointer"
+                    onClick={() => toggleInsurer(insurer)}
+                  >
+                    {INSURER_NAMES[insurer]}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Age & Gender */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium mb-1 block">나이</label>
+                <Input
+                  type="number"
+                  placeholder="예: 40"
+                  value={age}
+                  onChange={(e) => setAge(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">성별</label>
+                <div className="flex gap-2">
+                  <Button
+                    variant={gender === "M" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setGender(gender === "M" ? "" : "M")}
+                  >
+                    남
+                  </Button>
+                  <Button
+                    variant={gender === "F" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setGender(gender === "F" ? "" : "F")}
+                  >
+                    여
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Top K */}
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                top_k_per_insurer: {topK}
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={topK}
+                onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+                className="w-full"
+              />
+            </div>
+
+            {/* Coverage Codes */}
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                coverage_codes (쉼표 구분)
+              </label>
+              <Input
+                placeholder="예: A4200_1,A4210"
+                value={coverageCodes}
+                onChange={(e) => setCoverageCodes(e.target.value)}
+              />
+            </div>
+
+            {/* Policy Keywords */}
+            <div>
+              <label className="text-sm font-medium mb-1 block">
+                policy_keywords (쉼표 구분)
+              </label>
+              <Input
+                placeholder="예: 경계성,유사암"
+                value={policyKeywords}
+                onChange={(e) => setPolicyKeywords(e.target.value)}
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+
+        {/* Selected Insurers Display (when advanced is closed) */}
+        {!advancedOpen && (
+          <div className="flex flex-wrap gap-1">
+            {selectedInsurers.map((insurer) => (
+              <Badge key={insurer} variant="secondary" className="text-xs">
+                {INSURER_NAMES[insurer]}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Message Input */}
+        <div className="flex gap-2">
+          <Textarea
+            ref={textareaRef}
+            placeholder="질문을 입력하세요... (예: 경계성 종양 암진단비)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="min-h-[60px] resize-none"
+            disabled={isLoading}
+          />
+          <Button
+            onClick={handleSend}
+            disabled={!query.trim() || selectedInsurers.length === 0 || isLoading}
+            className="px-4"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
