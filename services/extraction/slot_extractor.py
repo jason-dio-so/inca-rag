@@ -104,33 +104,141 @@ CANCER_DIAGNOSIS_SLOTS = [
 # A4299_1: 암진단비(유사암제외) - 삼성화재 variant
 CANCER_COVERAGE_CODES = {"A4200_1", "A4210", "A4209", "A4299_1"}
 
+# =============================================================================
+# U-4.12: 뇌/심혈관 진단비 슬롯 정의 (stub)
+# =============================================================================
+
+CEREBRO_CARDIOVASCULAR_SLOTS = [
+    {
+        "slot_key": "diagnosis_lump_sum_amount",
+        "label": "진단비 지급금액(일시금)",
+        "comparable": True,
+        "source_doc_types": ["가입설계서", "상품요약서", "사업방법서"],
+        "extractor": "diagnosis_lump_sum",
+    },
+    {
+        "slot_key": "existence_status",
+        "label": "담보 존재 여부",
+        "comparable": True,
+        "source_doc_types": ["가입설계서", "상품요약서", "사업방법서"],
+    },
+    {
+        "slot_key": "waiting_period",
+        "label": "대기기간",
+        "comparable": False,
+        "source_doc_types": ["약관"],
+    },
+]
+
+# =============================================================================
+# U-4.12: 수술비 슬롯 정의 (stub)
+# =============================================================================
+
+SURGERY_BENEFIT_SLOTS = [
+    {
+        "slot_key": "surgery_amount",
+        "label": "수술비 지급금액",
+        "comparable": True,
+        "source_doc_types": ["가입설계서", "상품요약서", "사업방법서"],
+        "extractor": "surgery_amount",  # stub
+    },
+    {
+        "slot_key": "surgery_count_limit",
+        "label": "수술 횟수 제한",
+        "comparable": True,
+        "source_doc_types": ["상품요약서", "사업방법서"],
+        "extractor": "count_limit",  # stub
+    },
+    {
+        "slot_key": "existence_status",
+        "label": "담보 존재 여부",
+        "comparable": True,
+        "source_doc_types": ["가입설계서", "상품요약서", "사업방법서"],
+    },
+]
+
 # Coverage Type별 슬롯 정의 레지스트리
-# 향후 다른 담보군 추가 시 여기에 등록
 SLOT_DEFINITIONS_BY_COVERAGE_TYPE = {
     "cancer_diagnosis": CANCER_DIAGNOSIS_SLOTS,
-    # 향후 추가 예정:
-    # "stroke_diagnosis": STROKE_DIAGNOSIS_SLOTS,
-    # "surgery_benefit": SURGERY_BENEFIT_SLOTS,
+    "cerebro_cardiovascular_diagnosis": CEREBRO_CARDIOVASCULAR_SLOTS,
+    "surgery_benefit": SURGERY_BENEFIT_SLOTS,
 }
 
 # Coverage code → Coverage type 매핑
 COVERAGE_CODE_TO_TYPE = {
+    # 암진단비
     "A4200_1": "cancer_diagnosis",
     "A4210": "cancer_diagnosis",
     "A4209": "cancer_diagnosis",
     "A4299_1": "cancer_diagnosis",
-    # 향후 추가 예정
+    # 뇌/심혈관 진단비 (U-4.12)
+    "A5200": "cerebro_cardiovascular_diagnosis",
+    "A5210": "cerebro_cardiovascular_diagnosis",
+    "A5220": "cerebro_cardiovascular_diagnosis",
+    "A5230": "cerebro_cardiovascular_diagnosis",
+    # 수술비 (U-4.12)
+    "A6100": "surgery_benefit",
+    "A6110": "surgery_benefit",
+    "A6120": "surgery_benefit",
+    "A6130": "surgery_benefit",
 }
+
+# Default YAML path
+DEFAULT_SLOT_DEFINITIONS_YAML = "config/slot_definitions.yaml"
+
+
+def load_slot_definitions_from_yaml(yaml_path: str | None = None) -> dict | None:
+    """
+    YAML에서 슬롯 정의 로드 (U-4.12: 외부화)
+
+    Returns:
+        YAML 데이터 dict 또는 None (파일 없거나 파싱 실패 시)
+    """
+    if yaml_path is None:
+        yaml_path = DEFAULT_SLOT_DEFINITIONS_YAML
+
+    path = Path(yaml_path)
+    if not path.exists():
+        # 프로젝트 루트 기준으로 시도
+        project_root = Path(__file__).parent.parent.parent
+        path = project_root / yaml_path
+
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except yaml.YAMLError:
+            return None
+    return None
+
+
+def get_slots_for_coverage_type(coverage_type: str, yaml_path: str | None = None) -> list[dict]:
+    """
+    Coverage type에 해당하는 슬롯 정의 반환
+
+    우선순위:
+      1. YAML 파일 (있으면)
+      2. 코드 내 하드코딩 (fallback)
+    """
+    # YAML 시도
+    yaml_data = load_slot_definitions_from_yaml(yaml_path)
+    if yaml_data and "coverage_types" in yaml_data:
+        ct_data = yaml_data["coverage_types"].get(coverage_type)
+        if ct_data and "slots" in ct_data:
+            return ct_data["slots"]
+
+    # Fallback: 코드 내 정의
+    return SLOT_DEFINITIONS_BY_COVERAGE_TYPE.get(coverage_type, CANCER_DIAGNOSIS_SLOTS)
 
 
 def load_slot_definitions(yaml_path: str | None = None) -> list[dict]:
-    """슬롯 정의 로드 (YAML 또는 기본값)"""
-    if yaml_path:
-        path = Path(yaml_path)
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-                return data.get("slots", CANCER_DIAGNOSIS_SLOTS)
+    """슬롯 정의 로드 (YAML 또는 기본값) - 하위 호환성 유지"""
+    yaml_data = load_slot_definitions_from_yaml(yaml_path)
+    if yaml_data and "coverage_types" in yaml_data:
+        # 첫 번째 coverage_type의 slots 반환 (하위 호환성)
+        for ct_data in yaml_data["coverage_types"].values():
+            if "slots" in ct_data:
+                return ct_data["slots"]
     return CANCER_DIAGNOSIS_SLOTS
 
 

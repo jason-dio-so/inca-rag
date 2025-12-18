@@ -1,0 +1,225 @@
+# Slot Definitions YAML
+# U-4.12: Coverage Type별 슬롯 정의 (외부 설정 파일)
+#
+# 이 파일은 코드에 하드코딩된 슬롯 정의를 외부화하여 관리합니다.
+# slot_extractor.py의 load_slot_definitions()가 이 파일을 로드합니다.
+
+version: "0.2"
+
+# =============================================================================
+# Coverage Type -> Slot Definitions Mapping
+# =============================================================================
+
+coverage_types:
+  # -------------------------------------------------------------------------
+  # 암진단비 (기존 U-4.8)
+  # -------------------------------------------------------------------------
+  cancer_diagnosis:
+    display_name: "암진단비"
+    coverage_codes:
+      - A4200_1   # 암진단비(유사암제외) - 표준코드
+      - A4210     # 유사암진단비
+      - A4209     # 암진단비
+      - A4299_1   # 암진단비(유사암제외) - 삼성화재 variant
+    slots:
+      - slot_key: diagnosis_lump_sum_amount
+        label: "진단비 지급금액(일시금)"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: diagnosis_lump_sum
+
+      - slot_key: existence_status
+        label: "담보 존재 여부"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: existence_check
+
+      - slot_key: payout_condition_summary
+        label: "지급조건 요약"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서", "가입설계서"]
+        extractor: condition_snippet
+
+      - slot_key: diagnosis_scope_definition
+        label: "진단 범위 정의"
+        comparable: false
+        source_doc_types: ["약관"]
+        extractor: policy_snippet
+
+      - slot_key: waiting_period
+        label: "대기기간"
+        comparable: false
+        source_doc_types: ["약관"]
+        extractor: policy_snippet
+
+  # -------------------------------------------------------------------------
+  # 뇌/심혈관 진단비 (U-4.12 신규)
+  # -------------------------------------------------------------------------
+  cerebro_cardiovascular_diagnosis:
+    display_name: "뇌/심혈관 진단비"
+    coverage_codes:
+      - A5200     # 뇌졸중진단비
+      - A5210     # 급성심근경색진단비
+      - A5220     # 뇌혈관질환진단비
+      - A5230     # 허혈성심장질환진단비
+    slots:
+      - slot_key: diagnosis_lump_sum_amount
+        label: "진단비 지급금액(일시금)"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: diagnosis_lump_sum  # 암진단비와 동일한 추출기 사용 가능
+
+      - slot_key: existence_status
+        label: "담보 존재 여부"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: existence_check
+
+      - slot_key: waiting_period
+        label: "대기기간"
+        comparable: false
+        source_doc_types: ["약관"]
+        extractor: policy_snippet
+        # NOTE: 뇌/심혈관은 암과 달리 대기기간이 다를 수 있음 (보통 90일 vs 180일)
+
+  # -------------------------------------------------------------------------
+  # 수술비 (U-4.12 신규)
+  # -------------------------------------------------------------------------
+  surgery_benefit:
+    display_name: "수술비"
+    coverage_codes:
+      - A6100     # 질병수술비
+      - A6110     # 상해수술비
+      - A6120     # 암수술비
+      - A6130     # 1~5종수술비
+    slots:
+      - slot_key: surgery_amount
+        label: "수술비 지급금액"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: surgery_amount  # 별도 추출기 필요 (stub)
+
+      - slot_key: surgery_count_limit
+        label: "수술 횟수 제한"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서"]
+        extractor: count_limit  # 별도 추출기 필요 (stub)
+
+      - slot_key: existence_status
+        label: "담보 존재 여부"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: existence_check
+
+  # -------------------------------------------------------------------------
+  # 입원일당 (U-4.12 신규 - stub)
+  # -------------------------------------------------------------------------
+  hospitalization_daily:
+    display_name: "입원일당"
+    coverage_codes:
+      - A7100     # 질병입원일당
+      - A7110     # 상해입원일당
+    slots:
+      - slot_key: daily_amount
+        label: "입원일당 금액"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: daily_amount  # 별도 추출기 필요 (stub)
+
+      - slot_key: max_days_limit
+        label: "지급 한도일수"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서"]
+        extractor: day_limit  # 별도 추출기 필요 (stub)
+
+      - slot_key: existence_status
+        label: "담보 존재 여부"
+        comparable: true
+        source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+        extractor: existence_check
+
+# =============================================================================
+# Extractor Registry (추출기 정의)
+# =============================================================================
+
+extractors:
+  diagnosis_lump_sum:
+    type: rule_based
+    description: "진단비 일시금 추출 (금액 패턴 + 키워드 매칭)"
+    function: extract_diagnosis_lump_sum_slot
+
+  existence_check:
+    type: rule_based
+    description: "담보 존재 여부 확인 (evidence 유무)"
+    function: extract_existence_status
+
+  condition_snippet:
+    type: rule_based
+    description: "지급조건 스니펫 추출"
+    function: extract_payout_condition_summary
+
+  policy_snippet:
+    type: rule_based
+    description: "약관 기반 정의/조건 추출"
+    function: extract_from_policy
+
+  # Stub extractors (U-4.12에서 구현 예정)
+  surgery_amount:
+    type: stub
+    description: "수술비 금액 추출 (구현 예정)"
+    function: null
+
+  count_limit:
+    type: stub
+    description: "횟수 제한 추출 (구현 예정)"
+    function: null
+
+  daily_amount:
+    type: stub
+    description: "일당 금액 추출 (구현 예정)"
+    function: null
+
+  day_limit:
+    type: stub
+    description: "일수 제한 추출 (구현 예정)"
+    function: null
+
+# =============================================================================
+# Search Keywords Registry (2-pass retrieval용)
+# =============================================================================
+
+search_keywords:
+  diagnosis_lump_sum:
+    - "진단비"
+    - "진단보험금"
+    - "진단 확정"
+    - "진단확정"
+    - "가입금액 지급"
+    - "가입금액지급"
+    - "최초 1회"
+    - "최초1회"
+
+  cancer_diagnosis:
+    - "암 진단비"
+    - "암진단비"
+    - "유사암"
+    - "악성신생물"
+
+  cerebro_cardiovascular:
+    - "뇌졸중"
+    - "급성심근경색"
+    - "뇌혈관"
+    - "허혈성심장"
+    - "뇌출혈"
+
+  surgery_benefit:
+    - "수술비"
+    - "수술급여"
+    - "수술 시"
+    - "수술횟수"
+
+  hospitalization_daily:
+    - "입원일당"
+    - "입원 1일당"
+    - "일당"
+    - "입원일수"
