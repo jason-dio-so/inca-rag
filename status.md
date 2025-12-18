@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-18
+> 최종 업데이트: 2025-12-19
 
 ---
 
@@ -47,6 +47,8 @@
 | **Step U-4.3** | **데모 삼성/메리츠 전체 PDF 로딩 + 충분성 리포트** | **DevOps** | ✅ 완료 |
 | **Step U-4.4** | **데모 스모크 2단 구성 (안정성/시나리오) + UI Debug 강화** | **DevOps/UI** | ✅ 완료 |
 | **Step U-4.8** | **Comparison Slots v0.1 (암진단비 슬롯 기반 비교)** | **기능/UI** | ✅ 완료 |
+| **Step U-4.9** | **Eval Framework 구축 (goldset + eval_runner)** | **검증** | ✅ 완료 |
+| **Step U-4.10** | **Demo vs Main 변경사항 분류 문서화** | **문서** | ✅ 완료 |
 
 ---
 
@@ -1184,6 +1186,97 @@ cd apps/web && npm run dev
 
 ---
 
+### 37. Step U-4.9: Eval Framework 구축 (goldset + eval_runner) [검증]
+
+**목표:**
+- 데모 비교 결과의 정확성을 자동으로 검증할 수 있는 Eval 프레임워크 구축
+- "이 비교 결과를 우리가 얼마나 믿어도 되는지" 자동 판단
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `eval/goldset_cancer_minimal.csv` | 암진단비 정답셋 (4개 케이스) |
+| `eval/eval_runner.py` | Eval 실행기 (API 호출 → 정답 비교) |
+| `tools/run_demo_eval.sh` | 데모 신뢰성 기준선 원샷 스크립트 |
+
+**Goldset 컬럼:**
+```
+query,insurer,coverage_code,slot_key,expected_value,expected_doc_type
+```
+
+**Eval Runner 지표:**
+| 지표 | 설명 |
+|------|------|
+| coverage_resolve_rate | expected coverage_code가 resolved_coverage_codes에 포함 |
+| slot_fill_rate | expected slot이 실제로 채워졌는지 |
+| value_correct_rate | 값이 정답과 일치하는지 (정규화 비교) |
+| evidence_doc_type_match_rate | 근거 doc_type이 expected와 일치 (optional) |
+
+**현재 Eval 결과:**
+```
+- Total cases: 4
+- Coverage resolve rate: 100%
+- Slot fill rate: 100%
+- Value correctness: 100%
+```
+
+**사용법:**
+```bash
+# 원샷 실행 (audit + eval)
+./tools/run_demo_eval.sh
+
+# eval만 실행
+python eval/eval_runner.py
+```
+
+**효과:**
+- 데모 신뢰성 기준선 확립 (100% 정확도 검증)
+- 회귀 방지: 변경 후 eval 재실행으로 정확도 유지 확인
+- audit_slots.py + eval_runner.py 이중 검증 체계
+
+---
+
+### 38. Step U-4.10: Demo vs Main 변경사항 분류 문서화 [문서]
+
+**목표:**
+- 데모에서 수정된 로직이 본선(main/dev)에 반영되어야 하는지 분류
+- 체리픽/PR 전략 제안 및 반영 후 검증 체크리스트 제공
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `docs/demo_vs_main_diff.md` | Demo vs Main 변경사항 분류 문서 |
+
+**분류 결과:**
+
+| 분류 | 파일 수 | 핵심 내용 |
+|------|--------|----------|
+| 공통 반영 | 12개 | amount_extractor, slot_extractor, compare_service, tests |
+| 데모 전용 | 9개 | eval/*, tools/run_demo_eval.sh, docker-compose.demo.yml |
+
+**공통 반영 대상 (Critical):**
+- `services/extraction/amount_extractor.py` - LUMP_SUM 키워드, premium-negative 거리 비교
+- `services/extraction/slot_extractor.py` - 슬롯 기반 추출 모듈
+- `services/retrieval/compare_service.py` - 2-pass retrieval, slots 통합
+- `tests/test_extraction.py` - 47개 테스트
+
+**권장 반영 전략:**
+```bash
+git cherry-pick a888f72
+```
+
+**반영 후 체크리스트:**
+1. `python -m pytest tests/test_extraction.py -v` → 47 PASS
+2. `/compare` API → SAMSUNG/MERITZ 3,000만원
+3. `./tools/run_demo_eval.sh` → 100% correctness
+
+**효과:**
+- 데모/본선 변경사항 명확히 분리
+- 본선 반영 시 리스크/장점 분석 제공
+- 체리픽 후 검증 체크리스트로 안전한 병합
+
+---
+
 ## 📁 생성된 파일 목록
 
 ### 구현 파일
@@ -1246,6 +1339,10 @@ cd apps/web && npm run dev
 | `tools/demo_up.sh` | 원클릭 실행 스크립트 (Step U-4, U-4.1) |
 | `tools/demo_seed.sh` | 데이터 시딩 스크립트 (Step U-4.1) |
 | `README.md` | 데모 실행 가이드 (Step U-4) |
+| `eval/goldset_cancer_minimal.csv` | 암진단비 정답셋 4건 (Step U-4.9) |
+| `eval/eval_runner.py` | Eval 실행기 (Step U-4.9) |
+| `tools/run_demo_eval.sh` | 데모 신뢰성 기준선 스크립트 (Step U-4.9) |
+| `docs/demo_vs_main_diff.md` | Demo vs Main 변경사항 분류 (Step U-4.10) |
 
 ### UI 파일 (apps/web)
 | 파일 | 설명 |
@@ -1288,10 +1385,28 @@ cd apps/web && npm run dev
 
 ## 🔜 다음 단계 (예정)
 
+### 완료된 단계
 1. ~~Retrieval API 구현 (FastAPI)~~ ✅ Step E 완료
 2. ~~비교조회 API 구현 (quota 기반 병합)~~ ✅ Step E 완료
 3. ~~plan_selector 연동 (성별/나이 기반 plan 자동 선택)~~ ✅ Step I, J-3 완료
 4. ~~HANWHA 가입설계서 alias 보강~~ ✅ Step D-1에서 불필요 확인
 5. ~~Vector search 연동 (pgvector similarity search)~~ ✅ Step K Hybrid 옵션으로 완료
 6. ~~프론트엔드 연동~~ ✅ Step U-ChatUI, U-1, U-2 완료
-7. 사용자 피드백 기반 개선
+7. ~~Eval Framework 구축~~ ✅ Step U-4.9 완료
+8. ~~Demo vs Main 분류 문서화~~ ✅ Step U-4.10 완료
+
+### 다음 작업 후보
+
+**우선순위 높음:**
+1. **Main 브랜치 병합** - `a888f72` 체리픽 (docs/demo_vs_main_diff.md 참조)
+2. **Goldset 확장** - 현재 4건 → 더 많은 케이스 추가
+
+**우선순위 중간:**
+3. **추가 보험사 데이터 적재** - 현재 SAMSUNG, MERITZ만 chunk 있음
+4. **LLM 슬롯 추출 활성화** - 현재 rule-based만 사용 중
+5. **UI 개선** - SlotsTable 디자인, diff 시각화
+
+**우선순위 낮음:**
+6. **coverage_code 자동 추천 개선** - similarity threshold 조정
+7. **Evidence doc_type 매칭** - 현재 0% (API 응답 구조 제한)
+8. 사용자 피드백 기반 개선
