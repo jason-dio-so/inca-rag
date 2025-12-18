@@ -343,6 +343,8 @@ class CompareResponse:
     diff_summary: list[DiffSummaryItem] = field(default_factory=list)
     # U-4.8: Comparison Slots
     slots: list = field(default_factory=list)
+    # resolved_coverage_codes: 질의에서 자동 추론된 coverage_code 목록 (top-level 승격)
+    resolved_coverage_codes: list[str] | None = None
     debug: dict[str, Any] = field(default_factory=dict)
 
 
@@ -453,20 +455,55 @@ def get_compare_axis_vector(
 
 
 # =============================================================================
-# U-4.11: Amount-bearing chunk retrieval for payout_amount slot
+# 2-Pass Retrieval Configuration (범용화)
 # =============================================================================
 
-# 진단비 일시금 검색용 키워드
-LUMP_SUM_SEARCH_KEYWORDS = [
-    "암 진단비",
-    "암진단비",
-    "진단 확정",
-    "진단확정",
-    "가입금액 지급",
-    "가입금액지급",
-    "최초 1회",
-    "최초1회",
-]
+# 2-pass retrieval 설정 상수
+RETRIEVAL_CONFIG = {
+    "preview_len": int(os.environ.get("RETRIEVAL_PREVIEW_LEN", "1000")),
+    "top_k_pass1": int(os.environ.get("RETRIEVAL_TOP_K_PASS1", "10")),
+    "top_k_pass2": int(os.environ.get("RETRIEVAL_TOP_K_PASS2", "5")),
+}
+
+# Slot별 검색 키워드 레지스트리 (범용화)
+SLOT_SEARCH_KEYWORDS = {
+    # 진단비 일시금 (암진단비, 뇌졸중 등에 공통 사용 가능)
+    "diagnosis_lump_sum": [
+        "진단비",
+        "진단보험금",
+        "진단 확정",
+        "진단확정",
+        "가입금액 지급",
+        "가입금액지급",
+        "최초 1회",
+        "최초1회",
+    ],
+    # 암 진단비 전용 (상위 호환)
+    "cancer_diagnosis": [
+        "암 진단비",
+        "암진단비",
+        "유사암",
+        "악성신생물",
+    ],
+    # 수술비 (향후 확장용)
+    "surgery_benefit": [
+        "수술비",
+        "수술급여",
+        "수술 시",
+    ],
+    # 입원일당 (향후 확장용)
+    "hospitalization_daily": [
+        "입원일당",
+        "입원 1일당",
+        "일당",
+    ],
+}
+
+# 하위 호환성을 위한 alias
+LUMP_SUM_SEARCH_KEYWORDS = (
+    SLOT_SEARCH_KEYWORDS["diagnosis_lump_sum"] +
+    SLOT_SEARCH_KEYWORDS["cancer_diagnosis"]
+)
 
 
 def get_amount_bearing_evidence(
@@ -474,25 +511,43 @@ def get_amount_bearing_evidence(
     insurer_code: str,
     compare_doc_types: list[str],
     plan_id: int | None = None,
-    top_k: int = 5,
+    top_k: int | None = None,
+    slot_type: str = "diagnosis_lump_sum",  # 범용화: slot_type 인자 추가
 ) -> list[Evidence]:
     """
-    U-4.11: 금액을 포함한 chunk를 검색 (payout_amount slot용)
+    2-Pass Retrieval: 금액을 포함한 chunk를 검색 (범용화)
 
     일반 coverage_code 기반 검색으로 금액을 찾지 못한 경우 fallback으로 사용.
-    암진단비 관련 키워드 + 금액 패턴을 포함한 chunk를 검색.
+    slot_type에 따라 적절한 키워드 세트를 사용.
 
     Args:
         conn: DB 연결
         insurer_code: 보험사 코드
         compare_doc_types: 검색 대상 doc_type 리스트
         plan_id: plan_id (있으면 plan_id 또는 NULL, 없으면 NULL만)
-        top_k: 최대 결과 수
+        top_k: 최대 결과 수 (None이면 RETRIEVAL_CONFIG 사용)
+        slot_type: 검색할 슬롯 타입 (diagnosis_lump_sum, cancer_diagnosis 등)
 
     Returns:
         Evidence 리스트
     """
     results: list[Evidence] = []
+
+    # 설정에서 top_k 가져오기
+    if top_k is None:
+        top_k = RETRIEVAL_CONFIG["top_k_pass2"]
+
+    preview_len = RETRIEVAL_CONFIG["preview_len"]
+
+    # slot_type에 따른 키워드 선택
+    search_keywords = SLOT_SEARCH_KEYWORDS.get(slot_type, [])
+    # cancer_diagnosis인 경우 diagnosis_lump_sum 키워드도 포함
+    if slot_type == "cancer_diagnosis":
+        search_keywords = search_keywords + SLOT_SEARCH_KEYWORDS.get("diagnosis_lump_sum", [])
+
+    if not search_keywords:
+        # fallback: 기본 진단비 키워드 사용
+        search_keywords = LUMP_SUM_SEARCH_KEYWORDS
 
     # Plan condition
     if plan_id is not None:
@@ -504,9 +559,9 @@ def get_amount_bearing_evidence(
 
     # Build keyword OR condition
     keyword_conditions = " OR ".join(
-        "c.content ILIKE %s" for _ in LUMP_SUM_SEARCH_KEYWORDS
+        "c.content ILIKE %s" for _ in search_keywords
     )
-    keyword_params = tuple(f"%{kw}%" for kw in LUMP_SUM_SEARCH_KEYWORDS)
+    keyword_params = tuple(f"%{kw}%" for kw in search_keywords)
 
     # Amount pattern: matches "X,XXX만원" or "X만원" or "X천만원"
     # PostgreSQL regex: digit(s) with optional commas, followed by 만원/천만원
@@ -519,7 +574,7 @@ def get_amount_bearing_evidence(
                 c.document_id,
                 c.doc_type,
                 c.page_start,
-                LEFT(c.content, 1000) AS preview,
+                LEFT(c.content, %s) AS preview,
                 c.meta->'entities'->>'coverage_code' AS coverage_code
             FROM chunk c
             JOIN insurer i ON c.insurer_id = i.insurer_id
@@ -540,6 +595,7 @@ def get_amount_bearing_evidence(
         """
 
         params = (
+            preview_len,
             insurer_code,
             compare_doc_types,
         ) + keyword_params + (amount_pattern,) + plan_params + (top_k,)
@@ -1677,5 +1733,6 @@ def compare(
         coverage_compare_result=coverage_compare_result,
         diff_summary=diff_summary,
         slots=slots,
+        resolved_coverage_codes=resolved_coverage_codes,
         debug=debug,
     )

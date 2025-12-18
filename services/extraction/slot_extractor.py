@@ -58,13 +58,18 @@ class ComparisonSlot:
 # Slot Definitions (from YAML or inline)
 # =============================================================================
 
+# =============================================================================
+# Slot Definition Registry (coverage_type별 슬롯 정의)
+# =============================================================================
+
 # 암진단비 슬롯 정의
 CANCER_DIAGNOSIS_SLOTS = [
     {
-        "slot_key": "payout_amount",
-        "label": "진단비 지급금액(일시금)",  # U-4.10: 일시금 명시
+        "slot_key": "diagnosis_lump_sum_amount",  # 범용화: 진단비 일시금 전용 슬롯
+        "label": "진단비 지급금액(일시금)",
         "comparable": True,
         "source_doc_types": ["가입설계서", "상품요약서", "사업방법서"],
+        "extractor": "diagnosis_lump_sum",  # 추출기 지정
     },
     {
         "slot_key": "existence_status",
@@ -99,6 +104,24 @@ CANCER_DIAGNOSIS_SLOTS = [
 # A4299_1: 암진단비(유사암제외) - 삼성화재 variant
 CANCER_COVERAGE_CODES = {"A4200_1", "A4210", "A4209", "A4299_1"}
 
+# Coverage Type별 슬롯 정의 레지스트리
+# 향후 다른 담보군 추가 시 여기에 등록
+SLOT_DEFINITIONS_BY_COVERAGE_TYPE = {
+    "cancer_diagnosis": CANCER_DIAGNOSIS_SLOTS,
+    # 향후 추가 예정:
+    # "stroke_diagnosis": STROKE_DIAGNOSIS_SLOTS,
+    # "surgery_benefit": SURGERY_BENEFIT_SLOTS,
+}
+
+# Coverage code → Coverage type 매핑
+COVERAGE_CODE_TO_TYPE = {
+    "A4200_1": "cancer_diagnosis",
+    "A4210": "cancer_diagnosis",
+    "A4209": "cancer_diagnosis",
+    "A4299_1": "cancer_diagnosis",
+    # 향후 추가 예정
+}
+
 
 def load_slot_definitions(yaml_path: str | None = None) -> list[dict]:
     """슬롯 정의 로드 (YAML 또는 기본값)"""
@@ -115,17 +138,19 @@ def load_slot_definitions(yaml_path: str | None = None) -> list[dict]:
 # Slot Extraction Functions
 # =============================================================================
 
-def extract_payout_amount(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
+def extract_diagnosis_lump_sum_slot(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
     """
-    진단비 지급금액(일시금) 슬롯 추출
+    진단비 지급금액(일시금) 슬롯 추출 (범용화된 추출기)
 
-    U-4.10: 진단비 일시금만 추출 (일당/특약 금액 제외)
+    진단비 일시금만 추출 (일당/특약 금액 제외)
     우선순위:
       1. doc_type: 상품요약서 > 사업방법서 > 가입설계서
       2. confidence: high > medium (within same doc_type)
 
     Note: compare_axis evidence doesn't have pre-populated amount field.
     We call extract_diagnosis_lump_sum() directly on each evidence preview.
+
+    This extractor can be used for any coverage type that requires lump-sum diagnosis amount.
     """
     doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1}
     confidence_priority = {"high": 2, "medium": 1, "low": 0, "not_found": -1}
@@ -199,6 +224,10 @@ def extract_payout_amount(evidence_list: list, insurer_code: str) -> SlotInsurer
         reason="가입설계서/상품요약서/사업방법서에서 진단비 일시금 미확인",
         trace=trace,
     )
+
+
+# 하위 호환성을 위한 alias (deprecated, 향후 제거 예정)
+extract_payout_amount = extract_diagnosis_lump_sum_slot
 
 
 def extract_existence_status(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
@@ -557,18 +586,19 @@ def extract_slots(
 
     slots = []
 
-    # 1. payout_amount (U-4.10: 진단비 일시금만)
-    payout_slot = ComparisonSlot(
-        slot_key="payout_amount",
+    # 1. diagnosis_lump_sum_amount (범용화: 진단비 일시금 전용)
+    # NOTE: 하위 호환성을 위해 payout_amount도 동일한 슬롯으로 매핑
+    lump_sum_slot = ComparisonSlot(
+        slot_key="payout_amount",  # 하위 호환성 유지 (향후 diagnosis_lump_sum_amount로 마이그레이션)
         label="진단비 지급금액(일시금)",
         comparable=True,
         insurers=[
-            extract_payout_amount(compare_by_insurer.get(ic, []), ic)
+            extract_diagnosis_lump_sum_slot(compare_by_insurer.get(ic, []), ic)
             for ic in insurers
         ],
     )
-    payout_slot.diff_summary = _generate_slot_diff_summary(payout_slot)
-    slots.append(payout_slot)
+    lump_sum_slot.diff_summary = _generate_slot_diff_summary(lump_sum_slot)
+    slots.append(lump_sum_slot)
 
     # 2. existence_status
     existence_slot = ComparisonSlot(

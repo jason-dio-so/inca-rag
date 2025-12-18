@@ -121,10 +121,13 @@ def extract_slot_value(
 
 def check_coverage_code_resolved(response: dict, expected_code: str) -> bool:
     """Check if expected coverage_code is in resolved_coverage_codes."""
-    # resolved_coverage_codes is in debug field
-    debug = response.get("debug") or {}
-    resolved = debug.get("resolved_coverage_codes") or []
-    return expected_code in resolved
+    # First check top-level (after API upgrade)
+    resolved = response.get("resolved_coverage_codes")
+    # Fallback to debug for backward compatibility
+    if resolved is None:
+        debug = response.get("debug") or {}
+        resolved = debug.get("resolved_coverage_codes") or []
+    return expected_code in (resolved or [])
 
 
 def run_eval(goldset_path: str, api_base: str) -> dict:
