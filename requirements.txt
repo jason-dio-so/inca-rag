@@ -5,6 +5,7 @@ PyMuPDF>=1.23.0
 
 # Database
 psycopg[binary]>=3.1.0
+psycopg2-binary>=2.9.0
 
 # YAML parsing
 PyYAML>=6.0
@@ -12,6 +13,10 @@ PyYAML>=6.0
 # Excel processing (for coverage mapping loader)
 pandas>=2.0.0
 openpyxl>=3.1.0
+
+# API Server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
 
 # Optional: OpenAI Embedding (not required for dummy embedding)
 # openai>=1.0.0

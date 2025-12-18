@@ -44,11 +44,11 @@ export function CompareTable({ data }: CompareTableProps) {
     );
   }
 
-  // Get all unique insurers from the data
+  // Get all unique insurers from the data (insurers is a list, not dict)
   const allInsurers = new Set<string>();
   data.forEach((item) => {
-    Object.keys(item.insurers || {}).forEach((insurer) => {
-      allInsurers.add(insurer);
+    (item.insurers || []).forEach((cell) => {
+      allInsurers.add(cell.insurer_code);
     });
   });
   const insurerList = Array.from(allInsurers).sort();
@@ -78,9 +78,9 @@ export function CompareTable({ data }: CompareTableProps) {
       {viewingEvidence && (
         <PdfPageViewer
           documentId={viewingEvidence.document_id}
-          initialPage={viewingEvidence.page_start}
+          initialPage={viewingEvidence.page_start ?? 1}
           docType={viewingEvidence.doc_type}
-          highlightQuery={viewingEvidence.snippet?.slice(0, 120)}
+          highlightQuery={viewingEvidence.preview?.slice(0, 120)}
           onClose={() => setViewingEvidence(null)}
         />
       )}
@@ -110,7 +110,10 @@ export function CompareTable({ data }: CompareTableProps) {
                   )}
                 </td>
                 {insurerList.map((insurer) => {
-                  const insurerData = item.insurers?.[insurer];
+                  // insurers is a list, find by insurer_code
+                  const insurerData = (item.insurers || []).find(
+                    (cell) => cell.insurer_code === insurer
+                  );
                   if (!insurerData) {
                     return (
                       <td key={insurer} className="p-3 text-center text-muted-foreground">
@@ -127,20 +130,6 @@ export function CompareTable({ data }: CompareTableProps) {
                   return (
                     <td key={insurer} className="p-3">
                       <div className="space-y-2">
-                        {/* Amount */}
-                        {insurerData.resolved_amount && (
-                          <div className="text-lg font-bold text-primary">
-                            {insurerData.resolved_amount}
-                          </div>
-                        )}
-
-                        {/* Condition */}
-                        {insurerData.condition_snippet && (
-                          <div className="text-sm text-muted-foreground line-clamp-2">
-                            {insurerData.condition_snippet}
-                          </div>
-                        )}
-
                         {/* Evidence (A2: 약관 제외) */}
                         {filteredEvidence.slice(0, 2).map((evidence, eIdx) => (
                           <div
@@ -151,7 +140,7 @@ export function CompareTable({ data }: CompareTableProps) {
                               {evidence.doc_type}
                             </Badge>
                             <span className="text-muted-foreground truncate">
-                              {evidence.document_id.slice(0, 8)}:p{evidence.page_start}
+                              {String(evidence.document_id).slice(0, 8)}:p{evidence.page_start ?? 0}
                             </span>
                             <Button
                               variant="ghost"
@@ -163,7 +152,7 @@ export function CompareTable({ data }: CompareTableProps) {
                               {copiedRef ===
                               formatEvidenceRef(
                                 evidence.document_id,
-                                evidence.page_start
+                                evidence.page_start ?? 0
                               ) ? (
                                 <Check className="h-3 w-3 text-green-500" />
                               ) : (

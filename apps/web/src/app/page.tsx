@@ -95,10 +95,19 @@ export default function Home() {
       let summaryText = "";
 
       if (diffSummary.length > 0) {
+        // Generated type: DiffSummaryItem has coverage_code, coverage_name, bullets[]
         const topDiffs = diffSummary.slice(0, 3);
-        summaryText = topDiffs
-          .map((d, i) => `${i + 1}. ${d.description}`)
-          .join("\n");
+        const lines: string[] = [];
+        topDiffs.forEach((d, i) => {
+          const name = d.coverage_name || d.coverage_code || "항목";
+          // Defensive: filter out undefined/null/empty text
+          const bulletTexts = (d.bullets || [])
+            .map((b) => b.text || "")
+            .filter((t) => t.trim())
+            .join("; ");
+          lines.push(`${i + 1}. [${name}] ${bulletTexts || "상세 내용은 오른쪽 패널 참조"}`);
+        });
+        summaryText = lines.join("\n");
         summaryText += "\n\n자세한 비교표/근거는 오른쪽 패널을 확인해주세요.";
       } else {
         // No diff summary, show basic info

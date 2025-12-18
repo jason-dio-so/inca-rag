@@ -100,8 +100,79 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ScrollArea className="h-[250px]">
+            <ScrollArea className="h-[300px]">
               <div className="p-4 space-y-4">
+                {/* Evidence Count by Insurer */}
+                {(() => {
+                  const compareAxis = response.compare_axis || [];
+                  const counts: Record<string, number> = {};
+                  compareAxis.forEach((item) => {
+                    const ic = item.insurer_code || "";
+                    counts[ic] = (counts[ic] || 0) + 1;
+                  });
+                  const insurers = Object.keys(counts).sort();
+                  const hasZero = insurers.some((ic) => counts[ic] === 0) || insurers.length < 2;
+
+                  return (
+                    <div className={`p-3 rounded-lg border ${hasZero ? "bg-orange-50 border-orange-200" : "bg-green-50 border-green-200"}`}>
+                      <h4 className={`text-sm font-medium mb-2 ${hasZero ? "text-orange-800" : "text-green-800"}`}>
+                        Compare Evidence Count:
+                        {hasZero && (
+                          <span className="ml-2 px-2 py-0.5 text-xs bg-orange-200 text-orange-800 rounded">WARN</span>
+                        )}
+                      </h4>
+                      <div className="flex gap-4 text-sm">
+                        {insurers.length > 0 ? (
+                          insurers.map((ic) => (
+                            <span key={ic} className={counts[ic] === 0 ? "text-orange-700 font-medium" : "text-green-700"}>
+                              {ic}: {counts[ic]}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-orange-700">No evidence found</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Resolved Parameters from Debug */}
+                {response.debug && (
+                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                    <h4 className="text-sm font-medium text-gray-800 mb-2">Resolved Parameters:</h4>
+                    <div className="text-xs text-gray-700 space-y-1">
+                      {(() => {
+                        const debug = response.debug as Record<string, unknown>;
+                        const resolvedCodes = debug.resolved_coverage_codes as string[] | undefined;
+                        const recommendedCodes = debug.recommended_coverage_codes as string[] | undefined;
+                        const policyKeywords = debug.resolved_policy_keywords as string[] | undefined;
+                        return (
+                          <>
+                            {resolvedCodes && (
+                              <div>
+                                <span className="font-medium">coverage_codes:</span>{" "}
+                                {resolvedCodes.join(", ") || "(none)"}
+                              </div>
+                            )}
+                            {recommendedCodes && (
+                              <div>
+                                <span className="font-medium">recommended:</span>{" "}
+                                {recommendedCodes.join(", ") || "(none)"}
+                              </div>
+                            )}
+                            {policyKeywords && (
+                              <div>
+                                <span className="font-medium">policy_keywords:</span>{" "}
+                                {policyKeywords.join(", ") || "(auto)"}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
                 {/* A2 Policy Status */}
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <h4 className="text-sm font-medium text-blue-800 mb-2">A2 Policy:</h4>

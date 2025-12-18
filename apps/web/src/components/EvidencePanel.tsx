@@ -105,9 +105,9 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
       {viewingEvidence && (
         <PdfPageViewer
           documentId={viewingEvidence.document_id}
-          initialPage={viewingEvidence.page_start}
+          initialPage={viewingEvidence.page_start ?? 1}
           docType={viewingEvidence.doc_type}
-          highlightQuery={viewingEvidence.snippet?.slice(0, 120)}
+          highlightQuery={viewingEvidence.preview?.slice(0, 120) || undefined}
           onClose={() => setViewingEvidence(null)}
         />
       )}
@@ -190,11 +190,6 @@ function EvidenceCard({
               >
                 {evidence.doc_type}
               </Badge>
-              {evidence.coverage_code && (
-                <Badge variant="outline" className="text-xs">
-                  {evidence.coverage_code}
-                </Badge>
-              )}
               {evidence.score !== undefined && (
                 <span className="text-xs text-muted-foreground">
                   score: {evidence.score.toFixed(2)}
@@ -209,17 +204,14 @@ function EvidenceCard({
               </span>
               <span className="mx-1">|</span>
               <span>
-                p.{evidence.page_start}
-                {evidence.page_end &&
-                  evidence.page_end !== evidence.page_start &&
-                  `-${evidence.page_end}`}
+                p.{evidence.page_start ?? 0}
               </span>
             </div>
 
-            {/* Snippet */}
-            {evidence.snippet && (
+            {/* Preview Text */}
+            {evidence.preview && (
               <p className="text-sm mt-2 p-2 bg-muted rounded line-clamp-3">
-                {evidence.snippet}
+                {evidence.preview}
               </p>
             )}
           </div>

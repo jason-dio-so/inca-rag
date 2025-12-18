@@ -15,13 +15,6 @@ const INSURER_NAMES: Record<string, string> = {
   HEUNGKUK: "흥국",
 };
 
-const DIFF_TYPE_COLORS: Record<string, string> = {
-  amount_diff: "bg-blue-100 text-blue-800",
-  coverage_missing: "bg-red-100 text-red-800",
-  condition_diff: "bg-yellow-100 text-yellow-800",
-  default: "bg-gray-100 text-gray-800",
-};
-
 interface DiffSummaryProps {
   data: DiffSummaryItem[];
 }
@@ -37,46 +30,66 @@ export function DiffSummary({ data }: DiffSummaryProps) {
 
   return (
     <div className="space-y-3">
-      {data.map((item, idx) => (
-        <Card key={idx}>
-          <CardContent className="p-4">
-            <div className="flex items-start gap-3">
-              {/* Diff Type Badge */}
-              <Badge
-                className={
-                  DIFF_TYPE_COLORS[item.diff_type] || DIFF_TYPE_COLORS.default
-                }
-              >
-                {item.diff_type}
-              </Badge>
+      {data.map((item, idx) => {
+        const bullets = item.bullets || [];
+        const displayName = item.coverage_name || item.coverage_code || "항목";
 
-              <div className="flex-1">
-                {/* Description */}
-                <p className="text-sm">{item.description}</p>
+        return (
+          <Card key={idx}>
+            <CardContent className="p-4">
+              <div className="space-y-2">
+                {/* Coverage Header */}
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{item.coverage_code}</Badge>
+                  <span className="font-medium">{displayName}</span>
+                </div>
 
-                {/* Affected Insurers */}
-                {item.insurers_affected && item.insurers_affected.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {item.insurers_affected.map((insurer) => (
-                      <Badge key={insurer} variant="outline" className="text-xs">
-                        {INSURER_NAMES[insurer] || insurer}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
+                {/* Bullets */}
+                {bullets.length > 0 ? (
+                  <ul className="space-y-2 ml-2">
+                    {bullets.map((bullet, bIdx) => {
+                      const refs = bullet.evidence_refs || [];
+                      // Get unique insurers from evidence refs
+                      const insurers = [...new Set(refs.map((r) => r.insurer_code))];
 
-                {/* Evidence References */}
-                {item.evidence_refs && item.evidence_refs.length > 0 && (
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    <span className="font-medium">Refs: </span>
-                    {item.evidence_refs.join(", ")}
-                  </div>
+                      return (
+                        <li key={bIdx} className="text-sm">
+                          <p>{bullet.text}</p>
+                          {insurers.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {insurers.map((insurer) => (
+                                <Badge
+                                  key={insurer}
+                                  variant="secondary"
+                                  className="text-xs"
+                                >
+                                  {INSURER_NAMES[insurer] || insurer}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                          {refs.length > 0 && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              <span className="font-medium">Refs: </span>
+                              {refs
+                                .map((r) => `${r.document_id}:${r.page_start ?? 0}`)
+                                .join(", ")}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground ml-2">
+                    상세 차이점 정보 없음
+                  </p>
                 )}
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

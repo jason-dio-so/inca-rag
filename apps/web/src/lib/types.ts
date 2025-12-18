@@ -1,75 +1,45 @@
-// API Request/Response Types
+/**
+ * ⚠️ API 타입 Re-export
+ *
+ * 이 파일은 types.generated.ts에서 생성된 타입을 re-export합니다.
+ * API 계약 타입은 직접 수정하지 마세요.
+ *
+ * Source of Truth: FastAPI Pydantic 모델 → OpenAPI → types.generated.ts
+ */
 
-export interface CompareRequest {
-  insurers: string[];
-  query: string;
-  age?: number;
-  gender?: "M" | "F";
-  top_k_per_insurer?: number;
-  coverage_codes?: string[];
-  policy_keywords?: string[];
-}
+import { components } from "./types.generated";
 
-export interface Evidence {
-  document_id: string;
-  page_start: number;
-  page_end?: number;
-  doc_type: string;
-  snippet?: string;
-  score?: number;
-  source_path?: string;
-  coverage_code?: string;
-}
+// =============================================================================
+// API Contract Types (from types.generated.ts)
+// =============================================================================
 
-export interface CompareAxisItem {
-  insurer_code: string;
-  coverage_code?: string;
-  evidence: Evidence[];
-}
+// Request - API has defaults for some fields, make them optional for UI
+type ApiCompareRequest = components["schemas"]["CompareRequest"];
+export type CompareRequest = Pick<ApiCompareRequest, "insurers" | "query"> &
+  Partial<Omit<ApiCompareRequest, "insurers" | "query">>;
 
-export interface PolicyAxisItem {
-  insurer_code: string;
-  evidence: Evidence[];
-}
+// Response
+export type CompareResponse = components["schemas"]["CompareResponseModel"];
+export type CompareAxisItem = components["schemas"]["CompareAxisItemResponse"];
+export type PolicyAxisItem = components["schemas"]["PolicyAxisItemResponse"];
+export type CoverageCompareItem = components["schemas"]["CoverageCompareRowResponse"];
+export type DiffSummaryItem = components["schemas"]["DiffSummaryItemResponse"];
 
-export interface CoverageCompareItem {
-  coverage_code: string;
-  coverage_name?: string;
-  insurers: {
-    [key: string]: {
-      resolved_amount?: string;
-      condition_snippet?: string;
-      best_evidence?: Evidence[];
-    };
-  };
-}
+// Evidence & Related
+export type Evidence = components["schemas"]["EvidenceResponse"];
+export type AmountInfo = components["schemas"]["AmountInfoResponse"];
+export type ConditionInfo = components["schemas"]["ConditionInfoResponse"];
 
-export interface DiffSummaryItem {
-  diff_type: string;
-  description: string;
-  insurers_affected?: string[];
-  evidence_refs?: string[];
-}
+// Compare Table Cell
+export type InsurerCompareCell = components["schemas"]["InsurerCompareCellResponse"];
 
-export interface DebugInfo {
-  selected_plan?: Array<{
-    insurer_code: string;
-    plan_id?: string;
-    plan_name?: string;
-  }>;
-  timing_ms?: number;
-  [key: string]: unknown;
-}
+// Diff Summary
+export type DiffBullet = components["schemas"]["DiffBulletResponse"];
+export type EvidenceRef = components["schemas"]["EvidenceRefResponse"];
 
-export interface CompareResponse {
-  compare_axis: CompareAxisItem[];
-  policy_axis: PolicyAxisItem[];
-  coverage_compare_result: CoverageCompareItem[];
-  diff_summary: DiffSummaryItem[];
-  debug: DebugInfo;
-}
-
-// Chat UI Types
+// =============================================================================
+// UI-Only Types (not from API)
+// =============================================================================
 
 export interface ChatMessage {
   id: string;
@@ -79,3 +49,6 @@ export interface ChatMessage {
   isLoading?: boolean;
   error?: string;
 }
+
+// DebugInfo는 API에서 { [key: string]: unknown } 으로 정의됨
+export type DebugInfo = CompareResponse["debug"];

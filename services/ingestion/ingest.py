@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -121,7 +122,16 @@ def process_single_document(
 
         # 7. Document 삽입
         doc_type = manifest.doc_type or "기타"
-        source_path = str(pdf_path)
+
+        # SOURCE_PATH_ROOT 환경변수로 경로 변환 (컨테이너 배포용)
+        # 예: SOURCE_PATH_ROOT=/app/data, root=data → /Users/.../data/samsung/... → /app/data/samsung/...
+        source_path_root = os.environ.get("SOURCE_PATH_ROOT")
+        if source_path_root:
+            # root 기준 상대경로를 SOURCE_PATH_ROOT에 연결
+            rel_path = pdf_path.relative_to(root)
+            source_path = str(Path(source_path_root) / rel_path)
+        else:
+            source_path = str(pdf_path)
 
         doc_id: int | None = None
         if db_writer and not dry_run:

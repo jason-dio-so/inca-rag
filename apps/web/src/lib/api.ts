@@ -75,8 +75,9 @@ export async function compare(request: CompareRequest): Promise<CompareResponse>
 }
 
 // Helper to format evidence reference for clipboard
-export function formatEvidenceRef(documentId: string, pageStart: number): string {
-  return `${documentId}:${pageStart}`;
+// document_id is number from API, pageStart can be null
+export function formatEvidenceRef(documentId: number | string, pageStart: number | null): string {
+  return `${documentId}:${pageStart ?? 0}`;
 }
 
 // Copy text to clipboard

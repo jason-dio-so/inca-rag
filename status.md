@@ -41,6 +41,11 @@
 | **Step U-1** | **A2 정책 신뢰 (약관 제외 안내 UI)** | **UI** | ✅ 완료 |
 | **Step U-2** | **Evidence PDF Page Viewer (원문 보기)** | **UI/API** | ✅ 완료 |
 | **Step U-2.5** | **Evidence 하이라이트 + Deep-link** | **UI/API** | ✅ 완료 |
+| **Step U-4** | **Docker Compose 데모 배포 패키징** | **DevOps** | ✅ 완료 |
+| **Step U-4.1** | **데모 데이터 시딩 자동화 + /compare 스모크 활성화** | **DevOps** | ✅ 완료 |
+| **Step U-4.2** | **데모 스모크를 "양쪽 근거"로 고정** | **DevOps** | ✅ 완료 |
+| **Step U-4.3** | **데모 삼성/메리츠 전체 PDF 로딩 + 충분성 리포트** | **DevOps** | ✅ 완료 |
+| **Step U-4.4** | **데모 스모크 2단 구성 (안정성/시나리오) + UI Debug 강화** | **DevOps/UI** | ✅ 완료 |
 
 ---
 
@@ -962,6 +967,129 @@ curl "http://localhost:8000/documents/1/page/1/spans?q=보험금&max_hits=3"
 
 ---
 
+### 34. Step U-4: Docker Compose 데모 배포 패키징 [DevOps]
+
+**목표:**
+- `git clone` 후 한 번의 명령으로 전체 시스템 실행
+- DB + API + Web + Nginx 4개 서비스 통합 배포
+- 스모크 테스트 자동 실행
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `docker-compose.demo.yml` | 데모용 Docker Compose |
+| `api/Dockerfile` | FastAPI 백엔드 이미지 |
+| `apps/web/Dockerfile` | Next.js 프론트엔드 이미지 |
+| `deploy/nginx.conf` | Nginx 리버스 프록시 설정 |
+| `tools/demo_up.sh` | 원클릭 실행 스크립트 |
+| `README.md` | 데모 실행 가이드 |
+
+**서비스 구성:**
+| 서비스 | 이미지 | 포트 | 설명 |
+|--------|--------|------|------|
+| db | pgvector/pgvector:pg16 | 5432 | PostgreSQL + pgvector |
+| api | (빌드) | 8000 | FastAPI 백엔드 |
+| web | (빌드) | 3000 | Next.js 프론트엔드 |
+| nginx | nginx:alpine | 80 | 리버스 프록시 |
+
+**Nginx 라우팅:**
+```
+/api/*  → api:8000 (strip /api prefix)
+/       → web:3000
+```
+
+**사용법:**
+```bash
+# 데모 실행
+./tools/demo_up.sh
+
+# 이미지 재빌드
+./tools/demo_up.sh --build
+
+# 볼륨 삭제 후 재시작
+./tools/demo_up.sh --clean
+
+# 종료
+docker compose -f docker-compose.demo.yml down
+```
+
+**접속 URL:**
+| 서비스 | URL |
+|--------|-----|
+| Web UI | http://localhost |
+| API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+
+**스모크 테스트:**
+- `/health` API 체크
+- `/api/health` Nginx 경유 체크
+- `/compare` 간단 요청 테스트
+
+**효과:**
+- git clone → `./tools/demo_up.sh` 한 줄로 전체 시스템 실행
+- 4개 서비스 의존성 자동 관리 (healthcheck + depends_on)
+- 스모크 테스트로 배포 검증 자동화
+
+---
+
+### 35. Step U-4.1: 데모 데이터 시딩 자동화 + /compare 스모크 활성화 [DevOps]
+
+**목표:**
+- `./tools/demo_up.sh` 실행 시 데이터 시딩까지 자동화
+- DB 스키마 적용 → Coverage 매핑 로드 → SAMSUNG/MERITZ ingestion → /compare 스모크 테스트
+- 컨테이너 경로 정합성: `SOURCE_PATH_ROOT` 환경변수로 source_path 변환
+
+**수정/생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `services/ingestion/ingest.py` | `SOURCE_PATH_ROOT` 환경변수 지원 추가 |
+| `tools/demo_seed.sh` | 데이터 시딩 스크립트 (단독 실행 가능) |
+| `tools/demo_up.sh` | 데이터 시딩 단계 통합 |
+| `api/Dockerfile` | tools 폴더 복사 추가 |
+| `README.md` | API 스키마(`insurers`) 수정 |
+
+**SOURCE_PATH_ROOT 동작:**
+```python
+# ingest.py에서 source_path 변환
+source_path_root = os.environ.get("SOURCE_PATH_ROOT")
+if source_path_root:
+    rel_path = pdf_path.relative_to(root)
+    source_path = str(Path(source_path_root) / rel_path)
+    # 예: /Users/.../data/samsung/... → /app/data/samsung/...
+```
+
+**demo_up.sh 시딩 단계:**
+1. Coverage 매핑 로드 (`data/담보명mapping자료.xlsx`)
+2. SAMSUNG ingestion (약관/요약서/사업방법서/가입설계서)
+3. MERITZ ingestion
+4. 적재 결과 확인 (문서/청크 수)
+
+**적재 결과:**
+```
+문서: 9개
+청크: 3,216개 (SAMSUNG 1,279 + MERITZ 1,937)
+```
+
+**스모크 테스트 결과:**
+```
+/health: OK
+/api/health (via nginx): OK
+/compare: PASS (4개 근거)
+```
+
+**compare 응답 요약:**
+- compare_axis: 4개 근거
+- coverage_compare_result: 4개 담보
+- diff_summary: 4개 차이점
+- policy_axis: SAMSUNG 30개, MERITZ 30개 약관 근거
+
+**효과:**
+- `git clone` → `./tools/demo_up.sh` 한 번으로 데이터 적재까지 완료
+- /compare 스모크 테스트 PASS로 배포 검증
+- 컨테이너 경로 정합성으로 PDF Viewer 정상 동작
+
+---
+
 ## 📁 생성된 파일 목록
 
 ### 구현 파일
@@ -1018,10 +1146,17 @@ curl "http://localhost:8000/documents/1/page/1/spans?q=보험금&max_hits=3"
 | `tools/benchmark_compare_axis.py` | 벤치마크 스크립트 (Step K) |
 | `api/document_viewer.py` | PDF 페이지 렌더링 API (Step U-2) |
 | `tests/test_document_viewer.py` | Document Viewer API 테스트 (Step U-2) |
+| `docker-compose.demo.yml` | 데모용 Docker Compose (Step U-4) |
+| `api/Dockerfile` | FastAPI 백엔드 이미지 (Step U-4) |
+| `deploy/nginx.conf` | Nginx 리버스 프록시 설정 (Step U-4) |
+| `tools/demo_up.sh` | 원클릭 실행 스크립트 (Step U-4, U-4.1) |
+| `tools/demo_seed.sh` | 데이터 시딩 스크립트 (Step U-4.1) |
+| `README.md` | 데모 실행 가이드 (Step U-4) |
 
 ### UI 파일 (apps/web)
 | 파일 | 설명 |
 |------|------|
+| `Dockerfile` | Next.js 프론트엔드 이미지 (Step U-4) |
 | `src/app/page.tsx` | 메인 채팅 페이지 (Step U-ChatUI) |
 | `src/components/ChatInput.tsx` | 채팅 입력 컴포넌트 (Step U-ChatUI) |
 | `src/components/CompareTable.tsx` | 비교표 컴포넌트 (Step U-ChatUI, U-1, U-2) |
