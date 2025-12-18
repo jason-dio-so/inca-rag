@@ -10,9 +10,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { CompareAxisItem, PolicyAxisItem, Evidence } from "@/lib/types";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
-import { Copy, Check, Eye } from "lucide-react";
+import { Copy, Check, Eye, ChevronDown, Star, FileText } from "lucide-react";
 import { PdfPageViewer } from "./PdfPageViewer";
 
 const INSURER_NAMES: Record<string, string> = {
@@ -36,11 +41,33 @@ const DOC_TYPE_COLORS: Record<string, string> = {
 interface EvidencePanelProps {
   data: CompareAxisItem[] | PolicyAxisItem[];
   isPolicyMode?: boolean; // true = Policy tab (약관만), false = Evidence tab (약관 제외)
+  slots?: ComparisonSlot[]; // U-4.9: slots for identifying 대표 근거
 }
 
-export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps) {
+/**
+ * Build a Set of "representative evidence" keys from slots.evidence_refs
+ * Key format: `${document_id}-${page_start}`
+ */
+function buildRepresentativeEvidenceSet(slots: ComparisonSlot[] | undefined, insurerCode: string): Set<string> {
+  const repSet = new Set<string>();
+  if (!slots) return repSet;
+
+  for (const slot of slots) {
+    for (const iv of slot.insurers) {
+      if (iv.insurer_code === insurerCode && iv.evidence_refs) {
+        for (const ref of iv.evidence_refs) {
+          repSet.add(`${ref.document_id}-${ref.page_start ?? 0}`);
+        }
+      }
+    }
+  }
+  return repSet;
+}
+
+export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePanelProps) {
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
   const [viewingEvidence, setViewingEvidence] = useState<Evidence | null>(null);
+  const [additionalOpen, setAdditionalOpen] = useState<Record<string, boolean>>({});
 
   if (!data || data.length === 0) {
     return (
@@ -99,6 +126,10 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
     setViewingEvidence(evidence);
   };
 
+  const toggleAdditional = (insurer: string) => {
+    setAdditionalOpen(prev => ({ ...prev, [insurer]: !prev[insurer] }));
+  };
+
   return (
     <div className="space-y-2">
       {/* PDF Page Viewer Modal (Step U-2.5: highlightQuery 추가) */}
@@ -110,6 +141,19 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
           highlightQuery={viewingEvidence.preview?.slice(0, 120) || undefined}
           onClose={() => setViewingEvidence(null)}
         />
+      )}
+
+      {/* U-4.9: Evidence Tab Clarification Notice */}
+      {!isPolicyMode && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <FileText className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+            <div className="text-sm text-blue-800 space-y-1">
+              <p>※ Evidence는 비교 계산에 사용된 &apos;대표 근거&apos;가 아니라,</p>
+              <p className="ml-3">관련 문서에서 발견된 전체 근거 목록입니다.</p>
+            </div>
+          </div>
+        </div>
       )}
 
       {isPolicyMode && (
@@ -126,7 +170,24 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
 
       <Accordion type="multiple" defaultValue={insurerList} className="w-full">
         {insurerList.map((insurer) => {
-          const evidence = groupedByInsurer.get(insurer) || [];
+          const allEvidence = groupedByInsurer.get(insurer) || [];
+
+          // U-4.9: Split into representative and additional evidence
+          const repSet = buildRepresentativeEvidenceSet(slots, insurer);
+          const representativeEvidence: Evidence[] = [];
+          const additionalEvidence: Evidence[] = [];
+
+          allEvidence.forEach((ev) => {
+            const key = `${ev.document_id}-${ev.page_start ?? 0}`;
+            if (repSet.has(key)) {
+              representativeEvidence.push(ev);
+            } else {
+              additionalEvidence.push(ev);
+            }
+          });
+
+          const repCount = representativeEvidence.length;
+          const totalCount = allEvidence.length;
 
           return (
             <AccordionItem key={insurer} value={insurer}>
@@ -135,12 +196,82 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
                   <span className="font-medium">
                     {INSURER_NAMES[insurer] || insurer}
                   </span>
-                  <Badge variant="secondary">{evidence.length}건</Badge>
+                  {/* U-4.9: Show "대표 N / 전체 M" instead of raw count */}
+                  <Badge variant="secondary" className="font-normal">
+                    {slots && repCount > 0 ? (
+                      <span>대표 {repCount} / 전체 {totalCount}</span>
+                    ) : (
+                      <span>{totalCount}건</span>
+                    )}
+                  </Badge>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
-                <div className="space-y-2 pt-2">
-                  {evidence.map((ev, idx) => (
+                <div className="space-y-4 pt-2">
+                  {/* U-4.9: Section 1 - 비교에 사용된 대표 근거 */}
+                  {slots && representativeEvidence.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
+                        <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                        비교에 사용된 대표 근거
+                      </div>
+                      <div className="space-y-2">
+                        {representativeEvidence.map((ev, idx) => (
+                          <EvidenceCard
+                            key={`rep-${ev.document_id}-${ev.page_start}-${idx}`}
+                            evidence={ev}
+                            onCopy={handleCopy}
+                            onView={handleView}
+                            copiedRef={copiedRef}
+                            isRepresentative={true}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* U-4.9: Section 2 - 추가 참고 근거 (collapsible) */}
+                  {additionalEvidence.length > 0 && (
+                    <Collapsible
+                      open={additionalOpen[insurer] ?? false}
+                      onOpenChange={() => toggleAdditional(insurer)}
+                    >
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-between text-muted-foreground hover:text-foreground"
+                        >
+                          <span className="flex items-center gap-2">
+                            <FileText className="h-4 w-4" />
+                            추가 참고 근거 ({additionalEvidence.length}건)
+                          </span>
+                          <ChevronDown
+                            className={`h-4 w-4 transition-transform ${
+                              additionalOpen[insurer] ? "rotate-180" : ""
+                            }`}
+                          />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="space-y-2 pt-2">
+                          {additionalEvidence.map((ev, idx) => (
+                            <EvidenceCard
+                              key={`add-${ev.document_id}-${ev.page_start}-${idx}`}
+                              evidence={ev}
+                              onCopy={handleCopy}
+                              onView={handleView}
+                              copiedRef={copiedRef}
+                              isRepresentative={false}
+                            />
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+
+                  {/* Fallback: No slots, show all evidence normally */}
+                  {!slots && allEvidence.map((ev, idx) => (
                     <EvidenceCard
                       key={`${ev.document_id}-${ev.page_start}-${idx}`}
                       evidence={ev}
@@ -164,6 +295,7 @@ interface EvidenceCardProps {
   onCopy: (evidence: Evidence) => void;
   onView: (evidence: Evidence) => void;
   copiedRef: string | null;
+  isRepresentative?: boolean; // U-4.9: true = 대표 근거, false = 참고 근거
 }
 
 function EvidenceCard({
@@ -171,17 +303,18 @@ function EvidenceCard({
   onCopy,
   onView,
   copiedRef,
+  isRepresentative,
 }: EvidenceCardProps) {
   const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
   const isCopied = copiedRef === ref;
 
   return (
-    <Card>
+    <Card className={isRepresentative ? "border-amber-300 bg-amber-50/30" : ""}>
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 space-y-1">
-            {/* Doc Type Badge */}
-            <div className="flex items-center gap-2">
+            {/* Doc Type Badge + Representative Badge */}
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 className={
                   DOC_TYPE_COLORS[evidence.doc_type] ||
@@ -190,6 +323,26 @@ function EvidenceCard({
               >
                 {evidence.doc_type}
               </Badge>
+              {/* U-4.9: 대표/참고 근거 badge */}
+              {isRepresentative !== undefined && (
+                <Badge
+                  variant={isRepresentative ? "default" : "outline"}
+                  className={
+                    isRepresentative
+                      ? "bg-amber-500 hover:bg-amber-500 text-white"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {isRepresentative ? (
+                    <span className="flex items-center gap-1">
+                      <Star className="h-3 w-3 fill-current" />
+                      대표 근거
+                    </span>
+                  ) : (
+                    "참고 근거"
+                  )}
+                </Badge>
+              )}
               {evidence.score !== undefined && (
                 <span className="text-xs text-muted-foreground">
                   score: {evidence.score.toFixed(2)}

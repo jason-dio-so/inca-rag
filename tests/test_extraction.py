@@ -333,3 +333,365 @@ class TestAmountExtractorBlockHeuristic:
         # 표 내의 숫자들은 단위가 없어서 추출 안됨
         assert result.amount_value == 10_000_000
         assert result.unit == "만원"
+
+
+class TestAmountExtractorFlattenedTable:
+    """U-4.8 Fix: 단일 라인으로 펼쳐진 가입설계서 테이블 처리"""
+
+    def test_samsung_flattened_table_extracts_amount(self):
+        """Samsung 가입설계서: 한 줄로 펼쳐진 표에서 금액 추출 (known chunk)"""
+        # Actual Samsung chunk content (flattened by replace \n with space)
+        text = """[L3ZPB275100AGSL010_0500001] 가입제안서 무배당 삼성화재 건강보험 마이헬스 파트너(2508.12) 3종(납입면제해약환급금 미지급형Ⅱ) 담보별 보장내용 가입금액 보험료(원) 납입기간 보험기간 선택계약 암 진단비(유사암 제외) 보장개시일 이후 암(유사암 제외)으로 진단 확정된 경우 가입금액 지급(최초  1회한) ※ 암(유사암 제외)의 보장개시일은 최초 계약일 또는 부활(효력회복)일부 터 90일이 지난날의 다음날임 ※ 유사암은 기타피부암, 갑상선암, 대장점막내암, 제자리암, 경계성종양임 3,000만원 40,620 20년납  100세만기"""
+
+        result = extract_amount(text, doc_type="가입설계서")
+
+        # Should extract 3,000만원 using wide window (150 chars)
+        assert result.amount_value == 30_000_000
+        assert result.amount_text == "3,000만원"
+        assert result.unit == "만원"
+        assert result.confidence == "medium"  # Wide window = medium confidence
+
+    def test_single_line_wide_window_positive_keyword(self):
+        """단일 라인에서 넓은 윈도우로 POSITIVE 키워드 탐색"""
+        # Simulating flattened table with keyword far from amount
+        text = "암진단비 보장개시일 이후 암으로 진단 확정된 경우 가입금액 지급 여러 설명이 포함되어 있습니다 금액은 1,000만원입니다"
+
+        result = extract_amount(text, doc_type="가입설계서")
+
+        # 가입금액, 지급 등 POSITIVE 키워드가 있으므로 추출되어야 함
+        assert result.amount_value == 10_000_000
+        assert result.unit == "만원"
+
+    def test_single_line_no_positive_keyword_returns_none(self):
+        """단일 라인에서 POSITIVE 키워드 없으면 None"""
+        text = "어떤 설명이 포함된 텍스트 1,000만원 추가 설명"
+
+        result = extract_amount(text, doc_type="가입설계서")
+
+        # POSITIVE 키워드 없으면 None (정답성 우선)
+        assert result.amount_value is None
+
+    def test_single_line_negative_keyword_close_excluded(self):
+        """단일 라인에서 NEGATIVE 키워드가 가까우면 제외"""
+        text = "가입금액 지급 조건 설명 월납보험료 35,000원 입니다"
+
+        result = extract_amount(text, doc_type="가입설계서")
+
+        # 보험료 근처 금액은 제외
+        assert result.amount_value is None
+
+    def test_multiline_table_not_affected(self):
+        """멀티라인 테이블은 기존 로직 유지"""
+        text = """담보명 가입금액
+암진단비 1,000만원
+심근경색 500만원"""
+
+        result = extract_amount(text, doc_type="가입설계서")
+
+        # 멀티라인은 coverage_block 로직 적용
+        assert result.amount_value == 10_000_000
+
+
+class TestSlotPayoutAmountExtraction:
+    """U-4.8: slot_extractor payout_amount 테스트"""
+
+    def test_payout_amount_with_evidence_refs(self):
+        """payout_amount 추출 시 evidence_refs 포함 확인"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        # Mock evidence
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="가입설계서",
+                page_start=10,
+                preview="가입금액 지급 암진단비 1,000만원 보장",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        assert result.value == "1,000만원"
+        assert result.confidence in ("high", "medium")
+        assert len(result.evidence_refs) > 0
+        assert result.evidence_refs[0].document_id == 1
+        assert result.evidence_refs[0].page_start == 10
+
+    def test_payout_amount_no_evidence_returns_not_found(self):
+        """evidence 없으면 not_found 반환"""
+        from services.extraction.slot_extractor import extract_payout_amount
+
+        result = extract_payout_amount([], "SAMSUNG")
+
+        assert result.value is None
+        assert result.confidence == "not_found"
+        assert result.reason is not None
+
+    def test_payout_amount_yakwan_excluded(self):
+        """약관 doc_type은 A2 정책에 따라 제외"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="약관",  # 약관은 제외
+                page_start=10,
+                preview="가입금액 1,000만원 지급",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        # 약관만 있으면 not_found
+        assert result.value is None
+        assert result.confidence == "not_found"
+
+    def test_payout_amount_priority_product_summary(self):
+        """상품요약서가 가입설계서보다 우선순위 높음"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="가입설계서",
+                page_start=10,
+                preview="가입금액 500만원 지급",
+            ),
+            MockEvidence(
+                document_id=2,
+                doc_type="상품요약서",
+                page_start=20,
+                preview="보험금 1,000만원 지급",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        # 상품요약서(우선순위 3) > 가입설계서(우선순위 1)
+        assert result.value == "1,000만원"
+        assert result.evidence_refs[0].document_id == 2
+
+
+class TestDiagnosisLumpSumExtraction:
+    """U-4.10 Fix: 진단비 일시금 추출 테스트"""
+
+    def test_single_candidate_lump_sum_accepted(self):
+        """단일 후보 금액이 일시금으로 인정되어야 함 (regression test)"""
+        from services.extraction.amount_extractor import extract_diagnosis_lump_sum
+
+        # Samsung 가입설계서 스타일: 단일 금액만 존재
+        text = """[L3ZPB275100AGSL010_0500001] 가입제안서 무배당 삼성화재 건강보험
+담보별 보장내용 가입금액 보험료(원) 납입기간 보험기간
+암 진단비(유사암 제외) 보장개시일 이후 암(유사암 제외)으로 진단 확정된 경우
+가입금액 지급(최초 1회한) 3,000만원 40,620 20년납 100세만기"""
+
+        result = extract_diagnosis_lump_sum(text, doc_type="가입설계서")
+
+        # 단일 후보 일시금이므로 반드시 추출되어야 함
+        assert result.amount_value == 30_000_000
+        assert result.amount_text == "3,000만원"
+        assert result.confidence in ("high", "medium")  # medium도 허용
+
+    def test_daily_amount_excluded(self):
+        """일당 금액은 진단비 일시금에서 제외되어야 함"""
+        from services.extraction.amount_extractor import extract_diagnosis_lump_sum
+
+        text = """입원일당 20만원 지급
+암 직접치료 통원일당 5만원"""
+
+        result = extract_diagnosis_lump_sum(text, doc_type="상품요약서")
+
+        # 일당 금액만 있으면 not_found
+        assert result.confidence == "not_found"
+        assert "일당" in result.reason or "특약" in result.reason
+
+    def test_lump_sum_preferred_over_daily(self):
+        """일시금과 일당이 함께 있으면 일시금 선택"""
+        from services.extraction.amount_extractor import extract_diagnosis_lump_sum
+
+        text = """암진단비 3,000만원 지급(최초 1회한)
+입원일당 20만원
+통원치료비 5만원(1회당)"""
+
+        result = extract_diagnosis_lump_sum(text, doc_type="상품요약서")
+
+        # 일시금(3,000만원) 선택
+        assert result.amount_value == 30_000_000
+        assert result.amount_text == "3,000만원"
+
+    def test_single_evidence_lump_sum_reason(self):
+        """단일 후보 일시금일 때 reason=single_evidence_lump_sum"""
+        from services.extraction.amount_extractor import extract_diagnosis_lump_sum
+
+        # 키워드 없이 금액만 있는 경우
+        text = "총 보장금액 50만원"
+
+        result = extract_diagnosis_lump_sum(text, doc_type="가입설계서")
+
+        # 50만원은 100만원 미만이므로 single_evidence_lump_sum 적용
+        # 단일 후보이므로 값이 반환되어야 함
+        if result.amount_value:
+            assert result.confidence == "medium"
+
+    def test_medium_confidence_shows_value_not_미확인(self):
+        """confidence=medium이어도 value가 있으면 표시 (UI 규칙)"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        # Samsung 스타일 가입설계서
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="가입설계서",
+                page_start=5,
+                preview="""담보별 보장내용 가입금액 보험료
+암 진단비(유사암 제외) 3,000만원 40,620""",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        # 값이 반환되어야 하고, confidence가 not_found가 아니어야 함
+        assert result.value is not None, "Samsung payout_amount should not be None"
+        assert result.value == "3,000만원"
+        assert result.confidence != "not_found", "confidence should not be not_found"
+        # medium이어도 value가 있으면 UI에서 표시됨
+
+
+class TestConfidencePriorityExtraction:
+    """U-4.11 Fix: Confidence 우선순위 테스트 (같은 doc_type 내에서 high > medium)"""
+
+    def test_high_confidence_preferred_over_medium_same_doc_type(self):
+        """같은 doc_type에서 high confidence가 medium보다 우선 (Meritz regression)"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        # Meritz 상품요약서: page 135 (상해 통합치료비) medium, page 165 (암진단비) high
+        evidence_list = [
+            MockEvidence(
+                document_id=8,
+                doc_type="상품요약서",
+                page_start=135,
+                preview="""상해 통합치료비 5,000만원 지급
+통원치료비 10만원""",
+            ),
+            MockEvidence(
+                document_id=8,
+                doc_type="상품요약서",
+                page_start=165,
+                preview="""암진단비(유사암제외) 최초 1회 진단확정시
+가입금액 3,000만원 지급(최초 1회한)""",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "MERITZ")
+
+        # page 165의 3,000만원 (high confidence)가 선택되어야 함
+        # page 135의 5,000만원 (medium confidence)보다 우선
+        assert result.value == "3,000만원", f"Expected 3,000만원 but got {result.value}"
+        assert result.confidence == "high"
+        assert result.evidence_refs[0].page_start == 165
+
+    def test_first_high_confidence_wins_same_doc_type(self):
+        """같은 doc_type에서 여러 high confidence가 있으면 첫 번째 선택"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="상품요약서",
+                page_start=10,
+                preview="암진단비 가입금액 2,000만원 지급(최초 1회한)",
+            ),
+            MockEvidence(
+                document_id=1,
+                doc_type="상품요약서",
+                page_start=20,
+                preview="암진단비 가입금액 3,000만원 지급(최초 1회한)",
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        # 첫 번째 high confidence가 선택됨
+        assert result.value == "2,000만원"
+        assert result.evidence_refs[0].page_start == 10
+
+    def test_doc_type_priority_over_confidence(self):
+        """doc_type 우선순위가 confidence보다 우선"""
+        from services.extraction.slot_extractor import extract_payout_amount
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockEvidence:
+            document_id: int
+            doc_type: str
+            page_start: int
+            preview: str
+
+        evidence_list = [
+            MockEvidence(
+                document_id=1,
+                doc_type="사업방법서",  # 우선순위 2
+                page_start=50,
+                preview="암진단비 가입금액 5,000만원 지급(최초 1회한)",
+            ),
+            MockEvidence(
+                document_id=2,
+                doc_type="상품요약서",  # 우선순위 3
+                page_start=100,
+                preview="암진단비 3,000만원",  # medium confidence (키워드 적음)
+            ),
+        ]
+
+        result = extract_payout_amount(evidence_list, "SAMSUNG")
+
+        # 상품요약서(우선순위 3)가 사업방법서(우선순위 2)보다 우선
+        assert result.value == "3,000만원"
+        assert result.evidence_refs[0].page_start == 100

@@ -63,6 +63,46 @@ NEGATIVE_KEYWORDS = [
     "보험료(원)",
 ]
 
+# =============================================================================
+# U-4.10: 진단비 일시금 전용 키워드
+# =============================================================================
+
+# LUMP_SUM 키워드: 진단비 일시금 관련 (반드시 근처에 있어야 함)
+LUMP_SUM_KEYWORDS = [
+    "진단비",
+    "진단보험금",
+    "암 진단비",
+    "암진단비",
+    "가입금액 지급",
+    "가입금액지급",
+    "일시금",
+    "진단 확정",
+    "진단확정",
+    "최초 1회",
+    "최초1회",
+]
+
+# DAILY_ANCILLARY 키워드: 일당/특약 금액 관련 (제외해야 함)
+# NOTE: "1회" 제거 - "최초 1회한"은 일시금을 의미함
+DAILY_ANCILLARY_KEYWORDS = [
+    "일당",
+    "통원일당",
+    "치료비",
+    "회당",
+    "입원일당",
+    "연간",
+    "1일이상",
+    "간병",
+]
+
+# 일시금 문맥을 나타내는 패턴 (DAILY_ANCILLARY 제외 시 사용)
+LUMP_SUM_CONTEXT_PATTERNS = [
+    "최초 1회",
+    "최초1회",
+    "1회한",
+    "1회에 한",
+]
+
 # Premium block header tokens (표에서 보험료 컬럼 식별)
 # 순서: 더 구체적인 것 먼저, 일반적인 것은 마지막 (매칭 시 우선순위)
 PREMIUM_HEADER_TOKENS = [
@@ -331,15 +371,42 @@ def _has_positive_keyword_nearby(text: str, position: int, window: int = 40) -> 
 def _has_negative_keyword_nearby(text: str, position: int, window: int = 40) -> bool:
     """
     금액 위치 주변(±window 자)에 NEGATIVE 키워드(보험료 관련)가 있는지 확인
+
+    NOTE: LUMP_SUM 키워드가 NEGATIVE 키워드보다 금액에 더 가까우면 False 반환
     """
     start = max(0, position - window)
     end = min(len(text), position + window)
     context = text[start:end]
 
+    # Find closest NEGATIVE keyword
+    closest_neg_dist = float('inf')
     for keyword in NEGATIVE_KEYWORDS:
-        if keyword in context:
-            return True
-    return False
+        idx = context.find(keyword)
+        if idx != -1:
+            # Distance from keyword center to amount position in context
+            keyword_center = idx + len(keyword) // 2
+            amount_pos_in_context = position - start
+            dist = abs(keyword_center - amount_pos_in_context)
+            closest_neg_dist = min(closest_neg_dist, dist)
+
+    if closest_neg_dist == float('inf'):
+        return False  # No negative keyword found
+
+    # Find closest LUMP_SUM keyword
+    closest_lump_dist = float('inf')
+    for keyword in LUMP_SUM_KEYWORDS:
+        idx = context.find(keyword)
+        if idx != -1:
+            keyword_center = idx + len(keyword) // 2
+            amount_pos_in_context = position - start
+            dist = abs(keyword_center - amount_pos_in_context)
+            closest_lump_dist = min(closest_lump_dist, dist)
+
+    # If LUMP_SUM keyword is closer, this is not a premium amount
+    if closest_lump_dist < closest_neg_dist:
+        return False
+
+    return True
 
 
 def _get_line_context(text: str, position: int) -> str:
@@ -518,7 +585,8 @@ def _extract_amount_strict(text: str, amounts: list) -> AmountExtract:
     우선순위:
     1. coverage_block 내의 금액 (premium_block에 없는 것)
     2. POSITIVE 키워드 근처이면서 premium_block에 없는 금액
-    3. 둘 다 없으면 None (정답성 우선)
+    3. 단일 라인의 경우: 더 넓은 윈도우로 POSITIVE 키워드 탐색 (flattened table)
+    4. 둘 다 없으면 None (정답성 우선)
 
     제외:
     - premium_block 내의 금액
@@ -587,7 +655,31 @@ def _extract_amount_strict(text: str, amounts: list) -> AmountExtract:
             matched_span=matched_text,
         )
 
-    # Step 3: 둘 다 없으면 None 반환 (정답성 우선)
+    # Step 3: 단일 라인 (flattened table)의 경우, 더 넓은 윈도우로 재시도
+    # 가입설계서 표가 한 줄로 펼쳐진 경우 키워드와 금액 사이 거리가 멀 수 있음
+    if not is_table_structure:
+        # 넓은 윈도우 (150자)로 POSITIVE 키워드 탐색
+        wide_positive_amounts = [
+            (pos, matched, unit, value)
+            for pos, matched, unit, value in amounts
+            if _has_positive_keyword_nearby(text, pos, window=150)
+            and not _has_close_negative_keyword(text, pos)
+        ]
+
+        if wide_positive_amounts:
+            pos, matched_text, unit, value = wide_positive_amounts[0]
+            # 넓은 윈도우로 찾은 경우 confidence를 medium으로 설정
+            return AmountExtract(
+                amount_value=value,
+                amount_text=matched_text,
+                currency="KRW",
+                unit=unit,
+                confidence="medium",
+                method="regex",
+                matched_span=matched_text,
+            )
+
+    # Step 4: 둘 다 없으면 None 반환 (정답성 우선)
     return AmountExtract(
         amount_value=None,
         amount_text=None,
@@ -644,4 +736,192 @@ def _extract_amount_default(text: str, amounts: list) -> AmountExtract:
         confidence=confidence,
         method="regex",
         matched_span=matched_text,
+    )
+
+
+# =============================================================================
+# U-4.10: 진단비 일시금 전용 추출 함수
+# =============================================================================
+
+def _has_lump_sum_keyword_nearby(text: str, position: int, window: int = 80) -> bool:
+    """
+    금액 위치 주변(±window 자)에 LUMP_SUM 키워드가 있는지 확인
+    """
+    start = max(0, position - window)
+    end = min(len(text), position + window)
+    context = text[start:end]
+
+    for keyword in LUMP_SUM_KEYWORDS:
+        if keyword in context:
+            return True
+    return False
+
+
+def _has_daily_ancillary_keyword_nearby(text: str, position: int, window: int = 30) -> bool:
+    """
+    금액 위치 주변(±window 자)에 DAILY_ANCILLARY 키워드가 있는지 확인
+    좁은 범위(30자)로 확인하여 확실히 일당/특약 금액인 경우만 제외
+
+    NOTE: LUMP_SUM_CONTEXT_PATTERNS이 더 가까이 있으면 False 반환 (일시금 우선)
+    """
+    start = max(0, position - window)
+    end = min(len(text), position + window)
+    context = text[start:end]
+
+    # 일시금 문맥 패턴이 있으면 일당이 아님 (일시금 우선)
+    for pattern in LUMP_SUM_CONTEXT_PATTERNS:
+        if pattern in context:
+            return False
+
+    for keyword in DAILY_ANCILLARY_KEYWORDS:
+        if keyword in context:
+            return True
+    return False
+
+
+def _is_likely_lump_sum_amount(value: int | None) -> bool:
+    """
+    금액이 진단비 일시금으로 적합한 범위인지 확인
+
+    일시금은 보통 수백만원 ~ 수천만원 (100만원 이상)
+    일당/특약은 보통 수만원 ~ 수십만원 (100만원 미만)
+    """
+    if value is None:
+        return False
+    # 100만원 이상이면 일시금 가능성 높음
+    return value >= 1_000_000
+
+
+@dataclass
+class DiagnosisLumpSumResult:
+    """진단비 일시금 추출 결과"""
+    amount_value: int | None
+    amount_text: str | None
+    confidence: str  # "high"|"medium"|"low"|"not_found"
+    reason: str | None  # not_found일 때 사유
+    method: str = "regex"
+
+
+def extract_diagnosis_lump_sum(text: str, doc_type: str | None = None) -> DiagnosisLumpSumResult:
+    """
+    진단비 일시금만 추출 (일당/특약 금액 제외)
+
+    Args:
+        text: 추출 대상 텍스트
+        doc_type: 문서 유형
+
+    Returns:
+        DiagnosisLumpSumResult
+    """
+    if not text or len(text.strip()) == 0:
+        return DiagnosisLumpSumResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="텍스트 없음",
+        )
+
+    # 모든 금액 표현 찾기
+    amounts = _find_amounts_with_positions(text)
+
+    if not amounts:
+        return DiagnosisLumpSumResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="금액 표현 미발견",
+        )
+
+    # 보험료 금액 제외
+    non_premium_amounts = [
+        (pos, matched, unit, value)
+        for pos, matched, unit, value in amounts
+        if not _has_negative_keyword_nearby(text, pos)
+        and not _has_close_negative_keyword(text, pos)
+    ]
+
+    if not non_premium_amounts:
+        return DiagnosisLumpSumResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="보험료 외 금액 미발견",
+        )
+
+    # Step 1: 일시금 후보 (LUMP_SUM 키워드 근처 + DAILY_ANCILLARY 키워드 없음)
+    lump_sum_candidates = []
+    daily_ancillary_candidates = []
+    unclassified_candidates = []  # 키워드 없는 금액
+
+    for pos, matched, unit, value in non_premium_amounts:
+        has_lump_sum_kw = _has_lump_sum_keyword_nearby(text, pos)
+        has_daily_kw = _has_daily_ancillary_keyword_nearby(text, pos)
+
+        if has_lump_sum_kw and not has_daily_kw:
+            # 일시금 후보
+            lump_sum_candidates.append((pos, matched, unit, value, "lump_sum_keyword"))
+        elif has_daily_kw:
+            # 일당/특약 금액
+            daily_ancillary_candidates.append((pos, matched, unit, value))
+        elif _is_likely_lump_sum_amount(value) and not has_daily_kw:
+            # 금액 크기로 일시금 추정 (100만원 이상, 일당 키워드 없음)
+            lump_sum_candidates.append((pos, matched, unit, value, "amount_threshold"))
+        else:
+            # 분류되지 않은 금액
+            unclassified_candidates.append((pos, matched, unit, value))
+
+    # Step 2: 일시금 후보가 있으면 선택
+    if lump_sum_candidates:
+        # 가장 큰 금액 선택 (일시금은 보통 가장 큼)
+        lump_sum_candidates.sort(key=lambda x: x[3] or 0, reverse=True)
+        pos, matched_text, unit, value, reason_tag = lump_sum_candidates[0]
+
+        confidence = "high" if reason_tag == "lump_sum_keyword" else "medium"
+
+        return DiagnosisLumpSumResult(
+            amount_value=value,
+            amount_text=matched_text,
+            confidence=confidence,
+            reason=None,
+        )
+
+    # Step 3: U-4.10 Fix - 단일 후보가 있고 일당/특약이 아니면 수용
+    # single_candidate_lump_sum rule: 하나의 금액만 존재하고 일당이 아니면 일시금으로 간주
+    if len(non_premium_amounts) == 1 and not daily_ancillary_candidates:
+        pos, matched_text, unit, value = non_premium_amounts[0]
+        return DiagnosisLumpSumResult(
+            amount_value=value,
+            amount_text=matched_text,
+            confidence="medium",
+            reason="single_evidence_lump_sum",
+        )
+
+    # Step 4: 일시금 후보 없고 일당/특약 금액만 있으면 not_found
+    if daily_ancillary_candidates and not unclassified_candidates:
+        return DiagnosisLumpSumResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="진단비 일시금 금액 미확인 (일당/특약 금액만 존재)",
+        )
+
+    # Step 5: 분류되지 않은 금액 중 가장 큰 것 선택 (fallback)
+    if unclassified_candidates:
+        unclassified_candidates.sort(key=lambda x: x[3] or 0, reverse=True)
+        pos, matched_text, unit, value = unclassified_candidates[0]
+        # 100만원 이상이면 medium, 미만이면 low
+        if value and value >= 1_000_000:
+            return DiagnosisLumpSumResult(
+                amount_value=value,
+                amount_text=matched_text,
+                confidence="medium",
+                reason="fallback_large_amount",
+            )
+
+    # Step 6: 아무것도 없으면 not_found
+    return DiagnosisLumpSumResult(
+        amount_value=None,
+        amount_text=None,
+        confidence="not_found",
+        reason="진단비 일시금 관련 키워드 근처에 금액 미발견",
     )

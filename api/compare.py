@@ -133,12 +133,52 @@ class DiffSummaryItemResponse(BaseModel):
     bullets: list[DiffBulletResponse]
 
 
+# =============================================================================
+# U-4.8: Comparison Slots
+# =============================================================================
+
+class SlotEvidenceRefResponse(BaseModel):
+    """슬롯 근거 참조"""
+    document_id: int
+    page_start: int | None
+    chunk_id: int | None = None
+
+
+class LLMTraceResponse(BaseModel):
+    """LLM 사용 추적 정보"""
+    method: Literal["rule", "llm", "hybrid"]
+    llm_used: bool
+    llm_reason: Literal["flag_off", "ambiguity_high", "parse_fail", "cost_guard", "not_needed"] | None = None
+    model: str | None = None
+
+
+class SlotInsurerValueResponse(BaseModel):
+    """슬롯 보험사별 값"""
+    insurer_code: str
+    value: str | None
+    confidence: Literal["high", "medium", "low", "not_found"] = "medium"
+    reason: str | None = None  # not_found일 때 이유
+    evidence_refs: list[SlotEvidenceRefResponse] = []
+    trace: LLMTraceResponse | None = None  # LLM usage trace
+
+
+class ComparisonSlotResponse(BaseModel):
+    """비교 슬롯 항목"""
+    slot_key: str
+    label: str
+    comparable: bool
+    insurers: list[SlotInsurerValueResponse]
+    diff_summary: str | None = None  # 슬롯별 차이 요약
+
+
 class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
     compare_axis: list[CompareAxisItemResponse]
     policy_axis: list[PolicyAxisItemResponse]
     coverage_compare_result: list[CoverageCompareRowResponse]
     diff_summary: list[DiffSummaryItemResponse]
+    # U-4.8: Comparison Slots
+    slots: list[ComparisonSlotResponse] = []
     debug: dict[str, Any]
 
 
@@ -170,6 +210,42 @@ def _convert_evidence(e) -> EvidenceResponse:
         amount=amount_resp,
         condition_snippet=condition_resp,
     )
+
+
+def _convert_slots(slots: list) -> list[ComparisonSlotResponse]:
+    """슬롯 결과를 API 응답 모델로 변환"""
+    return [
+        ComparisonSlotResponse(
+            slot_key=slot.slot_key,
+            label=slot.label,
+            comparable=slot.comparable,
+            insurers=[
+                SlotInsurerValueResponse(
+                    insurer_code=iv.insurer_code,
+                    value=iv.value,
+                    confidence=iv.confidence,
+                    reason=iv.reason,
+                    evidence_refs=[
+                        SlotEvidenceRefResponse(
+                            document_id=ref.document_id,
+                            page_start=ref.page_start,
+                            chunk_id=getattr(ref, 'chunk_id', None),
+                        )
+                        for ref in iv.evidence_refs
+                    ],
+                    trace=LLMTraceResponse(
+                        method=iv.trace.method,
+                        llm_used=iv.trace.llm_used,
+                        llm_reason=iv.trace.llm_reason,
+                        model=iv.trace.model,
+                    ) if iv.trace else None,
+                )
+                for iv in slot.insurers
+            ],
+            diff_summary=slot.diff_summary,
+        )
+        for slot in slots
+    ]
 
 
 def _convert_response(result: CompareResponse) -> CompareResponseModel:
@@ -229,6 +305,8 @@ def _convert_response(result: CompareResponse) -> CompareResponseModel:
             )
             for item in result.diff_summary
         ],
+        # U-4.8: Comparison Slots
+        slots=_convert_slots(getattr(result, 'slots', [])),
         debug=result.debug,
     )
 

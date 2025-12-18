@@ -31,6 +31,7 @@ from services.extraction.llm_prompts import (
     has_amount_intent,
 )
 from services.extraction.llm_schemas import LLMExtractResult
+from services.extraction.slot_extractor import extract_slots
 from services.retrieval.plan_selector import (
     select_plans_for_insurers,
     get_plan_ids_for_retrieval,
@@ -340,6 +341,8 @@ class CompareResponse:
     policy_axis: list[PolicyAxisResult] = field(default_factory=list)
     coverage_compare_result: list[CoverageCompareRow] = field(default_factory=list)
     diff_summary: list[DiffSummaryItem] = field(default_factory=list)
+    # U-4.8: Comparison Slots
+    slots: list = field(default_factory=list)
     debug: dict[str, Any] = field(default_factory=dict)
 
 
@@ -449,6 +452,115 @@ def get_compare_axis_vector(
     return list(results.values()), insurer_counts
 
 
+# =============================================================================
+# U-4.11: Amount-bearing chunk retrieval for payout_amount slot
+# =============================================================================
+
+# 진단비 일시금 검색용 키워드
+LUMP_SUM_SEARCH_KEYWORDS = [
+    "암 진단비",
+    "암진단비",
+    "진단 확정",
+    "진단확정",
+    "가입금액 지급",
+    "가입금액지급",
+    "최초 1회",
+    "최초1회",
+]
+
+
+def get_amount_bearing_evidence(
+    conn: psycopg.Connection,
+    insurer_code: str,
+    compare_doc_types: list[str],
+    plan_id: int | None = None,
+    top_k: int = 5,
+) -> list[Evidence]:
+    """
+    U-4.11: 금액을 포함한 chunk를 검색 (payout_amount slot용)
+
+    일반 coverage_code 기반 검색으로 금액을 찾지 못한 경우 fallback으로 사용.
+    암진단비 관련 키워드 + 금액 패턴을 포함한 chunk를 검색.
+
+    Args:
+        conn: DB 연결
+        insurer_code: 보험사 코드
+        compare_doc_types: 검색 대상 doc_type 리스트
+        plan_id: plan_id (있으면 plan_id 또는 NULL, 없으면 NULL만)
+        top_k: 최대 결과 수
+
+    Returns:
+        Evidence 리스트
+    """
+    results: list[Evidence] = []
+
+    # Plan condition
+    if plan_id is not None:
+        plan_condition = "(c.plan_id = %s OR c.plan_id IS NULL)"
+        plan_params = (plan_id,)
+    else:
+        plan_condition = "c.plan_id IS NULL"
+        plan_params = ()
+
+    # Build keyword OR condition
+    keyword_conditions = " OR ".join(
+        "c.content ILIKE %s" for _ in LUMP_SUM_SEARCH_KEYWORDS
+    )
+    keyword_params = tuple(f"%{kw}%" for kw in LUMP_SUM_SEARCH_KEYWORDS)
+
+    # Amount pattern: matches "X,XXX만원" or "X만원" or "X천만원"
+    # PostgreSQL regex: digit(s) with optional commas, followed by 만원/천만원
+    amount_pattern = r'[0-9][0-9,]*\s*만\s*원'
+
+    with conn.cursor() as cur:
+        query = f"""
+            SELECT
+                c.chunk_id,
+                c.document_id,
+                c.doc_type,
+                c.page_start,
+                LEFT(c.content, 1000) AS preview,
+                c.meta->'entities'->>'coverage_code' AS coverage_code
+            FROM chunk c
+            JOIN insurer i ON c.insurer_id = i.insurer_id
+            WHERE i.insurer_code = %s
+              AND c.doc_type = ANY(%s::text[])
+              AND ({keyword_conditions})
+              AND c.content ~ %s
+              AND {plan_condition}
+            ORDER BY
+                CASE c.doc_type
+                    WHEN '상품요약서' THEN 1
+                    WHEN '사업방법서' THEN 2
+                    WHEN '가입설계서' THEN 3
+                    ELSE 4
+                END,
+                c.page_start
+            LIMIT %s
+        """
+
+        params = (
+            insurer_code,
+            compare_doc_types,
+        ) + keyword_params + (amount_pattern,) + plan_params + (top_k,)
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        for row in rows:
+            results.append(
+                Evidence(
+                    document_id=row["document_id"],
+                    doc_type=row["doc_type"],
+                    page_start=row["page_start"],
+                    preview=row["preview"].replace("\n", " ").strip(),
+                    score=0.0,
+                )
+            )
+
+    return results
+
+
 def get_compare_axis(
     conn: psycopg.Connection,
     insurers: list[str],
@@ -496,7 +608,7 @@ def get_compare_axis(
                             c.document_id,
                             c.doc_type,
                             c.page_start,
-                            LEFT(c.content, 150) AS preview,
+                            LEFT(c.content, 1000) AS preview,
                             c.meta->'entities'->>'coverage_code' AS coverage_code,
                             c.meta->'entities'->>'coverage_name' AS coverage_name,
                             i.insurer_code,
@@ -527,7 +639,7 @@ def get_compare_axis(
                             c.document_id,
                             c.doc_type,
                             c.page_start,
-                            LEFT(c.content, 150) AS preview,
+                            LEFT(c.content, 1000) AS preview,
                             c.meta->'entities'->>'coverage_code' AS coverage_code,
                             c.meta->'entities'->>'coverage_name' AS coverage_name,
                             i.insurer_code,
@@ -1460,6 +1572,69 @@ def compare(
                                 existing_result.evidence.append(ev)
                                 existing_chunk_ids.add(ev.chunk_id)
 
+        # U-4.11: 2-pass amount retrieval for payout_amount slot
+        # Check each insurer's evidence for amounts, fetch additional if needed
+        start = time.time()
+        amount_pattern = re.compile(r'\d[\d,]*\s*만\s*원')
+        amount_retrieval_used = {}
+
+        for insurer_code in insurers:
+            # Find insurer's compare_axis entries
+            insurer_evidence = []
+            for result in compare_axis:
+                if result.insurer_code == insurer_code:
+                    insurer_evidence.extend(result.evidence)
+
+            # Check if any evidence has amount
+            has_amount = any(
+                amount_pattern.search(ev.preview) for ev in insurer_evidence
+            )
+
+            if not has_amount:
+                # 2nd pass: fetch amount-bearing chunks
+                plan_id = plan_ids.get(insurer_code) if plan_ids else None
+                amount_evidence = get_amount_bearing_evidence(
+                    conn,
+                    insurer_code,
+                    compare_doc_types,
+                    plan_id=plan_id,
+                    top_k=3,
+                )
+
+                if amount_evidence:
+                    amount_retrieval_used[insurer_code] = len(amount_evidence)
+
+                    # Add to compare_axis (create new entry if needed)
+                    existing_result = next(
+                        (r for r in compare_axis if r.insurer_code == insurer_code),
+                        None
+                    )
+                    if existing_result is None:
+                        # Create new CompareAxisResult for this insurer
+                        compare_axis.append(
+                            CompareAxisResult(
+                                insurer_code=insurer_code,
+                                coverage_code="__amount_fallback__",
+                                coverage_name=None,
+                                doc_type_counts={},
+                                evidence=amount_evidence,
+                            )
+                        )
+                    else:
+                        # Add evidence to existing result (avoid duplicates)
+                        existing_doc_ids = {ev.document_id for ev in existing_result.evidence}
+                        for ev in amount_evidence:
+                            if ev.document_id not in existing_doc_ids:
+                                existing_result.evidence.append(ev)
+                                existing_doc_ids.add(ev.document_id)
+                                # Update doc_type counts
+                                existing_result.doc_type_counts[ev.doc_type] = (
+                                    existing_result.doc_type_counts.get(ev.doc_type, 0) + 1
+                                )
+
+        debug["timing_ms"]["amount_retrieval_2pass"] = round((time.time() - start) * 1000, 2)
+        debug["amount_retrieval_used"] = amount_retrieval_used
+
         # Policy Axis (resolved_policy_keywords 사용)
         start = time.time()
         policy_axis, policy_counts = get_policy_axis(
@@ -1482,6 +1657,17 @@ def compare(
         diff_summary = build_diff_summary(coverage_compare_result)
         debug["timing_ms"]["diff_summary"] = round((time.time() - start) * 1000, 2)
 
+        # U-4.8: Comparison Slots 추출
+        start = time.time()
+        slots = extract_slots(
+            insurers=insurers,
+            compare_axis=compare_axis,
+            policy_axis=policy_axis,
+            coverage_codes=resolved_coverage_codes,
+        )
+        debug["timing_ms"]["slots"] = round((time.time() - start) * 1000, 2)
+        debug["slots_count"] = len(slots)
+
     finally:
         conn.close()
 
@@ -1490,5 +1676,6 @@ def compare(
         policy_axis=policy_axis,
         coverage_compare_result=coverage_compare_result,
         diff_summary=diff_summary,
+        slots=slots,
         debug=debug,
     )

@@ -61,6 +61,11 @@ def get_llm_max_retries() -> int:
     return int(os.environ.get("LLM_MAX_RETRIES", "2"))
 
 
+def is_cost_guard_enabled() -> bool:
+    """Cost guard 활성화 여부 (LLM 호출 비용 제한)"""
+    return os.environ.get("LLM_COST_GUARD", "0") == "1"
+
+
 @dataclass
 class LLMCallMetrics:
     """LLM 호출 메트릭"""

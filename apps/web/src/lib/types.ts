@@ -38,6 +38,46 @@ export type DiffBullet = components["schemas"]["DiffBulletResponse"];
 export type EvidenceRef = components["schemas"]["EvidenceRefResponse"];
 
 // =============================================================================
+// U-4.8: Comparison Slots Types
+// =============================================================================
+
+export interface SlotEvidenceRef {
+  document_id: number;
+  page_start: number | null;
+  chunk_id?: number | null;
+}
+
+export interface LLMTrace {
+  method: "rule" | "llm" | "hybrid";
+  llm_used: boolean;
+  llm_reason?: "flag_off" | "ambiguity_high" | "parse_fail" | "cost_guard" | "not_needed" | null;
+  model?: string | null;
+}
+
+export interface SlotInsurerValue {
+  insurer_code: string;
+  value: string | null;
+  confidence: "high" | "medium" | "low" | "not_found";
+  reason?: string | null;
+  evidence_refs: SlotEvidenceRef[];
+  trace?: LLMTrace | null;
+}
+
+export interface ComparisonSlot {
+  slot_key: string;
+  label: string;
+  comparable: boolean;
+  insurers: SlotInsurerValue[];
+  diff_summary?: string | null;
+}
+
+// Extend CompareResponse to include slots
+// (Until types.generated.ts is regenerated)
+export type CompareResponseWithSlots = CompareResponse & {
+  slots?: ComparisonSlot[];
+};
+
+// =============================================================================
 // UI-Only Types (not from API)
 // =============================================================================
 

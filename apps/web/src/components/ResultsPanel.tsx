@@ -12,11 +12,12 @@ import {
 import { CompareTable } from "./CompareTable";
 import { DiffSummary } from "./DiffSummary";
 import { EvidencePanel } from "./EvidencePanel";
-import { CompareResponse } from "@/lib/types";
+import { SlotsTable } from "./SlotsTable";
+import { CompareResponseWithSlots } from "@/lib/types";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 interface ResultsPanelProps {
-  response: CompareResponse | null;
+  response: CompareResponseWithSlots | null;
 }
 
 export function ResultsPanel({ response }: ResultsPanelProps) {
@@ -35,8 +36,17 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
 
   return (
     <div className="h-full flex flex-col">
-      <Tabs defaultValue="compare" className="flex-1 flex flex-col">
+      <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col">
         <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
+          {/* U-4.8: Slots tab (first if available) */}
+          {response.slots && response.slots.length > 0 && (
+            <TabsTrigger
+              value="slots"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            >
+              Slots
+            </TabsTrigger>
+          )}
           <TabsTrigger
             value="compare"
             className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
@@ -64,6 +74,13 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
         </TabsList>
 
         <ScrollArea className="flex-1">
+          {/* U-4.8: Slots content */}
+          {response.slots && response.slots.length > 0 && (
+            <TabsContent value="slots" className="m-0 p-4">
+              <SlotsTable slots={response.slots} />
+            </TabsContent>
+          )}
+
           <TabsContent value="compare" className="m-0 p-4">
             <CompareTable data={response.coverage_compare_result} />
           </TabsContent>
@@ -73,7 +90,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           </TabsContent>
 
           <TabsContent value="evidence" className="m-0 p-4">
-            <EvidencePanel data={response.compare_axis} isPolicyMode={false} />
+            <EvidencePanel data={response.compare_axis} isPolicyMode={false} slots={response.slots} />
           </TabsContent>
 
           <TabsContent value="policy" className="m-0 p-4">
