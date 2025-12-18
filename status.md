@@ -50,6 +50,7 @@
 | **Step U-4.9** | **Eval Framework 구축 (goldset + eval_runner)** | **검증** | ✅ 완료 |
 | **Step U-4.10** | **Demo vs Main 변경사항 분류 문서화** | **문서** | ✅ 완료 |
 | **Step U-4.11** | **Slot Generalization (coverage type 레지스트리)** | **기능** | ✅ 완료 |
+| **Step U-4.12** | **Coverage Type 확장 + YAML 외부화** | **기능** | ✅ 완료 |
 
 ---
 
@@ -1356,6 +1357,103 @@ Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
 
 ---
 
+### 40. Step U-4.12: Coverage Type 확장 + YAML 외부화 [기능]
+
+**목표:**
+- 암진단비 외 다른 담보군(뇌/심혈관, 수술비)에 대한 슬롯 정의 추가
+- 슬롯 정의를 코드에서 분리하여 YAML 기반으로 관리
+
+**구현 내용:**
+
+**1. 새로운 Coverage Type 추가:**
+```python
+# 뇌/심혈관 진단비
+CEREBRO_CARDIOVASCULAR_SLOTS = [
+    {"slot_key": "diagnosis_lump_sum_amount", ...},
+    {"slot_key": "existence_status", ...},
+    {"slot_key": "waiting_period", ...},
+]
+
+# 수술비
+SURGERY_BENEFIT_SLOTS = [
+    {"slot_key": "surgery_amount", ...},     # stub
+    {"slot_key": "surgery_count_limit", ...}, # stub
+    {"slot_key": "existence_status", ...},
+]
+```
+
+**2. COVERAGE_CODE_TO_TYPE 확장:**
+```python
+COVERAGE_CODE_TO_TYPE = {
+    # 암진단비
+    "A4200_1": "cancer_diagnosis",
+    ...
+    # 뇌/심혈관 진단비
+    "A5200": "cerebro_cardiovascular_diagnosis",
+    "A5210": "cerebro_cardiovascular_diagnosis",
+    ...
+    # 수술비
+    "A6100": "surgery_benefit",
+    "A6110": "surgery_benefit",
+    ...
+}
+```
+
+**3. YAML 외부화 (`config/slot_definitions.yaml`):**
+```yaml
+version: "0.2"
+coverage_types:
+  cancer_diagnosis:
+    display_name: "암진단비"
+    coverage_codes: [A4200_1, A4210, ...]
+    slots:
+      - slot_key: diagnosis_lump_sum_amount
+        ...
+  cerebro_cardiovascular_diagnosis:
+    display_name: "뇌/심혈관 진단비"
+    ...
+  surgery_benefit:
+    display_name: "수술비"
+    ...
+```
+
+**4. YAML 로딩 함수:**
+```python
+def load_slot_definitions_from_yaml(yaml_path: str | None = None) -> dict | None:
+    """YAML에서 슬롯 정의 로드 (외부화)"""
+
+def get_slots_for_coverage_type(coverage_type: str, yaml_path: str | None = None) -> list[dict]:
+    """Coverage type에 해당하는 슬롯 정의 반환"""
+```
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `config/slot_definitions.yaml` | 슬롯 정의 외부 설정 파일 |
+
+**수정된 파일:**
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/extraction/slot_extractor.py` | CEREBRO_CARDIOVASCULAR_SLOTS, SURGERY_BENEFIT_SLOTS, YAML 로딩 함수 |
+
+**테스트 결과:**
+```
+47 passed (pytest tests/test_extraction.py)
+Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
+```
+
+**효과:**
+- 3개 coverage type 지원 (cancer_diagnosis, cerebro_cardiovascular_diagnosis, surgery_benefit)
+- 슬롯 정의 외부화로 코드 변경 없이 설정 조정 가능
+- stub 추출기로 향후 구현 대비
+
+**다음 단계에서 바로 구현 가능한 항목:**
+1. `cerebro_cardiovascular_diagnosis` 슬롯 추출기 구현 (diagnosis_lump_sum 재사용 가능)
+2. `surgery_benefit` 전용 추출기 (surgery_amount) 구현
+3. Goldset 확장 (뇌졸중, 수술비 테스트 케이스)
+
+---
+
 ## 📁 생성된 파일 목록
 
 ### 구현 파일
@@ -1422,6 +1520,7 @@ Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
 | `eval/eval_runner.py` | Eval 실행기 (Step U-4.9) |
 | `tools/run_demo_eval.sh` | 데모 신뢰성 기준선 스크립트 (Step U-4.9) |
 | `docs/demo_vs_main_diff.md` | Demo vs Main 변경사항 분류 (Step U-4.10) |
+| `config/slot_definitions.yaml` | 슬롯 정의 외부 설정 파일 (Step U-4.12) |
 
 ### UI 파일 (apps/web)
 | 파일 | 설명 |
@@ -1477,15 +1576,17 @@ Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
 ### 다음 작업 후보
 
 **우선순위 높음:**
-1. **Main 브랜치 병합** - `a888f72` 체리픽 (docs/demo_vs_main_diff.md 참조)
-2. **Goldset 확장** - 현재 4건 → 더 많은 케이스 추가
+1. ~~**Main 브랜치 병합**~~ ✅ U-4.11에서 완료
+2. **Goldset 확장** - 현재 4건 → 뇌졸중, 수술비 케이스 추가
+3. **뇌/심혈관 진단비 추출기 구현** - diagnosis_lump_sum 재사용
 
 **우선순위 중간:**
-3. **추가 보험사 데이터 적재** - 현재 SAMSUNG, MERITZ만 chunk 있음
-4. **LLM 슬롯 추출 활성화** - 현재 rule-based만 사용 중
-5. **UI 개선** - SlotsTable 디자인, diff 시각화
+4. **수술비 전용 추출기 구현** - surgery_amount, count_limit
+5. **추가 보험사 데이터 적재** - 현재 SAMSUNG, MERITZ만 chunk 있음
+6. **LLM 슬롯 추출 활성화** - 현재 rule-based만 사용 중
+7. **UI 개선** - SlotsTable 디자인, diff 시각화
 
 **우선순위 낮음:**
-6. **coverage_code 자동 추천 개선** - similarity threshold 조정
-7. **Evidence doc_type 매칭** - 현재 0% (API 응답 구조 제한)
-8. 사용자 피드백 기반 개선
+8. **coverage_code 자동 추천 개선** - similarity threshold 조정
+9. **Evidence doc_type 매칭** - 현재 0% (API 응답 구조 제한)
+10. 사용자 피드백 기반 개선
