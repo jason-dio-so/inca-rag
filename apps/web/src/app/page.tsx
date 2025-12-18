@@ -1,17 +1,68 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsPanel } from "@/components/ResultsPanel";
+import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
 import { ChatMessage, CompareRequest, CompareResponse } from "@/lib/types";
 
+// Deep-link 상태 타입
+interface DeepLinkState {
+  documentId: string;
+  page: number;
+  highlightQuery?: string;
+}
+
+// Deep-link 처리 컴포넌트 (Suspense 경계 내에서 사용)
+function DeepLinkHandler({
+  onOpen,
+}: {
+  onOpen: (state: DeepLinkState) => void;
+}) {
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const doc = searchParams.get("doc");
+    const page = searchParams.get("page");
+    const hl = searchParams.get("hl");
+
+    if (doc && page) {
+      onOpen({
+        documentId: doc,
+        page: parseInt(page, 10) || 1,
+        highlightQuery: hl || undefined,
+      });
+    }
+  }, [searchParams, onOpen]);
+
+  return null;
+}
+
 export default function Home() {
+  const router = useRouter();
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentResponse, setCurrentResponse] = useState<CompareResponse | null>(
     null
   );
   const [isLoading, setIsLoading] = useState(false);
+
+  // Deep-link: URL에서 viewer 상태 읽기
+  const [deepLinkViewer, setDeepLinkViewer] = useState<DeepLinkState | null>(null);
+
+  // Deep-link 열기 핸들러
+  const handleDeepLinkOpen = useCallback((state: DeepLinkState) => {
+    setDeepLinkViewer(state);
+  }, []);
+
+  // Deep-link viewer 닫기
+  const handleCloseDeepLinkViewer = useCallback(() => {
+    setDeepLinkViewer(null);
+    // URL에서 파라미터 제거
+    router.push("/", { scroll: false });
+  }, [router]);
 
   const handleSendMessage = useCallback(async (request: CompareRequest) => {
     // Add user message
@@ -86,6 +137,21 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-background">
+      {/* Deep-link URL 파라미터 처리 (Step U-2.5) */}
+      <Suspense fallback={null}>
+        <DeepLinkHandler onOpen={handleDeepLinkOpen} />
+      </Suspense>
+
+      {/* Deep-link PDF Viewer (Step U-2.5) */}
+      {deepLinkViewer && (
+        <PdfPageViewer
+          documentId={deepLinkViewer.documentId}
+          initialPage={deepLinkViewer.page}
+          highlightQuery={deepLinkViewer.highlightQuery}
+          onClose={handleCloseDeepLinkViewer}
+        />
+      )}
+
       {/* Left: Chat Panel */}
       <div className="w-1/2 flex flex-col border-r">
         <header className="p-4 border-b">

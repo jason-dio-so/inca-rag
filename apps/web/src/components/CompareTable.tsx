@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CoverageCompareItem, Evidence } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
 import { Copy, Eye, Check } from "lucide-react";
+import { PdfPageViewer } from "./PdfPageViewer";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -19,6 +19,10 @@ const INSURER_NAMES: Record<string, string> = {
   HEUNGKUK: "흥국",
 };
 
+// NOTE:
+// This filter is defensive.
+// A2 policy is enforced by the server.
+// UI filtering is only for display safety.
 // A2 Policy: 약관 제외 (Compare에서는 약관이 보이면 안 됨)
 function filterNonPolicy(evidence: Evidence[]): Evidence[] {
   return evidence.filter((e) => e.doc_type !== "약관");
@@ -64,57 +68,21 @@ export function CompareTable({ data }: CompareTableProps) {
 
   return (
     <div className="space-y-4">
-      {/* Evidence View Modal */}
+      {/* A2 Policy Notice */}
+      <div className="text-sm text-muted-foreground space-y-1">
+        <p>※ 비교 결과는 가입설계서·상품요약서·사업방법서를 기준으로 산출됩니다.</p>
+        <p>※ 약관은 비교 계산에 사용되지 않습니다.</p>
+      </div>
+
+      {/* PDF Page Viewer Modal (Step U-2.5: highlightQuery 추가) */}
       {viewingEvidence && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="max-w-lg w-full mx-4">
-            <CardHeader>
-              <CardTitle className="flex justify-between items-center">
-                <span>Evidence 상세</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setViewingEvidence(null)}
-                >
-                  &times;
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <span className="font-medium">Document ID:</span>{" "}
-                {viewingEvidence.document_id}
-              </div>
-              <div>
-                <span className="font-medium">Page:</span>{" "}
-                {viewingEvidence.page_start}
-                {viewingEvidence.page_end &&
-                  viewingEvidence.page_end !== viewingEvidence.page_start &&
-                  ` - ${viewingEvidence.page_end}`}
-              </div>
-              <div>
-                <span className="font-medium">Doc Type:</span>{" "}
-                <Badge variant="outline">{viewingEvidence.doc_type}</Badge>
-              </div>
-              {viewingEvidence.source_path && (
-                <div>
-                  <span className="font-medium">Source:</span>{" "}
-                  <span className="text-sm text-muted-foreground break-all">
-                    {viewingEvidence.source_path}
-                  </span>
-                </div>
-              )}
-              {viewingEvidence.snippet && (
-                <div>
-                  <span className="font-medium">Snippet:</span>
-                  <p className="text-sm mt-1 p-2 bg-muted rounded">
-                    {viewingEvidence.snippet}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <PdfPageViewer
+          documentId={viewingEvidence.document_id}
+          initialPage={viewingEvidence.page_start}
+          docType={viewingEvidence.doc_type}
+          highlightQuery={viewingEvidence.snippet?.slice(0, 120)}
+          onClose={() => setViewingEvidence(null)}
+        />
       )}
 
       {/* Compare Table */}

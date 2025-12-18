@@ -47,9 +47,22 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000
 - **Evidence**: 비교 근거 (compare_axis, 약관 제외)
 - **Policy(약관)**: 약관 근거 (policy_axis, 약관만)
 
-### A2 정책
-- Compare/Evidence 탭: 약관(doc_type='약관') 절대 미표시
-- Policy 탭: 약관만 표시
+## A2 Policy (Terms Handling)
+
+- Insurance policy documents (약관) are NOT used for coverage comparison.
+- Comparison results are derived from:
+  - 가입설계서
+  - 상품요약서
+  - 사업방법서
+- Policy documents are shown only in the Policy tab
+  for definition and clause reference.
+
+**This policy is enforced on the server side.**
+The UI reflects this policy for clarity and safety.
+
+### UI에서의 표시
+- **Compare/Evidence 탭**: 약관(doc_type='약관') 절대 미표시
+- **Policy 탭**: 약관만 표시 (정책/정의 근거 확인용)
 
 ## 테스트용 입력값
 

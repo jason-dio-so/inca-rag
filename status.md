@@ -37,6 +37,10 @@
 | **Step J-2** | **manifest.csv 기반 plan 태깅 + backfill** | **기능** | ✅ 완료 |
 | **Step J-3** | **DB 미태깅 원인 분류 + LOTTE 플랜 E2E 검증** | **검증** | ✅ 완료 |
 | **Step K** | **Vector Retrieval 품질 고정 + 파라미터 튜닝 + Hybrid 옵션** | **검증/기능** | ✅ 완료 |
+| **Step U-ChatUI** | **Next.js 채팅 UI (Compare 비교표)** | **UI** | ✅ 완료 |
+| **Step U-1** | **A2 정책 신뢰 (약관 제외 안내 UI)** | **UI** | ✅ 완료 |
+| **Step U-2** | **Evidence PDF Page Viewer (원문 보기)** | **UI/API** | ✅ 완료 |
+| **Step U-2.5** | **Evidence 하이라이트 + Deep-link** | **UI/API** | ✅ 완료 |
 
 ---
 
@@ -766,6 +770,198 @@ COMPARE_AXIS_VECTOR_TOP_K=20
 
 ---
 
+### 30. Step U-ChatUI: Next.js 채팅 UI (Compare 비교표) [UI]
+
+**목표:**
+- ChatGPT 스타일의 채팅 UI로 보험 비교 결과 표시
+- /compare API 연동
+- 탭 기반 결과 표시 (Compare, Evidence, Policy, Debug)
+
+**기술 스택:**
+- Next.js 16 + TypeScript
+- Tailwind CSS + shadcn/ui
+- Lucide Icons
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `apps/web/src/app/page.tsx` | 메인 채팅 페이지 |
+| `apps/web/src/components/ChatInput.tsx` | 채팅 입력 컴포넌트 |
+| `apps/web/src/components/CompareTable.tsx` | 비교표 컴포넌트 |
+| `apps/web/src/components/EvidencePanel.tsx` | 근거 자료 패널 |
+| `apps/web/src/lib/api.ts` | API 유틸리티 |
+| `apps/web/src/lib/types.ts` | TypeScript 타입 정의 |
+
+**효과:**
+- ChatGPT 스타일 UI로 보험 비교 결과 직관적 표시
+- 탭으로 Compare/Evidence/Policy/Debug 구분
+- 모바일 반응형 지원
+
+---
+
+### 31. Step U-1: A2 정책 신뢰 (약관 제외 안내 UI) [UI]
+
+**목표:**
+- A2 정책(약관 제외)을 UI에서 명시적으로 안내
+- 사용자가 비교 결과의 근거 범위를 이해할 수 있도록 표시
+
+**구현 내용:**
+1. Compare 탭에 안내 문구 추가:
+   - "※ 비교 결과는 가입설계서·상품요약서·사업방법서를 기준으로 산출됩니다."
+   - "※ 약관은 비교 계산에 사용되지 않습니다."
+
+2. Policy 탭에 약관 설명 추가:
+   - 약관은 정책/정의 근거 확인용으로만 제공됨을 안내
+
+3. UI defensive filter 추가:
+   - `filterNonPolicy()` 함수로 약관 제외 (서버 A2 정책의 이중 안전장치)
+
+**수정된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `apps/web/src/components/CompareTable.tsx` | A2 안내 문구 + defensive filter |
+| `apps/web/src/components/EvidencePanel.tsx` | Policy 탭 안내 + defensive filter |
+
+**효과:**
+- 사용자가 비교 결과의 근거 범위를 명확히 인지
+- 서버 A2 정책 + UI defensive filter로 이중 안전
+
+---
+
+### 32. Step U-2: Evidence PDF Page Viewer (원문 보기) [UI/API]
+
+**목표:**
+- Evidence에서 View 버튼 클릭 시 PDF 원문 페이지 이미지 표시
+- Backend: PyMuPDF 기반 PDF 렌더링 API
+- Frontend: 전체화면 PDF 뷰어 (페이지 이동, 줌)
+
+**Backend 구현:**
+
+1. `GET /documents/{document_id}/page/{page}` 엔드포인트:
+   - PyMuPDF (fitz)로 PDF → PNG 렌더링
+   - scale 파라미터 (1.0~4.0, 기본 2.0)
+   - lru_cache + disk cache (`artifacts/page_cache/`)
+   - 보안: DB source_path만 사용, path traversal 방지
+
+2. `GET /documents/{document_id}/info` 엔드포인트:
+   - 문서 정보 (page_count, source_path) 반환
+
+**Frontend 구현:**
+
+`PdfPageViewer.tsx` 컴포넌트:
+- 전체화면 모달
+- 페이지 이동 (← → 키보드, 버튼)
+- 스케일 토글 (1x/2x/3x)
+- ESC로 닫기
+- 로딩/에러 상태 처리
+- Copy ref 버튼
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `api/document_viewer.py` | PDF 페이지 렌더링 API |
+| `tests/test_document_viewer.py` | API 테스트 (7개) |
+| `apps/web/src/components/PdfPageViewer.tsx` | PDF 뷰어 컴포넌트 |
+
+**수정된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `api/main.py` | document_viewer 라우터 등록 |
+| `apps/web/src/components/EvidencePanel.tsx` | View 버튼 연결 |
+| `apps/web/src/components/CompareTable.tsx` | View 버튼 연결 |
+
+**API 응답:**
+```
+GET /documents/1/page/1?scale=2
+→ 200 OK, Content-Type: image/png
+```
+
+**효과:**
+- Evidence에서 원문 PDF 페이지를 바로 확인 가능
+- 키보드 네비게이션으로 빠른 페이지 이동
+- 캐싱으로 반복 요청 최적화
+
+---
+
+### 33. Step U-2.5: Evidence 하이라이트 + Deep-link [UI/API]
+
+**목표:**
+- View 버튼으로 PDF 열 때 근거 텍스트가 페이지 내 어디인지 시각적으로 표시
+- Deep-link URL로 특정 페이지+하이라이트 상태 공유 가능
+
+**Backend 구현:**
+
+`GET /documents/{document_id}/page/{page}/spans` 엔드포인트:
+- Query param: `q` (하이라이트할 텍스트, 최대 200자), `max_hits` (기본 5)
+- PyMuPDF `search_for()` + fuzzy matching (SequenceMatcher)
+- bbox 좌표 반환 (PDF 좌표계 기준)
+
+**응답 예시:**
+```json
+{
+  "document_id": 1,
+  "page": 5,
+  "hits": [
+    {"bbox": [72.0, 100.0, 300.0, 120.0], "score": 1.0, "text": "매칭된 텍스트..."}
+  ]
+}
+```
+
+**Frontend 구현:**
+
+1. `PdfPageViewer` props 확장:
+   - `highlightQuery?: string` 추가
+   - `/spans?q=` API 호출하여 bbox 조회
+   - 노란색 투명 박스로 하이라이트 표시
+   - scale(1x/2x/3x) 변경 시 bbox도 비례 확대
+
+2. Evidence/Compare에서 highlightQuery 전달:
+   - `evidence.snippet?.slice(0, 120)` 전달
+
+3. Deep-link URL 지원:
+   - `?doc=123&page=5&hl=<encoded>` 형태
+   - 새로고침해도 동일 상태 복원
+   - ESC 또는 닫기 버튼으로 URL 파라미터 제거
+
+**생성/수정된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `api/document_viewer.py` | `/spans` 엔드포인트 추가 |
+| `tests/test_document_viewer.py` | spans API 테스트 8개 추가 |
+| `apps/web/src/components/PdfPageViewer.tsx` | highlight overlay 추가 |
+| `apps/web/src/components/EvidencePanel.tsx` | highlightQuery 전달 |
+| `apps/web/src/components/CompareTable.tsx` | highlightQuery 전달 |
+| `apps/web/src/app/page.tsx` | deep-link URL 처리 |
+
+**curl 예시:**
+```bash
+curl "http://localhost:8000/documents/1/page/1/spans?q=보험금&max_hits=3"
+```
+
+**UI 흐름:**
+1. Evidence 카드에서 View 버튼 클릭
+2. PdfPageViewer 열림 → 0.1초 후 `/spans?q=` 호출
+3. 매칭된 영역에 노란색 투명 박스 표시 (best-effort)
+
+**테스트 케이스 (8개):**
+| 테스트 | 설명 |
+|--------|------|
+| `test_spans_success` | 정상 응답 구조 |
+| `test_spans_with_hits` | bbox 포함 확인 |
+| `test_spans_no_match` | 매칭 없으면 hits=[] |
+| `test_spans_document_not_found` | 404 |
+| `test_spans_page_out_of_range` | 404 |
+| `test_spans_query_required` | q 필수 (422) |
+| `test_spans_max_hits` | max_hits 동작 |
+| `test_spans_long_query_truncated` | 긴 쿼리 처리 |
+
+**효과:**
+- 근거 텍스트 위치를 시각적으로 확인 가능
+- Deep-link로 특정 근거 페이지 공유 가능
+- 하이라이트는 best-effort (매칭 실패 시 조용히 fallback)
+
+---
+
 ## 📁 생성된 파일 목록
 
 ### 구현 파일
@@ -820,6 +1016,19 @@ COMPARE_AXIS_VECTOR_TOP_K=20
 | `tests/fixtures/retrieval_cases.yaml` | 고정 질의 세트 18개 (Step K) |
 | `tests/test_vector_retrieval_quality.py` | Retrieval 품질 회귀 테스트 (Step K) |
 | `tools/benchmark_compare_axis.py` | 벤치마크 스크립트 (Step K) |
+| `api/document_viewer.py` | PDF 페이지 렌더링 API (Step U-2) |
+| `tests/test_document_viewer.py` | Document Viewer API 테스트 (Step U-2) |
+
+### UI 파일 (apps/web)
+| 파일 | 설명 |
+|------|------|
+| `src/app/page.tsx` | 메인 채팅 페이지 (Step U-ChatUI) |
+| `src/components/ChatInput.tsx` | 채팅 입력 컴포넌트 (Step U-ChatUI) |
+| `src/components/CompareTable.tsx` | 비교표 컴포넌트 (Step U-ChatUI, U-1, U-2) |
+| `src/components/EvidencePanel.tsx` | 근거 자료 패널 (Step U-ChatUI, U-1, U-2) |
+| `src/components/PdfPageViewer.tsx` | PDF 뷰어 컴포넌트 (Step U-2) |
+| `src/lib/api.ts` | API 유틸리티 (Step U-ChatUI) |
+| `src/lib/types.ts` | TypeScript 타입 정의 (Step U-ChatUI) |
 
 ---
 
@@ -855,4 +1064,5 @@ COMPARE_AXIS_VECTOR_TOP_K=20
 3. ~~plan_selector 연동 (성별/나이 기반 plan 자동 선택)~~ ✅ Step I, J-3 완료
 4. ~~HANWHA 가입설계서 alias 보강~~ ✅ Step D-1에서 불필요 확인
 5. ~~Vector search 연동 (pgvector similarity search)~~ ✅ Step K Hybrid 옵션으로 완료
-6. 프론트엔드 연동
+6. ~~프론트엔드 연동~~ ✅ Step U-ChatUI, U-1, U-2 완료
+7. 사용자 피드백 기반 개선

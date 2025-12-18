@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/accordion";
 import { CompareAxisItem, PolicyAxisItem, Evidence } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Eye } from "lucide-react";
+import { PdfPageViewer } from "./PdfPageViewer";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -39,6 +40,7 @@ interface EvidencePanelProps {
 
 export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps) {
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
+  const [viewingEvidence, setViewingEvidence] = useState<Evidence | null>(null);
 
   if (!data || data.length === 0) {
     return (
@@ -55,6 +57,10 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
     const insurer = item.insurer_code;
     let evidence = item.evidence || [];
 
+    // NOTE:
+    // This filter is defensive.
+    // A2 policy is enforced by the server.
+    // UI filtering is only for display safety.
     // A2 Policy filtering
     if (isPolicyMode) {
       // Policy tab: only show 약관
@@ -89,12 +95,32 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
     }
   };
 
+  const handleView = (evidence: Evidence) => {
+    setViewingEvidence(evidence);
+  };
+
   return (
     <div className="space-y-2">
+      {/* PDF Page Viewer Modal (Step U-2.5: highlightQuery 추가) */}
+      {viewingEvidence && (
+        <PdfPageViewer
+          documentId={viewingEvidence.document_id}
+          initialPage={viewingEvidence.page_start}
+          docType={viewingEvidence.doc_type}
+          highlightQuery={viewingEvidence.snippet?.slice(0, 120)}
+          onClose={() => setViewingEvidence(null)}
+        />
+      )}
+
       {isPolicyMode && (
-        <div className="text-sm text-muted-foreground mb-4 p-2 bg-muted rounded">
-          이 탭에는 <Badge className="bg-orange-100 text-orange-800">약관</Badge>{" "}
-          근거만 표시됩니다
+        <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+          <div className="flex items-start gap-2">
+            <Badge className="bg-orange-100 text-orange-800 shrink-0">약관</Badge>
+            <div className="text-sm text-orange-800 space-y-1">
+              <p>※ 약관은 비교 계산에 사용되지 않으며,</p>
+              <p className="ml-3">정책/정의 근거 확인용으로만 제공됩니다.</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -119,8 +145,8 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
                       key={`${ev.document_id}-${ev.page_start}-${idx}`}
                       evidence={ev}
                       onCopy={handleCopy}
+                      onView={handleView}
                       copiedRef={copiedRef}
-                      isPolicyMode={isPolicyMode}
                     />
                   ))}
                 </div>
@@ -136,15 +162,15 @@ export function EvidencePanel({ data, isPolicyMode = false }: EvidencePanelProps
 interface EvidenceCardProps {
   evidence: Evidence;
   onCopy: (evidence: Evidence) => void;
+  onView: (evidence: Evidence) => void;
   copiedRef: string | null;
-  isPolicyMode: boolean;
 }
 
 function EvidenceCard({
   evidence,
   onCopy,
+  onView,
   copiedRef,
-  isPolicyMode,
 }: EvidenceCardProps) {
   const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
   const isCopied = copiedRef === ref;
@@ -179,7 +205,7 @@ function EvidenceCard({
             {/* Page Range */}
             <div className="text-sm text-muted-foreground">
               <span className="font-mono">
-                {evidence.document_id.slice(0, 12)}...
+                {String(evidence.document_id).slice(0, 12)}
               </span>
               <span className="mx-1">|</span>
               <span>
@@ -198,20 +224,32 @@ function EvidenceCard({
             )}
           </div>
 
-          {/* Copy Button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={() => onCopy(evidence)}
-            title="Copy ref"
-          >
-            {isCopied ? (
-              <Check className="h-4 w-4 text-green-500" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </Button>
+          {/* Action Buttons */}
+          <div className="flex gap-1 shrink-0">
+            {/* View Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onView(evidence)}
+              title="View page"
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+
+            {/* Copy Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onCopy(evidence)}
+              title="Copy ref"
+            >
+              {isCopied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -100,10 +100,25 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ScrollArea className="h-[200px]">
-              <pre className="p-4 text-xs bg-muted">
-                {JSON.stringify(response.debug, null, 2)}
-              </pre>
+            <ScrollArea className="h-[250px]">
+              <div className="p-4 space-y-4">
+                {/* A2 Policy Status */}
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-blue-800 mb-2">A2 Policy:</h4>
+                  <ul className="text-xs text-blue-700 space-y-1">
+                    <li>• Compare Axis: 약관 제외 (server enforced)</li>
+                    <li>• Policy Axis: 약관 전용 (server enforced)</li>
+                  </ul>
+                </div>
+
+                {/* Debug JSON */}
+                <div>
+                  <h4 className="text-xs font-medium text-muted-foreground mb-2">Raw Debug:</h4>
+                  <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
+                    {JSON.stringify(response.debug, null, 2)}
+                  </pre>
+                </div>
+              </div>
             </ScrollArea>
           </CollapsibleContent>
         </Collapsible>
