@@ -1,0 +1,11 @@
+case_id,query,insurers,coverage_codes,expected_slot_count_min,expected_slots,acceptance_criteria
+u48_01,삼성과 메리츠의 암진단비 비교해줘,"SAMSUNG,MERITZ","A4200_1,A4210",3,"payout_amount,existence_status,payout_condition_summary",AC1: 최소 3개 슬롯 표시
+u48_02,암진단비 지급금액 비교,"SAMSUNG,MERITZ","A4200_1",3,"payout_amount,existence_status,payout_condition_summary",AC1: 최소 3개 슬롯 표시
+u48_03,암진단비 보험 비교,"SAMSUNG,MERITZ","A4200_1,A4210",3,"payout_amount,existence_status,payout_condition_summary",AC1: 최소 3개 슬롯 표시
+u48_04,유사암 진단비 비교,"SAMSUNG,MERITZ","A4210",3,"payout_amount,existence_status,payout_condition_summary",AC1: 최소 3개 슬롯 표시
+u48_05,재진단암 진단비 비교,"SAMSUNG,MERITZ","A4209",3,"payout_amount,existence_status,payout_condition_summary",AC1: 최소 3개 슬롯 표시
+u48_06,삼성 메리츠 암 보험 얼마,"SAMSUNG,MERITZ","A4200_1,A4210",3,"payout_amount,existence_status,payout_condition_summary",AC2: slot별 value/reason 표시
+u48_07,암진단비 조건 비교,"SAMSUNG,MERITZ","A4200_1",3,"payout_amount,existence_status,payout_condition_summary",AC3: evidence 최대 3개 기본 노출
+u48_08,삼성 암진단비,SAMSUNG,"A4200_1",3,"payout_amount,existence_status,payout_condition_summary",단일 보험사 케이스
+u48_09,메리츠 암진단비,MERITZ,"A4200_1",3,"payout_amount,existence_status,payout_condition_summary",단일 보험사 케이스
+u48_10,경계성종양 암진단비 비교,"SAMSUNG,MERITZ","A4200_1,A4210",3,"payout_amount,existence_status,payout_condition_summary",AC4: 기존 스모크 PASS 유지

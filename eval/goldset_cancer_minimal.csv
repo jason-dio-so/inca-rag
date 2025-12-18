@@ -1,0 +1,5 @@
+query,insurer,coverage_code,slot_key,expected_value,expected_doc_type
+암진단비(유사암제외),SAMSUNG,A4200_1,payout_amount,3000만원,가입설계서
+암진단비(유사암제외),MERITZ,A4200_1,payout_amount,3000만원,상품요약서
+암진단비(유사암제외),SAMSUNG,A4200_1,existence_status,있음,
+암진단비(유사암제외),MERITZ,A4200_1,existence_status,있음,
