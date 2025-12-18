@@ -179,6 +179,8 @@ class CompareResponseModel(BaseModel):
     diff_summary: list[DiffSummaryItemResponse]
     # U-4.8: Comparison Slots
     slots: list[ComparisonSlotResponse] = []
+    # resolved_coverage_codes: 질의에서 자동 추론된 coverage_code 목록
+    resolved_coverage_codes: list[str] | None = None
     debug: dict[str, Any]
 
 
@@ -307,6 +309,8 @@ def _convert_response(result: CompareResponse) -> CompareResponseModel:
         ],
         # U-4.8: Comparison Slots
         slots=_convert_slots(getattr(result, 'slots', [])),
+        # resolved_coverage_codes: top-level 승격
+        resolved_coverage_codes=result.resolved_coverage_codes,
         debug=result.debug,
     )
 
