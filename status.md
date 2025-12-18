@@ -49,6 +49,7 @@
 | **Step U-4.8** | **Comparison Slots v0.1 (암진단비 슬롯 기반 비교)** | **기능/UI** | ✅ 완료 |
 | **Step U-4.9** | **Eval Framework 구축 (goldset + eval_runner)** | **검증** | ✅ 완료 |
 | **Step U-4.10** | **Demo vs Main 변경사항 분류 문서화** | **문서** | ✅ 완료 |
+| **Step U-4.11** | **Slot Generalization (coverage type 레지스트리)** | **기능** | ✅ 완료 |
 
 ---
 
@@ -1274,6 +1275,84 @@ git cherry-pick a888f72
 - 데모/본선 변경사항 명확히 분리
 - 본선 반영 시 리스크/장점 분석 제공
 - 체리픽 후 검증 체크리스트로 안전한 병합
+
+---
+
+### 39. Step U-4.11: Slot Generalization (coverage type 레지스트리) [기능]
+
+**목표:**
+- payout_amount 슬롯의 암 전용 하드코딩 제거
+- 2-pass retrieval 로직을 범용화하여 다양한 슬롯 타입 지원
+- resolved_coverage_codes를 API top-level로 승격
+
+**구현 내용:**
+
+**1. Coverage Type 레지스트리 (`slot_extractor.py`):**
+```python
+COVERAGE_CODE_TO_TYPE = {
+    "A4200_1": "cancer_diagnosis",
+    "A4210": "cancer_diagnosis",
+    "A4209": "cancer_diagnosis",
+    # ... 추가 담보 타입 확장 가능
+}
+
+SLOT_DEFINITIONS_BY_COVERAGE_TYPE = {
+    "cancer_diagnosis": CANCER_DIAGNOSIS_SLOTS,
+    # ... 추가 타입 정의 가능
+}
+```
+
+**2. 2-pass Retrieval 범용화 (`compare_service.py`):**
+```python
+RETRIEVAL_CONFIG = {
+    "preview_len": int(os.environ.get("RETRIEVAL_PREVIEW_LEN", "1000")),
+    "top_k_pass1": int(os.environ.get("RETRIEVAL_TOP_K_PASS1", "10")),
+    "top_k_pass2": int(os.environ.get("RETRIEVAL_TOP_K_PASS2", "5")),
+}
+
+SLOT_SEARCH_KEYWORDS = {
+    "diagnosis_lump_sum": [...],
+    "cancer_diagnosis": [...],
+    "surgery_benefit": [...],
+    "hospitalization_daily": [...],
+}
+```
+
+**3. resolved_coverage_codes API 승격:**
+- 기존: `debug.resolved_coverage_codes`에만 존재
+- 변경: `CompareResponse.resolved_coverage_codes` top-level 필드로 승격
+- 하위 호환성: eval_runner가 top-level 우선, debug fallback
+
+**수정된 파일:**
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/extraction/slot_extractor.py` | COVERAGE_CODE_TO_TYPE 매핑, extract_diagnosis_lump_sum_slot 함수 |
+| `services/retrieval/compare_service.py` | RETRIEVAL_CONFIG, SLOT_SEARCH_KEYWORDS, resolved_coverage_codes 반환 |
+| `api/compare.py` | CompareResponseModel.resolved_coverage_codes 필드 추가 |
+| `eval/eval_runner.py` | top-level resolved_coverage_codes 읽기 (debug fallback) |
+
+**API 응답 변경:**
+```json
+{
+  "resolved_coverage_codes": ["A4200_1", "A5200", "A4210"],
+  "slots": [...],
+  "debug": {
+    "resolved_coverage_codes": ["A4200_1", "A5200", "A4210"]
+  }
+}
+```
+
+**테스트 결과:**
+```
+47 passed (pytest tests/test_extraction.py)
+Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
+```
+
+**효과:**
+- 슬롯 추출 로직이 coverage type별로 분리되어 확장성 향상
+- 환경변수로 retrieval 파라미터 조정 가능
+- API 응답에서 resolved_coverage_codes 직접 접근 가능
+- 하위 호환성 유지 (eval_runner debug fallback)
 
 ---
 
