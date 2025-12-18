@@ -1,0 +1,45 @@
+{
+  "phase": "after",
+  "results": {
+    "case1": {
+      "case_id": "case1",
+      "name": "SAMSUNG vs MERITZ / 경계성 종양 암진단비",
+      "iterations": 5,
+      "total": {
+        "avg": 305.8042526245117,
+        "max": 317.554235458374,
+        "min": 291.47791862487793
+      },
+      "policy_axis": {
+        "avg": 290.608,
+        "max": 300.97,
+        "min": 278.59
+      },
+      "compare_axis": {
+        "avg": 4.882,
+        "max": 6.67,
+        "min": 3.93
+      }
+    },
+    "case4": {
+      "case_id": "case4",
+      "name": "8개사 전체 / 암진단비 (쏠림 방지)",
+      "iterations": 5,
+      "total": {
+        "avg": 1132.793664932251,
+        "max": 1160.762071609497,
+        "min": 1122.4970817565918
+      },
+      "policy_axis": {
+        "avg": 1112.07,
+        "max": 1138.9,
+        "min": 1100.31
+      },
+      "compare_axis": {
+        "avg": 9.884,
+        "max": 10.73,
+        "min": 8.9
+      }
+    }
+  }
+}

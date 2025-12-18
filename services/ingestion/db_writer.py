@@ -257,6 +257,77 @@ class DBWriter:
             row = cur.fetchone()
             return row["plan_id"] if row else None
 
+    def find_plan_by_attributes(
+        self,
+        product_id: int,
+        gender: str = "U",
+        age_min: int | None = None,
+        age_max: int | None = None,
+    ) -> int | None:
+        """
+        gender/age 속성으로 기존 plan 검색
+        (plan_name 없이 속성만으로 매칭)
+
+        우선순위:
+        1. 정확히 gender 매칭 (U보다 M/F 우선)
+        2. age 범위가 더 좁은 plan 우선
+        """
+        # gender=U이고 age도 없으면 매칭 불가
+        if gender == "U" and age_min is None and age_max is None:
+            return None
+
+        with self.conn.cursor() as cur:
+            # gender 조건
+            gender_condition = ""
+            gender_params: list = []
+            if gender != "U":
+                gender_condition = "AND (pp.gender = %s OR pp.gender = 'U')"
+                gender_params = [gender]
+
+            # age 조건: manifest의 age 범위가 plan의 범위에 포함되어야 함
+            age_conditions: list[str] = []
+            age_params: list = []
+            if age_min is not None:
+                # plan의 age_min이 manifest age_min 이하이거나 NULL
+                age_conditions.append("(pp.age_min IS NULL OR pp.age_min <= %s)")
+                age_params.append(age_min)
+            if age_max is not None:
+                # plan의 age_max가 manifest age_max 이상이거나 NULL
+                age_conditions.append("(pp.age_max IS NULL OR pp.age_max >= %s)")
+                age_params.append(age_max)
+
+            age_condition = " AND ".join(age_conditions) if age_conditions else "TRUE"
+
+            # 매칭 우선순위:
+            # 1. age_specificity: age 제약이 있는 plan 우선 (NULL보다 구체적)
+            # 2. gender_score: 정확한 gender 매칭 우선
+            # 3. age_range: 더 좁은 범위 우선
+            query = f"""
+                SELECT pp.plan_id, pp.plan_name, pp.gender, pp.age_min, pp.age_max,
+                       CASE WHEN pp.gender = %s THEN 2 WHEN pp.gender = 'U' THEN 1 ELSE 0 END as gender_score,
+                       CASE
+                         WHEN pp.age_min IS NOT NULL AND pp.age_max IS NOT NULL THEN 2
+                         WHEN pp.age_min IS NOT NULL OR pp.age_max IS NOT NULL THEN 1
+                         ELSE 0
+                       END as age_specificity,
+                       COALESCE(pp.age_max, 999) - COALESCE(pp.age_min, 0) as age_range
+                FROM product_plan pp
+                WHERE pp.product_id = %s
+                  {gender_condition}
+                  AND {age_condition}
+                ORDER BY age_specificity DESC, gender_score DESC, age_range ASC
+                LIMIT 1
+            """
+
+            params = tuple([gender, product_id] + gender_params + age_params)
+            cur.execute(query, params)
+
+            row = cur.fetchone()
+            if row:
+                return row["plan_id"]
+
+            return None
+
     # =========================================================================
     # Document
     # =========================================================================
@@ -426,6 +497,10 @@ class DBWriter:
         """
         manifest에서 insurer_id, product_id, plan_id 해결
 
+        Plan 해결 우선순위:
+        1. plan_name이 있으면 해당 이름의 plan 조회/생성
+        2. plan_name 없지만 gender(M/F) 또는 age가 있으면 속성으로 기존 plan 검색
+
         Returns:
             (insurer_id, product_id, plan_id) - 모두 BIGINT (int)
         """
@@ -446,14 +521,24 @@ class DBWriter:
             )
 
         # plan
-        if product_id and manifest.plan.plan_name:
-            plan_id = self.get_or_create_plan(
-                product_id=product_id,
-                plan_name=manifest.plan.plan_name,
-                gender=manifest.plan.gender,
-                age_min=manifest.plan.age_min,
-                age_max=manifest.plan.age_max,
-                meta=manifest.plan.meta,
-            )
+        if product_id:
+            if manifest.plan.plan_name:
+                # plan_name이 있으면 이름으로 조회/생성
+                plan_id = self.get_or_create_plan(
+                    product_id=product_id,
+                    plan_name=manifest.plan.plan_name,
+                    gender=manifest.plan.gender,
+                    age_min=manifest.plan.age_min,
+                    age_max=manifest.plan.age_max,
+                    meta=manifest.plan.meta,
+                )
+            else:
+                # plan_name 없지만 gender/age 속성이 있으면 기존 plan에서 검색
+                plan_id = self.find_plan_by_attributes(
+                    product_id=product_id,
+                    gender=manifest.plan.gender,
+                    age_min=manifest.plan.age_min,
+                    age_max=manifest.plan.age_max,
+                )
 
         return insurer_id, product_id, plan_id

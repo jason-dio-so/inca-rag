@@ -28,6 +28,7 @@ from services.ingestion.db_writer import DBWriter
 from services.ingestion.embedding import embed_text, get_embedding_provider
 from services.ingestion.manifest import ManifestData, resolve_manifest
 from services.ingestion.pdf_loader import PDFContent, load_pdf
+from services.ingestion.plan_detector import detect_plan_id
 from services.ingestion.utils import (
     IngestionStats,
     extract_doc_type_from_path,
@@ -90,6 +91,24 @@ def process_single_document(
             logger.debug(
                 f"  IDs: insurer={insurer_id}, product={product_id}, plan={plan_id}"
             )
+
+            # 5-1. Plan 자동 감지 (manifest에 plan 정보가 없는 경우)
+            if plan_id is None and manifest.insurer_code:
+                try:
+                    detector_result = detect_plan_id(
+                        conn=db_writer.conn,
+                        insurer_code=manifest.insurer_code,
+                        source_path=str(pdf_path),
+                        doc_title=manifest.document.title,
+                        meta=manifest.document.meta,
+                    )
+                    if detector_result.plan_id:
+                        plan_id = detector_result.plan_id
+                        logger.info(f"  Plan auto-detected: {plan_id} ({detector_result.reason})")
+                    elif detector_result.detected_info.gender or detector_result.detected_info.age_min:
+                        logger.debug(f"  Plan detection: {detector_result.reason}")
+                except Exception as e:
+                    logger.warning(f"  Plan detection failed: {e}")
 
         # 6. Document 메타 준비
         doc_meta: dict[str, Any] = {}

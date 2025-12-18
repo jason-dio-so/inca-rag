@@ -1,0 +1,284 @@
+# Step K: 고정 Retrieval 품질 테스트 케이스
+# 각 케이스는 /compare API 호출 결과에서 검증할 조건을 정의
+
+cases:
+  # ==========================================================================
+  # Case 1-3: 2사 비교 (삼성 vs 메리츠, 삼성 vs 롯데, DB vs KB)
+  # ==========================================================================
+
+  - case_id: "case_01_samsung_meritz_borderline"
+    description: "삼성 vs 메리츠: 경계성 종양 암진단비"
+    query: "경계성 종양 암진단비"
+    insurers: ["SAMSUNG", "MERITZ"]
+    coverage_codes: ["A4200_1"]  # 암진단비
+    policy_keywords: ["경계성"]
+    expected:
+      min_total_evidence: 2
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []  # 선택적
+    notes: "기본 2사 비교 케이스, coverage_code 필터 적용"
+
+  - case_id: "case_02_samsung_lotte_similar_cancer"
+    description: "삼성 vs 롯데: 유사암(갑상선암) 진단비"
+    query: "유사암 갑상선암 진단비"
+    insurers: ["SAMSUNG", "LOTTE"]
+    coverage_codes: ["A4210"]  # 유사암진단비
+    policy_keywords: ["유사암"]
+    expected:
+      min_total_evidence: 0  # 해당 coverage_code가 없을 수 있음
+      min_per_insurer: 0  # 일부 보험사에 없을 수 있음
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "유사암 담보 비교 (coverage_code 없으면 skip)"
+
+  - case_id: "case_03_db_kb_cancer"
+    description: "DB vs KB: 암진단비"
+    query: "암진단비"
+    insurers: ["DB", "KB"]
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 2
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []
+    notes: "DB vs KB 기본 비교"
+
+  # ==========================================================================
+  # Case 4-5: Plan 기반 비교 (age/gender 파라미터)
+  # ==========================================================================
+
+  - case_id: "case_04_db_age_39"
+    description: "DB: 39세 남성 암진단비"
+    query: "암진단비"
+    insurers: ["DB"]
+    age: 39
+    gender: "M"
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 1
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []
+    notes: "40세 이하 plan 선택 확인"
+
+  - case_id: "case_05_db_age_41"
+    description: "DB: 41세 남성 암진단비"
+    query: "암진단비"
+    insurers: ["DB"]
+    age: 41
+    gender: "M"
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 1
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []
+    notes: "41세 이상 plan 선택 확인"
+
+  # ==========================================================================
+  # Case 6-8: 8개사 전체 비교
+  # ==========================================================================
+
+  - case_id: "case_06_all_insurers_cancer"
+    description: "8개사 전체: 암진단비"
+    query: "암진단비"
+    insurers: ["SAMSUNG", "LOTTE", "DB", "KB", "MERITZ", "HANWHA", "HYUNDAI", "HEUNGKUK"]
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 4  # 일부 보험사만 coverage_code 보유
+      min_per_insurer: 0  # 일부 보험사에 없음
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "8개 보험사 전체 기본 비교"
+
+  - case_id: "case_07_all_insurers_stroke"
+    description: "8개사 전체: 뇌졸중 진단비"
+    query: "뇌졸중 진단비"
+    insurers: ["SAMSUNG", "LOTTE", "DB", "KB", "MERITZ", "HANWHA", "HYUNDAI", "HEUNGKUK"]
+    coverage_codes: ["A4500"]  # 뇌졸중진단비
+    expected:
+      min_total_evidence: 0  # coverage_code 없을 수 있음
+      min_per_insurer: 0  # 없는 보험사 허용
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "뇌졸중 담보 (coverage_code 없으면 skip)"
+
+  - case_id: "case_08_all_insurers_surgery"
+    description: "8개사 전체: 질병수술비"
+    query: "질병수술비"
+    insurers: ["SAMSUNG", "LOTTE", "DB", "KB", "MERITZ", "HANWHA", "HYUNDAI", "HEUNGKUK"]
+    coverage_codes: ["B1000"]  # 질병수술비
+    expected:
+      min_total_evidence: 0  # coverage_code 없을 수 있음
+      min_per_insurer: 0
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "질병수술비 담보 (coverage_code 없으면 skip)"
+
+  # ==========================================================================
+  # Case 9-11: 단일사 테스트
+  # ==========================================================================
+
+  - case_id: "case_09_single_carcinoma"
+    description: "단일사(삼성): 제자리암 진단비"
+    query: "제자리암 상피내암 진단비"
+    insurers: ["SAMSUNG"]
+    coverage_codes: ["A4230"]  # 제자리암진단비
+    policy_keywords: ["제자리암"]
+    expected:
+      min_total_evidence: 0  # coverage_code 없을 수 있음
+      min_per_insurer: 0
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "제자리암 담보 단일사 테스트 (coverage_code 없으면 skip)"
+
+  - case_id: "case_10_single_hospitalization"
+    description: "단일사(롯데): 입원일당"
+    query: "입원일당 질병입원비"
+    insurers: ["LOTTE"]
+    coverage_codes: ["C1000"]  # 질병입원일당
+    expected:
+      min_total_evidence: 0  # coverage_code 없을 수 있음
+      min_per_insurer: 0
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "입원 담보 단일사 테스트 (coverage_code 없으면 skip)"
+
+  - case_id: "case_11_lotte_gender_male"
+    description: "롯데 남성 플랜: 암진단비"
+    query: "암진단비"
+    insurers: ["LOTTE"]
+    age: 35
+    gender: "M"
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 1
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []
+    notes: "롯데 남성 plan 선택"
+
+  - case_id: "case_12_lotte_gender_female"
+    description: "롯데 여성 플랜: 암진단비"
+    query: "암진단비"
+    insurers: ["LOTTE"]
+    age: 35
+    gender: "F"
+    coverage_codes: ["A4200_1"]
+    expected:
+      min_total_evidence: 1
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: ["A4200_1"]
+      must_include_keywords_in_text: []
+    notes: "롯데 여성 plan 선택"
+
+  # ==========================================================================
+  # Case 13-15: 키워드만 있는 케이스 (coverage_codes 비움)
+  # ==========================================================================
+
+  - case_id: "case_13_no_coverage_codes"
+    description: "coverage_codes 없음: 암진단비 한도"
+    query: "암진단비 한도 알려줘"
+    insurers: ["SAMSUNG", "LOTTE"]
+    coverage_codes: []  # 비움 -> 자동 추천 활성화
+    expected:
+      min_total_evidence: 0  # 추천 coverage_codes로 검색
+      min_per_insurer: 0  # 유연하게
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 자동 추천에 의존
+      must_include_keywords_in_text: []
+    notes: "coverage_codes 자동 추천 테스트"
+
+  - case_id: "case_14_keyword_only_borderline"
+    description: "키워드만: 경계성 종양"
+    query: "경계성 종양 보장 범위"
+    insurers: ["SAMSUNG", "MERITZ"]
+    coverage_codes: []
+    policy_keywords: ["경계성"]
+    expected:
+      min_total_evidence: 2
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []
+      must_include_keywords_in_text: []
+    notes: "키워드 기반 검색 테스트"
+
+  - case_id: "case_15_keyword_only_similar_cancer"
+    description: "키워드만: 유사암 범위"
+    query: "유사암에 갑상선암 포함되나요"
+    insurers: ["SAMSUNG", "DB"]
+    coverage_codes: []
+    policy_keywords: ["유사암"]
+    expected:
+      min_total_evidence: 2
+      min_per_insurer: 1
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []
+      must_include_keywords_in_text: []
+    notes: "유사암 키워드 검색"
+
+  # ==========================================================================
+  # Case 16: A2 정책 검증 (약관은 compare_axis에 포함 안 됨)
+  # ==========================================================================
+
+  - case_id: "case_16_a2_policy_check"
+    description: "A2 정책: compare_axis에 약관 없음"
+    query: "경계성 종양 암진단비"
+    insurers: ["SAMSUNG", "MERITZ", "LOTTE"]
+    coverage_codes: ["A4200_1"]
+    policy_keywords: ["경계성"]
+    expected:
+      min_total_evidence: 1  # 최소 1개
+      min_per_insurer: 0  # 일부 보험사에 없을 수 있음
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_exclude_doc_types: ["약관"]  # compare_axis에 약관 없어야 함
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "A2 정책 회귀 테스트"
+
+  # ==========================================================================
+  # Case 17-18: Quota/Top-K 검증
+  # ==========================================================================
+
+  - case_id: "case_17_quota_enforcement"
+    description: "Quota: 보험사별 제한 (coverage_code별 적용)"
+    query: "암진단비"
+    insurers: ["SAMSUNG", "LOTTE", "DB"]
+    coverage_codes: ["A4200_1", "A4210", "A4230"]  # 여러 coverage_codes
+    top_k_per_insurer: 5
+    expected:
+      min_total_evidence: 0  # coverage_code 없을 수 있음
+      min_per_insurer: 0  # 유연하게
+      # max_per_insurer는 coverage_code별 적용되므로 제거
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []
+      must_include_keywords_in_text: []
+    notes: "top_k_per_insurer는 coverage_code별 적용됨"
+
+  - case_id: "case_18_quota_8_insurers"
+    description: "Quota: 8개사 비교"
+    query: "암진단비"
+    insurers: ["SAMSUNG", "LOTTE", "DB", "KB", "MERITZ", "HANWHA", "HYUNDAI", "HEUNGKUK"]
+    coverage_codes: ["A4200_1"]
+    top_k_per_insurer: 3
+    expected:
+      min_total_evidence: 4  # 일부 보험사만 coverage_code 보유
+      min_per_insurer: 0  # 유연하게
+      # max_per_insurer는 coverage_code별 적용되므로 제거
+      must_include_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
+      must_include_coverage_codes: []  # 유연하게
+      must_include_keywords_in_text: []
+    notes: "8개사 비교 검증"

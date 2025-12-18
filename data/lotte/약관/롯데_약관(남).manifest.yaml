@@ -1,26 +1,7 @@
 schema_version: manifest_v1
 insurer_code: LOTTE
 doc_type: 약관
-
-product:
-  product_name: null
-  product_version: null
-  product_code: null
-
 plan:
-  plan_name: null
-  gender: U
+  gender: M
   age_min: null
   age_max: null
-  meta: {}
-
-document:
-  title: null
-  effective_date: null
-  meta:
-    subtype: null
-
-ingestion:
-  chunk_strategy: null
-  chunk_tokens: null
-  notes: null

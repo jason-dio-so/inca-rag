@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-17
+> 최종 업데이트: 2025-12-18
 
 ---
 
@@ -14,231 +14,755 @@
 | 분석 | doc_type별 coverage 매칭 품질 분석 | 분석/검토 | ✅ 완료 |
 | Step A-1 | 약관 전용 coverage 태깅 분리 | 구현 | ✅ 완료 |
 | 검증 | A-1 적용 후 비교 질의 품질 검증 | 분석/검토 | ✅ 완료 |
-| **Step D** | **전체 보험사 Ingestion + 품질 검증** | **구현** | ✅ 완료 |
+| Step D | 전체 보험사 Ingestion + 품질 검증 | 구현 | ✅ 완료 |
+| Step D-1 | HANWHA 가입설계서 분석 (담보 chunk 기준 재검토) | 분석/검토 | ✅ 완료 |
+| Step E | /compare MVP 구현 (2-Phase Retrieval) | 구현 | ✅ 완료 |
+| Step E-1 | /compare 정답성 검증 (5개 고정 시나리오) | 검증 | ✅ 완료 |
+| Step E-2 | /compare 회귀 테스트 pytest 자동화 | 검증 | ✅ 완료 |
+| Step E-3 | policy_axis 성능 개선 (pg_trgm 인덱스) | 최적화 | ✅ 완료 |
+| Step E-4 | policy_keywords 자동 추출 (규칙 기반) | 기능 | ✅ 완료 |
+| Step E-5 | coverage_codes 자동 추천 (coverage_alias 기반) | 기능 | ✅ 완료 |
+| Step F | coverage_compare_result(비교표) 생성 | 기능 | ✅ 완료 |
+| Step G-1 | diff_summary(차이점 요약) 규칙 엔진 | 기능 | ✅ 완료 |
+| Step H-1 | amount/condition_snippet 규칙 기반 추출 | 기능 | ✅ 완료 |
+| Step H-1.5 | amount/condition 추출 품질 리포트 | 분석/검토 | ✅ 완료 |
+| Step H-1.6 | amount_extractor 오탐 제거 (보험료 vs 보험금 분리) | 기능 | ✅ 완료 |
+| Step H-1.7 | amount_extractor premium_block 휴리스틱 (표 구조) | 기능 | ✅ 완료 |
+| Step H-1.8 | Amount source policy (가입설계서 amount 신뢰도 제한) | 기능 | ✅ 완료 |
+| **Step H-2** | **LLM 정밀 추출 (선별 적용)** | **기능** | ✅ 완료 |
+| **Step H-2.1** | **Real LLM Provider 연결 + 운영 가드레일** | **기능** | ✅ 완료 |
+| **Step I** | **Plan 자동 선택 (plan_selector) + plan_id 기반 retrieval** | **기능** | ✅ 완료 |
+| **Step I-1** | **Ingestion plan_id 자동 태깅 (plan_detector)** | **기능** | ✅ 완료 |
+| **Step J-1** | **Plan 태깅 품질 리포트 + /compare 플랜 회귀 테스트** | **검증** | ✅ 완료 |
+| **Step J-2** | **manifest.csv 기반 plan 태깅 + backfill** | **기능** | ✅ 완료 |
+| **Step J-3** | **DB 미태깅 원인 분류 + LOTTE 플랜 E2E 검증** | **검증** | ✅ 완료 |
+| **Step K** | **Vector Retrieval 품질 고정 + 파라미터 튜닝 + Hybrid 옵션** | **검증/기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
-### 1. Step A: DB 스키마 적용 및 데이터 적재 [구현]
+> Step 1-20 상세 기록: [status_archive.md](status_archive.md)
 
-**작업 내용:**
-- PostgreSQL + pgvector DB 스키마 적용 (`db/schema.sql`)
-- Docker 컨테이너 실행 (`docker-compose.yml`)
-- 담보명 매핑 Excel → `coverage_alias` 테이블 적재
-- SAMSUNG 보험사 문서 ingestion (5개 문서, 1,279개 chunks)
+### 21. Step H-1.8: Amount source policy (가입설계서 amount 신뢰도 제한) [기능]
 
-**생성된 파일:**
-- `db/schema.sql` - DB 스키마
-- `docker-compose.yml` - Docker 설정
-- `services/ingestion/` - Ingestion 파이프라인 전체
-- `tools/load_coverage_mapping.py` - 담보 매핑 로드 스크립트
+**목표:**
+- 가입설계서의 구조적 오탐 문제를 우회하여 사용자에게 노출되는 금액 정확도 향상
+- 금액은 상품요약서/사업방법서 중심으로 제공하고, 가입설계서는 보조로 전환
 
-**결과:**
-| 지표 | 값 |
-|------|-----|
-| 적재된 문서 수 | 5 |
-| 적재된 chunk 수 | 1,279 |
-| coverage 매칭률 | 66.85% |
-| 표준코드 수 | 28개 |
-| 보험사 수 | 8개 |
+**구현 내용:**
+1. `ResolvedAmount` dataclass 추가:
+   - `amount_value`, `amount_text`, `unit`, `confidence`
+   - `source_doc_type`: 금액이 선택된 doc_type
+   - `source_document_id`: 원본 document ID
 
----
+2. `amount_source_priority` 정책:
+   - 우선순위: 상품요약서 > 사업방법서 > 가입설계서
+   - 상위 우선순위 doc_type에 유효한 금액이 있으면 해당 금액 선택
 
-### 2. Step B: Retrieval/Compare 검증 [분석/검토]
+3. 가입설계서 confidence 제한:
+   - `doc_type=='가입설계서' AND confidence=='low'` → 제외
+   - `confidence=='high'` 또는 `'medium'` → 선택 가능
 
-**작업 내용:**
-- doc_type 필터링 SQL 검증
-- 쉬운요약서 우선순위 정렬 검증
-- coverage_code 기반 검색 검증
-- doc_type별 비교 분석
+4. `InsurerCompareCell`에 `resolved_amount` 필드 추가:
+   - 각 보험사 셀에 대표 금액 1개만 노출
+   - `best_evidence`의 개별 amount는 기존대로 유지 (상세 정보)
 
-**검증 결과:**
-- doc_type 필터링 정상 작동
-- 가입설계서 coverage 매칭률: 77.78%
-- plan_id NULL 비율: 100% (공통 문서)
+**수정된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `services/retrieval/compare_service.py` | ResolvedAmount, amount_source_priority 로직 |
+| `tests/test_amount_source_policy.py` | 단위 테스트 10개 |
 
----
-
-### 3. Step C-1: Coverage 코드 표준화 [구현]
-
-**문제:**
-- chunk에 ontology 코드(THYROID_CANCER, STROKE 등)가 저장되어 있음
-- 신정원 표준코드(A4210, A4103 등)가 아니라 JOIN 실패
-
-**해결:**
-1. `coverage_standard.meta.ontology_codes`에 매핑 seed
-2. `coverage_extractor.py`에 fallback remap 로직 추가
-3. 기존 chunk 백필 스크립트 실행
-
-**생성된 파일:**
-- `tools/seed_ontology_codes.py` - ontology → 신정원 매핑 seed
-- `tools/backfill_chunk_coverage_code.py` - 기존 chunk 백필
-
-**매핑 정의:**
-```python
-ONTOLOGY_TO_STANDARD = {
-    "CANCER_DIAG": "A4200_1",      # 암진단비
-    "THYROID_CANCER": "A4210",     # 유사암진단비
-    "CIS_CARCINOMA": "A4210",      # 제자리암
-    "STROKE": "A4103",             # 뇌졸중진단비
-    "ACUTE_MI": "A4105",           # 허혈성심장질환진단비
-    "SURGERY": "A5100",            # 질병수술비
-    "HOSPITALIZATION": "A6100_1",  # 질병입원비
-    "DEATH_BENEFIT": "A1100",      # 질병사망
-    "DISABILITY": "A3300_1",       # 상해후유장해
-    # ... 17개 매핑
+**API 응답 변경:**
+```json
+{
+  "coverage_compare_result": [{
+    "insurers": [{
+      "insurer_code": "SAMSUNG",
+      "resolved_amount": {
+        "amount_value": 10000000,
+        "amount_text": "1,000만원",
+        "unit": "만원",
+        "confidence": "high",
+        "source_doc_type": "상품요약서",
+        "source_document_id": 123
+      },
+      "best_evidence": [...]
+    }]
+  }]
 }
 ```
 
-**결과:**
-| 지표 | Before | After |
-|------|--------|-------|
-| coverage_name 있는 chunk | 0 | 855 (100%) |
-| coverage_standard JOIN 성공률 | 0% | 100% |
+**추가된 테스트 (10개):**
+| 테스트 | 설명 |
+|--------|------|
+| `test_상품요약서_우선_선택` | 상품요약서 > 가입설계서 우선순위 |
+| `test_사업방법서_가입설계서보다_우선` | 사업방법서 > 가입설계서 우선순위 |
+| `test_가입설계서_low_confidence_제외` | confidence='low' 제외 |
+| `test_가입설계서_high_confidence_선택` | confidence='high' 선택 |
+| `test_모든_amount_none이면_resolved_amount도_none` | 전부 None이면 None |
+| `test_빈_evidence_리스트` | 빈 리스트 처리 |
+| `test_상품요약서_사업방법서_가입설계서_전체_우선순위` | 3개 doc_type 우선순위 |
+| `test_상품요약서_amount_none이면_사업방법서_선택` | fallback 동작 |
+| `test_가입설계서_medium_confidence_선택` | medium 허용 |
+| `test_약관_doc_type은_amount_없음` | 약관 제외 확인 |
+
+**pytest 결과:**
+```
+97 passed in 18.09s
+```
+
+**효과:**
+- 가입설계서의 구조적 오탐(보험료 vs 보험금 혼동) 문제를 정책으로 우회
+- 사용자에게 노출되는 `resolved_amount`는 신뢰도 높은 상품요약서/사업방법서 우선
+- `best_evidence`에는 모든 doc_type의 amount가 그대로 유지 (상세 분석용)
+- 회귀 없음: 기존 87 + 신규 10 = 97 tests 모두 PASS
 
 ---
 
-### 4. doc_type별 coverage 매칭 품질 분석 [분석/검토]
+### 22. Step H-2: LLM 정밀 추출 (선별 적용) [기능]
 
-**분석 결과:**
-| doc_type | mapping | fallback_remap | 문제 |
-|----------|---------|----------------|------|
-| 약관 | 7.57% | **92.43%** | ⚠️ 오탐 다수 |
-| 상품요약서 | 50.59% | 49.41% | - |
-| 사업방법서 | 53.97% | 46.03% | - |
-| 가입설계서 | 71.43% | 28.57% | - |
+**목표:**
+- H-1.8 정책으로 resolved_amount가 비어있는 셀에 대해 LLM으로 보강
+- 선별 호출: 필요한 케이스만 (비용/속도/환각 최소화)
+- 근거(span) 필수: 환각 방지
 
-**원인 분류 (약관):**
-| 원인 | 비중 |
-|------|------|
-| 담보명이 문장 안에 묻힘 | ~92% |
-| alias 부족 | ~5% |
-| 표/레이아웃 깨짐 | ~3% |
-
-**결론:** 약관에서 "갑상선암", "수술비" 등 일반 단어가 정의/설명문에 등장하여 오탐 발생
-
----
-
-### 5. Step A-1: 약관 전용 coverage 태깅 분리 [구현]
-
-**목표:** 약관에서 오탐 방지를 위해 헤더/조문 패턴에서만 coverage 추출
-
-**구현 내용:**
-1. `coverage_extractor.py` doc_type별 정책 분기 추가
-   - 약관: `_extract_from_clause_header()` (헤더 패턴만)
-   - 그 외: 기존 로직 유지
-
-2. 헤더 패턴 정규식:
-   ```python
-   # 제X조(담보명)
-   r"제\s*\d+\s*조(?:의\s*\d+)?\s*\(([^)]+)\)"
-   # [담보명]
-   r"(?:^|\s)\[([^\]]{2,50})\]"
-   # X-Y. 담보명 특별약관
-   r"(?:^|\n)\s*\d+(?:-\d+)*\.\s*([^\n]{2,50}?(?:특별약관|특약))"
-   ```
-
-3. 새로운 필드 추가:
-   - `tag_source`: 'clause_header' (약관 전용)
-   - `confidence`: 'high' | 'medium' | 'low'
+**적용 범위 (선별 조건):**
+모든 조건 충족 시에만 LLM 호출:
+1. `resolved_amount.amount_value is None`
+2. `best_evidence` 중 `doc_type=='가입설계서'` evidence 존재
+3. `evidence.amount.confidence in ('low', 'medium')` OR `amount is None`
+4. `query`가 금액 의도 포함 (얼마, 한도, 금액, 지급 등)
 
 **생성된 파일:**
-- `tools/backfill_terms_for_policy.py` - 약관 재태깅 스크립트
+| 파일 | 설명 |
+|------|------|
+| `services/extraction/llm_schemas.py` | Pydantic 모델 (LLMExtractResult 등) |
+| `services/extraction/llm_prompts.py` | System/User 프롬프트 템플릿 |
+| `services/extraction/llm_client.py` | LLMClient 프로토콜 + Fake/Disabled 클라이언트 |
+| `tests/test_llm_refinement.py` | 단위 테스트 17개 |
 
-**결과:**
-| 지표 | Before | After |
-|------|--------|-------|
-| 약관 coverage 있는 chunk | 700 (62.6%) | 497 (44.5%) |
-| 오탐 제거 | - | 203건 (31%) |
-| 약관 match_source | fallback_remap 92% | clause_header 89% |
-| 약관 confidence | low | **high** |
+**핵심 스키마:**
+```python
+class LLMAmount(BaseModel):
+    label: Literal["benefit_amount", "premium_amount", "unknown"]
+    amount_value: int | None
+    amount_text: str | None
+    unit: str | None
+    confidence: Literal["high", "medium", "low"]
+    span: LLMSpan | None  # 근거 span (환각 방지)
+```
+
+**업그레이드 조건:**
+1. `label == "benefit_amount"` (보험료 차단)
+2. `confidence in ("high", "medium")` (low 제외)
+3. `span.text`가 chunk_text에 실제로 포함됨 (환각 방지)
+
+**안전장치:**
+- `premium_amount`는 절대 resolved_amount로 승격 금지
+- span 검증: LLM이 준 span.text가 원문에 없으면 결과 폐기
+- 호출 제한: `LLM_MAX_CALLS_PER_REQUEST` (기본 8)
+- 예외 발생 시 요청 전체 200 유지 + debug에만 기록
+
+**환경변수:**
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `LLM_ENABLED` | 0 | LLM 활성화 여부 |
+| `LLM_MAX_CALLS_PER_REQUEST` | 8 | 요청당 최대 호출 횟수 |
+| `LLM_PROVIDER` | openai | LLM 제공자 (추후) |
+| `LLM_MODEL` | gpt-4o-mini | LLM 모델 (추후) |
+
+**테스트 케이스 (17개):**
+| 테스트 | 설명 |
+|--------|------|
+| `test_resolved_amount_already_exists_no_call` | resolved_amount 있으면 호출 0회 |
+| `test_no_enrollment_evidence_no_call` | 가입설계서 없으면 호출 0회 |
+| `test_enrollment_confidence_high_no_call` | confidence high이면 호출 0회 |
+| `test_no_amount_intent_no_call` | 금액 의도 없으면 호출 0회 |
+| `test_premium_amount_no_upgrade` | premium_amount → 업그레이드 금지 |
+| `test_benefit_amount_medium_upgrade` | benefit_amount + medium → 업그레이드 |
+| `test_benefit_amount_low_no_upgrade` | benefit_amount + low → 업그레이드 금지 |
+| `test_span_not_in_text_discard` | span 환각 → 결과 폐기 |
+| `test_max_calls_limit` | 호출 제한 검증 |
+| `test_llm_disabled_no_crash` | LLM disabled → 200 유지 |
+| `test_약관_evidence_not_processed` | A2 정책 유지 |
+
+**pytest 결과:**
+```
+114 passed in 18.13s
+```
+
+**효과:**
+- LLM_ENABLED=0 상태에서도 100% 테스트 통과
+- FakeLLMClient로 CI 환경에서 안정적 테스트
+- 실제 LLM 연동은 추후 구현 예정 (환경변수로 활성화)
+- 회귀 없음: 기존 97 + 신규 17 = 114 tests 모두 PASS
 
 ---
 
-### 6. A-1 적용 후 비교 질의 품질 검증 [분석/검토]
+### 23. Step H-2.1: Real LLM Provider 연결 + 운영 가드레일 [기능]
 
-**검증 1: 핵심 키워드 조문 누락 여부**
+**목표:**
+- OpenAI API 실제 연결 구현 (LLM_ENABLED=1 시 활성화)
+- PII 마스킹으로 개인정보 보호
+- 운영 메트릭/로그 기록
+- 스모크 테스트 스크립트 제공
 
-| 키워드 | clause_header | mapping | no_match | 합계 |
-|--------|---------------|---------|----------|------|
-| 경계성 | 78 | 4 | 1 | 83 |
-| 유사암 | 27 | 16 | 16 | 59 |
-| 제자리암 | 6 | 0 | 11 | 17 |
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `services/extraction/pii_masker.py` | PII 마스킹 유틸리티 (주민번호, 전화번호, 계좌, 이메일) |
+| `tests/test_pii_masker.py` | PII 마스킹 단위 테스트 (25개) |
+| `tools/run_compare_with_llm_toggle.sh` | LLM 토글 스모크 테스트 스크립트 |
 
-- no_match 28건 중 17건(61%)은 ±5페이지 내 clause_header 존재
-- **판정: ✅ 성공** - 검색 근거 충분
+**OpenAILLMClient 구현:**
+```python
+class OpenAILLMClient:
+    """
+    - timeout(8s), retry(2), exponential backoff 지원
+    - PII 마스킹 자동 적용
+    - 메트릭 수집 (latency, success/failure, PII 마스킹 개수)
+    """
+```
 
-**검증 2: 비교 질의 doc_type 우선순위**
+**PII 마스킹 패턴:**
+| 타입 | 패턴 | 대체 |
+|------|------|------|
+| 주민등록번호 | `YYMMDD-NNNNNNN` | `[주민번호]` |
+| 전화번호 | `010-XXXX-XXXX` 등 | `[전화번호]` |
+| 이메일 | `xxx@domain.com` | `[이메일]` |
+| 계좌번호 | 10~16자리 숫자 | `[계좌번호]` |
 
-| doc_type | 검색 결과 건수 |
-|----------|---------------|
-| 가입설계서 | 7 |
-| 상품요약서 | 32 |
-| 사업방법서 | 9 |
-| 약관 | 93 |
+**환경변수 (확장):**
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `LLM_ENABLED` | 0 | LLM 활성화 여부 |
+| `LLM_PROVIDER` | openai | LLM 제공자 |
+| `LLM_MODEL` | gpt-4o-mini | LLM 모델 |
+| `LLM_TIMEOUT_SECONDS` | 8 | LLM 호출 타임아웃 |
+| `LLM_MAX_CALLS_PER_REQUEST` | 8 | 요청당 최대 호출 횟수 |
+| `LLM_MAX_CHARS_PER_CALL` | 4000 | 호출당 최대 문자 수 |
+| `LLM_MAX_RETRIES` | 2 | 최대 재시도 횟수 |
+| `OPENAI_API_KEY` | - | OpenAI API 키 (LLM_ENABLED=1 시 필수) |
 
-- 상위 50건: 가입설계서 → 상품요약서 → 사업방법서 → 약관 순
-- **판정: ✅ 성공** - 우선순위 정상 유지
+**상세 메트릭 (LLMRefinementStats):**
+```python
+@dataclass
+class LLMRefinementStats:
+    llm_calls_attempted: int      # 시도된 호출 수
+    llm_calls_succeeded: int      # 성공 호출 수
+    llm_upgrades: int             # 업그레이드 횟수
+    llm_failures_by_reason: dict  # 실패 이유별 카운트
+    llm_total_latency_ms: float   # 총 레이턴시
+```
+
+**스모크 테스트 사용법:**
+```bash
+# LLM OFF (기본, CI 환경)
+./tools/run_compare_with_llm_toggle.sh
+
+# LLM ON (실제 API 호출)
+LLM_ENABLED=1 OPENAI_API_KEY=sk-xxx ./tools/run_compare_with_llm_toggle.sh
+```
+
+**pytest 결과:**
+```
+139 passed in 18.19s
+```
+
+**효과:**
+- LLM_ENABLED=0 상태에서 139개 테스트 모두 통과
+- PII 마스킹으로 개인정보 보호 (LLM 호출 전 자동 적용)
+- OpenAI API 연결 준비 완료 (환경변수로 활성화)
+- 메트릭 수집으로 운영 가시성 확보
+- 회귀 없음: 기존 114 + 신규 25 = 139 tests 모두 PASS
 
 ---
 
-### 7. Step D: 전체 보험사 Ingestion + 품질 검증 [구현]
+### 24. Step I: Plan 자동 선택 + plan_id 기반 retrieval [기능]
 
-**작업 내용:**
-- 8개 보험사 전체 ingestion 실행
-- A-1 정책(약관 clause_header) 적용 확인
-- 보험사별 품질 편차 분석
+**목표:**
+- /compare 요청에 age/gender 포함 시 product_plan에서 plan 자동 선택
+- compare_axis retrieval에 plan_id 필터 적용
+- policy_axis는 A2 정책 유지 (plan 무시)
 
-**보험사별 Ingestion 결과:**
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `services/retrieval/plan_selector.py` | Plan 자동 선택 모듈 |
+| `tools/seed_product_plans.py` | 테스트용 Plan 데이터 seed 스크립트 |
+| `tests/test_plan_selector.py` | Plan selector 단위 테스트 (15개) |
 
-| insurer_code | doc_count | chunk_count | 상태 |
-|--------------|-----------|-------------|------|
-| LOTTE | 8 | 2,038 | ✅ |
-| MERITZ | 4 | 1,937 | ✅ |
-| HYUNDAI | 4 | 1,343 | ✅ |
-| SAMSUNG | 5 | 1,279 | ✅ |
-| DB | 5 | 1,259 | ✅ |
-| HANWHA | 4 | 1,114 | ✅ |
-| KB | 4 | 1,003 | ✅ |
-| HEUNGKUK | 4 | 977 | ✅ |
-| **합계** | **38** | **10,950** | - |
+**API 스키마 확장:**
+```python
+class CompareRequest(BaseModel):
+    # ... 기존 필드 ...
+    age: int | None = None     # 피보험자 나이 (0~150)
+    gender: Literal["M", "F"] | None = None  # 피보험자 성별
+```
 
-**보험사 × doc_type 매칭률:**
+**debug 응답에 selected_plan 추가:**
+```json
+{
+  "debug": {
+    "selected_plan": [
+      {"insurer_code": "SAMSUNG", "product_id": 1, "plan_id": 101, "reason": "gender_match(M)"}
+    ]
+  }
+}
+```
 
-| insurer_code | 가입설계서 | 상품요약서 | 사업방법서 | 약관 |
-|--------------|------------|------------|------------|------|
-| DB | 89.47% | 98.72% | 90.77% | 1.82% |
-| HANWHA | 60.00% ⚠️ | 84.72% | 75.96% | 25.18% |
-| HEUNGKUK | 84.62% | 97.50% | 91.30% | 42.03% |
-| HYUNDAI | 77.78% | 93.41% | 84.21% | 12.94% |
-| KB | 100.00% | 98.53% | 92.31% | 10.78% |
-| LOTTE | 77.78% | 91.67% | 87.78% | 33.98% |
-| MERITZ | 76.92% | 88.30% | 80.31% | 13.01% |
-| SAMSUNG | 77.78% | 96.59% | 98.44% | 44.45% |
+**Plan 선택 우선순위:**
+1. gender 정확 일치 (M/F) > U (공용)
+2. age 범위가 더 좁은 plan 우선
+3. plan_name 존재 (명시적) 우선
+4. 조건 없으면 plan_id=None (공통 문서만)
 
-**coverage_standard JOIN 성공률:** 전 보험사 **100%**
+**Retrieval SQL 반영:**
+```sql
+-- plan_id가 있으면:
+WHERE (c.plan_id = :plan_id OR c.plan_id IS NULL)
 
-**보험사별 판정:**
+-- plan_id가 없으면:
+WHERE c.plan_id IS NULL
+```
 
-| insurer_code | 판정 | 비고 |
-|--------------|------|------|
-| DB | PASS | - |
-| HANWHA | **FAIL** | 가입설계서 60% (기준 70% 미달) |
-| HEUNGKUK | PASS | - |
-| HYUNDAI | PASS | - |
-| KB | PASS | - |
-| LOTTE | PASS | - |
-| MERITZ | PASS | - |
-| SAMSUNG | PASS | - |
+**테스트 케이스 (15개):**
+| 테스트 | 설명 |
+|--------|------|
+| `test_no_product_found` | product 없으면 plan_id=None |
+| `test_no_age_gender_provided` | age/gender 없으면 plan 선택 안함 |
+| `test_gender_exact_match_preferred` | gender 정확 일치 우선 |
+| `test_gender_universal_fallback` | 정확 일치 없으면 U 선택 |
+| `test_age_range_narrower_preferred` | age 범위 좁은 것 우선 |
+| `test_no_matching_plan` | 조건 맞는 plan 없으면 None |
+| `test_multiple_insurers` | 여러 보험사 각각 선택 |
+| `test_age_gender_fields_in_request` | API에 필드 존재 |
+| `test_age_gender_optional` | age/gender는 optional |
+| `test_gender_validation` | M/F만 허용 |
+| `test_policy_axis_no_plan_filter` | A2: policy_axis는 plan 무시 |
 
-**API 구현 리스크:**
+**pytest 결과:**
+```
+154 passed in 18.34s
+```
 
-| # | 리스크 | 우선순위 |
-|---|--------|----------|
-| 1 | HANWHA 가입설계서 매칭률 60% → 비교조회 시 담보 누락 | 🔴 High |
-| 2 | 약관 clause_header 비율 편차 (1.8%~44.5%) → 검색 품질 불균형 | 🟡 Medium |
-| 3 | 보험사별 chunk 수 편차 (977~2,038) → quota 병합 시 쏠림 | 🟡 Medium |
+**효과:**
+- age/gender 기반 plan 자동 선택
+- 보험사별 다른 plan 선택 가능
+- A2 정책 유지 (약관은 plan 무관)
+- 회귀 없음: 기존 139 + 신규 15 = 154 tests 모두 PASS
+
+---
+
+### 25. Step I-1: Ingestion plan_id 자동 태깅 (plan_detector) [기능]
+
+**목표:**
+- 문서 경로/파일명/메타에서 성별(M/F)·나이구간을 감지하여 document.plan_id 자동 태깅
+- chunk.plan_id는 document.plan_id 상속
+- 기존 데이터는 backfill 도구로 일괄 갱신
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `services/ingestion/plan_detector.py` | Plan 감지 모듈 (성별/나이 패턴 매칭) |
+| `tools/backfill_plan_ids.py` | 기존 document/chunk plan_id 백필 도구 |
+| `tests/test_plan_detector.py` | Plan detector 단위 테스트 (69개) |
+
+**성별 감지 패턴:**
+```python
+MALE_PATTERNS = [
+    r"남성", r"남자", r"\b남\b", r"\(남\)", r"_남_", r"-남-",
+    r"남형", r"\bmale\b", r"\bM형\b", r"남성형",
+]
+FEMALE_PATTERNS = [
+    r"여성", r"여자", r"\b여\b", r"\(여\)", r"_여_", r"-여-",
+    r"여형", r"\bfemale\b", r"\bF형\b", r"여성형",
+]
+```
+
+**나이 감지 패턴:**
+| 패턴 | 예시 | 결과 |
+|------|------|------|
+| `XX세 이하` | 40세이하 | (None, 40) |
+| `XX세 이상` | 41세이상 | (41, None) |
+| `XX-YY세` | 20-40세 | (20, 40) |
+| `만XX세` | 만40세 | (40, 40) |
+| `XX대` | 30대 | (30, 39) |
+| `XX세 미만` | 40세미만 | (None, 39) |
+| `XX세 초과` | 40세초과 | (41, None) |
+
+**감지 우선순위:**
+1. meta (gender/age 필드)
+2. doc_title (문서 제목)
+3. source_path (파일명 → 폴더명)
+
+**Ingestion 파이프라인 통합:**
+```python
+# ingest.py에서 plan_id 자동 감지
+if plan_id is None and manifest.insurer_code:
+    detector_result = detect_plan_id(
+        conn=db_writer.conn,
+        insurer_code=manifest.insurer_code,
+        source_path=str(pdf_path),
+        doc_title=manifest.document.title,
+        meta=manifest.document.meta,
+    )
+    if detector_result.plan_id:
+        plan_id = detector_result.plan_id
+        logger.info(f"Plan auto-detected: {plan_id} ({detector_result.reason})")
+```
+
+**Backfill 도구 사용법:**
+```bash
+# Dry-run (실제 업데이트 없이 시뮬레이션)
+python tools/backfill_plan_ids.py --dry-run
+
+# 특정 보험사만
+python tools/backfill_plan_ids.py --insurer SAMSUNG
+
+# 전체 실행
+python tools/backfill_plan_ids.py
+
+# 현재 상태 확인
+python tools/backfill_plan_ids.py --verify-only
+```
+
+**테스트 케이스 (69개):**
+| 테스트 클래스 | 테스트 수 | 설명 |
+|--------------|----------|------|
+| TestDetectGender | 11 | 성별 패턴 감지 |
+| TestDetectAgeRange | 9 | 나이 범위 패턴 감지 |
+| TestDetectFromPath | 6 | 파일 경로 기반 감지 |
+| TestDetectFromMeta | 5 | 메타데이터 기반 감지 |
+| TestDetectPlanInfo | 3 | 통합 감지 우선순위 |
+| TestFindMatchingPlanId | 3 | DB plan 매칭 |
+| TestDetectPlanId | 3 | 전체 감지 플로우 |
+| TestEdgeCases | 4 | 엣지 케이스 |
+| TestPatternCoverage | 25 | 모든 패턴 커버리지 |
+
+**pytest 결과:**
+```
+223 passed in 18.31s
+```
+
+**효과:**
+- Ingestion 시 파일 경로/메타에서 plan 자동 감지
+- 기존 문서 plan_id 백필 도구 제공
+- 69개 테스트로 패턴 커버리지 보장
+- 회귀 없음: 기존 154 + 신규 69 = 223 tests 모두 PASS
+
+---
+
+### 26. Step J-1: Plan 태깅 품질 리포트 + /compare 플랜 회귀 테스트 [검증]
+
+**목표:**
+- 8개 보험사 전체에 대해 plan_id 태깅 결과를 정량 리포트로 생성
+- /compare가 age/gender 입력에 따라 plan이 올바르게 선택되는지 회귀 테스트
+- LOTTE(남/여), DB(연령) 중심으로 플랜 영향 검증
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `tools/audit_plan_tagging.py` | Plan 태깅 품질 리포트 생성 스크립트 |
+| `artifacts/audit/plan_tagging_report.md` | 리포트 출력 파일 |
+| `tests/test_compare_api_plan_cases.py` | Plan 회귀 테스트 (14개) |
+
+**리포트 지표:**
+| 지표 | 설명 |
+|------|------|
+| doc_type별 plan_id 분포 | NULL vs non-NULL |
+| gender별 plan 분포 | M/F/U |
+| age_range 분포 | age_min/age_max 히스토그램 |
+| plan 충돌 탐지 | 동일 경로 다른 plan_id, 성별 불일치 |
+
+**리포트 사용법:**
+```bash
+# 리포트 생성
+python tools/audit_plan_tagging.py
+
+# 출력만 (파일 저장 없이)
+python tools/audit_plan_tagging.py --print-only
+
+# 커스텀 출력 경로
+python tools/audit_plan_tagging.py --output my_report.md
+```
+
+**회귀 테스트 케이스 (14개):**
+| 테스트 클래스 | 테스트 수 | 설명 |
+|--------------|----------|------|
+| TestPlanSelectorInvocation | 4 | age/gender에 따른 plan 선택 |
+| TestA2PolicyWithPlan | 2 | A2 정책 유지 검증 |
+| TestMultipleInsurersWithPlan | 2 | 여러 보험사 동시 비교 |
+| TestCommonDocumentsRegression | 2 | 공통 문서 회귀 |
+| TestPlanEdgeCases | 4 | 엣지 케이스 |
+
+**핵심 테스트:**
+| 테스트 | 검증 내용 |
+|--------|----------|
+| `test_male_vs_female_different_plans` | LOTTE: gender=M vs F → 다른 plan 선택 |
+| `test_age_39_vs_41_different_plans` | DB: age=39 vs 41 → 다른 plan 선택 |
+| `test_compare_axis_no_policy_with_plan` | plan 선택 시에도 약관은 compare_axis에 없음 |
+| `test_multiple_insurers_each_has_plan` | 여러 보험사 각각 plan 선택됨 |
+
+**backfill 도구 CI 지원:**
+```bash
+# CI에서 DB 없어도 에러 없이 종료
+python tools/backfill_plan_ids.py --verify-only --skip-if-empty
+```
+
+**pytest 결과:**
+```
+237 passed in 22.47s
+```
+
+**효과:**
+- Plan 태깅 품질을 정량적으로 측정 가능
+- age/gender에 따른 plan 선택 동작 회귀 테스트
+- A2 정책(약관 분리) 유지 검증
+- CI 환경 지원 (--skip-if-empty)
+- 회귀 없음: 기존 223 + 신규 14 = 237 tests 모두 PASS
+
+---
+
+### 27. Step J-2: manifest.csv 기반 plan 태깅 + backfill + 재검증 [기능]
+
+**목표:**
+- manifest 파일에 plan 정보(gender, age_min, age_max)를 명시하여 plan_id 태깅
+- backfill 시 manifest 우선 → detector fallback 전략
+- LOTTE(성별), DB(연령) 중심으로 plan_id가 실제로 채워지는지 검증
+
+**생성/수정된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `data/lotte/*/*.manifest.yaml` | LOTTE 8개 문서 manifest (gender: M/F) |
+| `data/db/가입설계서/*.manifest.yaml` | DB 2개 문서 manifest (age_min/max) |
+| `services/ingestion/db_writer.py` | `find_plan_by_attributes()` 추가 |
+| `tools/backfill_plan_ids.py` | `--manifest` 옵션 추가 |
+| `tests/test_compare_api_plan_cases.py` | Plan evidence 테스트 5개 추가 |
+
+**manifest plan 필드:**
+```yaml
+schema_version: manifest_v1
+insurer_code: LOTTE
+doc_type: 상품요약서
+plan:
+  gender: M      # M/F/U
+  age_min: null  # null 또는 정수
+  age_max: null  # null 또는 정수
+```
+
+**Plan 매칭 우선순위:**
+1. `age_specificity`: age 제약이 있는 plan 우선 (NULL보다 구체적)
+2. `gender_score`: 정확한 gender 매칭 우선 (M/F > U)
+3. `age_range`: 더 좁은 범위 우선
+
+**backfill --manifest 사용법:**
+```bash
+# manifest 우선 모드
+python tools/backfill_plan_ids.py --manifest --insurer LOTTE
+
+# dry-run
+python tools/backfill_plan_ids.py --manifest --dry-run
+```
+
+**Plan 태깅 결과:**
+| 보험사 | 전체 문서 | plan_id 있음 | 태깅률 |
+|--------|----------|-------------|--------|
+| LOTTE | 8 | 8 | **100.0%** |
+| DB | 5 | 2 | **40.0%** |
+| 기타 | 25 | 0 | 0.0% |
+| **합계** | **38** | **10** | **26.3%** |
+
+**LOTTE Plan 분포:**
+- 남성(M): 4개 문서 (plan_id=6)
+- 여성(F): 4개 문서 (plan_id=8)
+
+**DB Plan 분포:**
+- 40세이하: 1개 문서 (plan_id=11, 남성-40세이하)
+- 41세이상: 1개 문서 (plan_id=12, 남성-41세이상)
+- 공통: 3개 문서 (plan_id=NULL)
+
+**추가된 테스트 (5개):**
+| 테스트 | 설명 |
+|--------|------|
+| `test_lotte_evidence_plan_id_in_debug` | LOTTE plan 선택 정보 검증 |
+| `test_lotte_male_vs_female_evidence_chunks` | 남/여 다른 plan 선택 |
+| `test_db_age_based_plan_selection` | 나이에 따른 plan 선택 |
+| `test_plan_filter_affects_retrieval` | plan 필터가 retrieval에 적용 |
+| `test_insurer_with_vs_without_plans` | plan 있는/없는 보험사 비교 |
+
+**pytest 결과:**
+```
+242 passed in 23.02s
+```
+
+**효과:**
+- manifest로 plan 정보 명시 → detector보다 신뢰도 높은 태깅
+- LOTTE 100%, DB 40% plan 태깅 달성
+- age_specificity 우선 매칭으로 공용 plan 대신 구체적 plan 선택
+- 회귀 없음: 기존 237 + 신규 5 = 242 tests 모두 PASS
+
+---
+
+### 28. Step J-3: DB 미태깅 원인 분류 + LOTTE 플랜 E2E 검증 [검증]
+
+**목표:**
+- DB의 plan_id NULL 문서 3개에 대한 원인 분류 및 근거 명시
+- LOTTE 플랜이 실제 검색 결과(evidence, resolved_amount)에 미치는 효과 E2E 검증
+- SAMSUNG (plan 없음) 회귀 테스트
+
+**1. DB 미태깅 원인 분류 리포트:**
+
+| document_id | doc_type | reason | 판정 |
+|-------------|----------|--------|------|
+| 8 | 사업방법서 | COMMON_DOC_EXPECTED | ✅ 정상 NULL |
+| 9 | 상품요약서 | COMMON_DOC_EXPECTED | ✅ 정상 NULL |
+| 10 | 약관 | COMMON_DOC_EXPECTED | ✅ 정상 NULL |
+
+**결론:** DB의 3개 미태깅 문서는 모두 `COMMON_DOC_EXPECTED` (공통 문서)로 분류되어 **plan_id = NULL이 의도된 동작**입니다.
+- 사업방법서, 상품요약서, 약관은 플랜 구분 없이 모든 플랜에 공통으로 적용
+- manifest 보강 불필요
+
+**2. LOTTE 플랜 E2E 검증 테스트:**
+
+| 테스트 | 검증 내용 | 결과 |
+|--------|----------|------|
+| `test_lotte_gender_m_vs_f_different_plan_ids` | 남/여 다른 plan_id 선택 | ✅ PASS |
+| `test_lotte_gender_m_vs_f_evidence_document_difference` | best_evidence.document_id 차이 | ✅ PASS |
+| `test_lotte_gender_m_vs_f_resolved_amount_source_difference` | resolved_amount 소스 차이 | ⚠️ WARN (금액 미추출) |
+| `test_db_age_39_vs_41_different_plan_ids` | 39세/41세 다른 plan_id 선택 | ✅ PASS |
+| `test_db_age_39_vs_41_evidence_or_amount_change` | evidence 또는 amount 변화 | ✅ PASS |
+
+**3. SAMSUNG 회귀 테스트 (plan 없음):**
+
+| 테스트 | 검증 내용 | 결과 |
+|--------|----------|------|
+| `test_samsung_no_plan_same_results_with_different_gender` | gender 달라도 결과 동일 | ✅ PASS |
+| `test_samsung_no_plan_same_results_with_different_age` | age 달라도 결과 동일 | ✅ PASS |
+| `test_samsung_no_plan_same_compare_axis` | plan 파라미터로 결과 안 달라짐 | ✅ PASS |
+| `test_samsung_vs_lotte_plan_effect_comparison` | plan 있는/없는 보험사 비교 | ✅ PASS |
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `tools/audit_unassigned_plans.py` | 미태깅 원인 분류 스크립트 |
+| `artifacts/audit/db_unassigned_plans.md` | DB 미태깅 원인 리포트 |
+| `tests/test_compare_api_plan_effects.py` | Plan 효과 E2E 테스트 (9개) |
+
+**pytest 결과:**
+```
+251 passed in 26.25s
+```
+
+**효과:**
+- DB 미태깅 3개 → 모두 COMMON_DOC_EXPECTED (정상 NULL)
+- LOTTE: gender 변경 시 다른 plan/evidence 반환 검증
+- DB: age 변경 시 다른 plan/evidence 반환 검증
+- SAMSUNG: plan 없어도 age/gender 파라미터에 영향 안 받음 (회귀 없음)
+- 회귀 없음: 기존 242 + 신규 9 = 251 tests 모두 PASS
+
+---
+
+### 29. Step K: Vector Retrieval 품질 고정 + 파라미터 튜닝 + Hybrid 옵션 [검증/기능]
+
+**목표:**
+- pgvector 기반 compare_axis retrieval이 8개 보험사 전체에서 안정적으로 동작
+- "잘 나와야 하는 근거"를 테스트로 고정해서 이후 변경에도 품질 유지
+- HNSW/쿼리 파라미터(ef_search, top_k) 튜닝을 벤치마크로 문서화
+- coverage_codes가 없거나 애매한 질의에서 Hybrid(벡터+키워드) fallback 옵션 제공
+
+**1. 고정 질의 세트 (18개 케이스):**
+
+| 카테고리 | 케이스 | 설명 |
+|----------|--------|------|
+| 2사 비교 | case_01~03 | 삼성 vs 메리츠/롯데, DB vs KB |
+| Plan 기반 | case_04~05 | DB age 39/41 |
+| 8개사 전체 | case_06~08 | 암진단비, 뇌졸중, 질병수술비 |
+| 단일사 | case_09~12 | 제자리암, 입원일당, LOTTE 성별 |
+| 키워드만 | case_13~15 | coverage_codes 비움 |
+| A2 정책 | case_16 | compare_axis에 약관 없음 검증 |
+| Quota | case_17~18 | top_k_per_insurer 검증 |
+
+**2. Retrieval 품질 회귀 테스트:**
+
+| 테스트 클래스 | 테스트 수 | 설명 |
+|--------------|----------|------|
+| TestRetrievalQuality | 54 | min_total, min_per_insurer, max_per_insurer |
+| TestA2PolicyCompliance | 18 | compare_axis에 약관 없음 |
+| TestDocTypeRequirements | 36 | must_include/exclude doc_types |
+| TestCoverageCodeRequirements | 18 | coverage_code 포함 검증 |
+| TestResponseStructure | 10 | 응답 구조 검증 |
+| TestPlanSelection | 3 | age/gender plan 선택 |
+
+**3. 벤치마크 스크립트:**
+
+```bash
+# 벤치마크 실행
+python tools/benchmark_compare_axis.py
+
+# 커스텀 옵션
+python tools/benchmark_compare_axis.py --iterations 50 --output custom_report.md
+```
+
+**벤치마크 파라미터:**
+| 파라미터 | 기본값 | 권장값 | 설명 |
+|----------|--------|--------|------|
+| top_k_per_insurer | 5 | 5 | 속도/품질 균형 |
+| top_k_per_insurer | 3 | 3 | 속도 우선 |
+| top_k_per_insurer | 8~10 | 8 | 품질 우선 |
+| ef_search | 40 | 40 | HNSW 파라미터 (벡터 검색 시) |
+
+**4. Hybrid 옵션 (기본 OFF):**
+
+```bash
+# Hybrid fallback 활성화
+COMPARE_AXIS_HYBRID=1
+
+# HNSW ef_search 파라미터
+COMPARE_AXIS_EF_SEARCH=40
+
+# 벡터 검색 top_k
+COMPARE_AXIS_VECTOR_TOP_K=20
+```
+
+**Hybrid 로직:**
+1. coverage_codes 검색 결과가 부족할 때 (보험사당 최소 1개 미달)
+2. 벡터 검색 실행 (pgvector HNSW 인덱스)
+3. 기존 결과와 병합 (중복 제거)
+
+**debug 응답에 추가된 필드:**
+```json
+{
+  "debug": {
+    "hybrid_enabled": false,
+    "hybrid_used": false,
+    "timing_ms": {
+      "compare_axis_vector": 123.45
+    }
+  }
+}
+```
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `tests/fixtures/retrieval_cases.yaml` | 고정 질의 세트 (18개) |
+| `tests/test_vector_retrieval_quality.py` | Retrieval 품질 회귀 테스트 |
+| `tools/benchmark_compare_axis.py` | 벤치마크 스크립트 |
+
+**pytest 결과:**
+```
+316 passed, 74 skipped, 6 warnings in 49.56s
+```
+
+**효과:**
+- 18개 고정 질의 세트로 retrieval 품질 회귀 방지
+- A2 정책 유지 검증 (약관은 compare_axis에 절대 없음)
+- Hybrid 옵션으로 coverage_codes 없을 때 벡터 검색 fallback 가능
+- 파라미터 튜닝 벤치마크 도구 제공
+- 회귀 없음: 기존 251 + 신규 65 = 316 tests 모두 PASS (74 skipped)
 
 ---
 
@@ -258,10 +782,44 @@ ONTOLOGY_TO_STANDARD = {
 | `services/ingestion/db_writer.py` | DB 저장 |
 | `services/ingestion/embedding.py` | 임베딩 생성 |
 | `services/ingestion/ingest.py` | Ingestion 메인 |
+| `services/retrieval/compare_service.py` | 2-Phase Retrieval 서비스 (Step E) |
+| `api/main.py` | FastAPI 앱 (Step E) |
+| `api/compare.py` | /compare 라우터 (Step E) |
 | `tools/load_coverage_mapping.py` | Excel → coverage_alias 로드 |
 | `tools/seed_ontology_codes.py` | Ontology → 신정원 매핑 seed |
 | `tools/backfill_chunk_coverage_code.py` | Chunk coverage 백필 |
 | `tools/backfill_terms_for_policy.py` | 약관 재태깅 백필 |
+| `tools/run_compare_smoke_tests.sh` | /compare 스모크 테스트 (Step E-1) |
+| `tests/test_compare_api.py` | /compare pytest 회귀 테스트 (Step E-2) |
+| `db/migrations/20251217_add_trgm_indexes.sql` | pg_trgm 인덱스 migration (Step E-3) |
+| `tools/benchmark_policy_axis.py` | policy_axis 벤치마크 스크립트 (Step E-3) |
+| `services/extraction/__init__.py` | Extraction 모듈 (Step H-1) |
+| `services/extraction/amount_extractor.py` | 금액 추출기 (Step H-1) |
+| `services/extraction/condition_extractor.py` | 지급조건 스니펫 추출기 (Step H-1) |
+| `tests/test_extraction.py` | 추출기 단위 테스트 (Step H-1) |
+| `tools/audit_extraction_quality.py` | 추출 품질 audit 스크립트 (Step H-1.5) |
+| `services/extraction/llm_schemas.py` | LLM 추출 Pydantic 모델 (Step H-2) |
+| `services/extraction/llm_prompts.py` | LLM 프롬프트 템플릿 (Step H-2) |
+| `services/extraction/llm_client.py` | LLM 클라이언트 (Fake/Disabled/OpenAI) (Step H-2, H-2.1) |
+| `services/extraction/pii_masker.py` | PII 마스킹 유틸리티 (Step H-2.1) |
+| `tests/test_llm_refinement.py` | LLM refinement 단위 테스트 (Step H-2) |
+| `tests/test_pii_masker.py` | PII 마스킹 단위 테스트 (Step H-2.1) |
+| `tools/run_compare_with_llm_toggle.sh` | LLM 토글 스모크 테스트 스크립트 (Step H-2.1) |
+| `services/retrieval/plan_selector.py` | Plan 자동 선택 모듈 (Step I) |
+| `tools/seed_product_plans.py` | 테스트용 Plan 데이터 seed (Step I) |
+| `tests/test_plan_selector.py` | Plan selector 단위 테스트 (Step I) |
+| `services/ingestion/plan_detector.py` | Plan 감지 모듈 (Step I-1) |
+| `tools/backfill_plan_ids.py` | plan_id 백필 도구 (Step I-1) |
+| `tests/test_plan_detector.py` | Plan detector 단위 테스트 (Step I-1) |
+| `tools/audit_plan_tagging.py` | Plan 태깅 품질 리포트 (Step J-1) |
+| `tests/test_compare_api_plan_cases.py` | Plan 회귀 테스트 (Step J-1, J-2) |
+| `data/lotte/*/*.manifest.yaml` | LOTTE 문서 manifest (plan gender) (Step J-2) |
+| `data/db/가입설계서/*.manifest.yaml` | DB 가입설계서 manifest (plan age) (Step J-2) |
+| `tools/audit_unassigned_plans.py` | 미태깅 원인 분류 스크립트 (Step J-3) |
+| `tests/test_compare_api_plan_effects.py` | Plan 효과 E2E 테스트 (Step J-3) |
+| `tests/fixtures/retrieval_cases.yaml` | 고정 질의 세트 18개 (Step K) |
+| `tests/test_vector_retrieval_quality.py` | Retrieval 품질 회귀 테스트 (Step K) |
+| `tools/benchmark_compare_axis.py` | 벤치마크 스크립트 (Step K) |
 
 ---
 
@@ -292,7 +850,9 @@ ONTOLOGY_TO_STANDARD = {
 
 ## 🔜 다음 단계 (예정)
 
-1. Retrieval API 구현 (FastAPI)
-2. 비교조회 API 구현 (quota 기반 병합)
-3. plan_selector 연동 (성별/나이 기반 plan 자동 선택)
-4. HANWHA 가입설계서 alias 보강 (매칭률 개선)
+1. ~~Retrieval API 구현 (FastAPI)~~ ✅ Step E 완료
+2. ~~비교조회 API 구현 (quota 기반 병합)~~ ✅ Step E 완료
+3. ~~plan_selector 연동 (성별/나이 기반 plan 자동 선택)~~ ✅ Step I, J-3 완료
+4. ~~HANWHA 가입설계서 alias 보강~~ ✅ Step D-1에서 불필요 확인
+5. ~~Vector search 연동 (pgvector similarity search)~~ ✅ Step K Hybrid 옵션으로 완료
+6. 프론트엔드 연동
