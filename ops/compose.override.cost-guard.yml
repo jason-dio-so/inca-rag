@@ -1,0 +1,17 @@
+# =============================================================================
+# COST GUARD Override - U-4.8.1 COST_GUARD_smoke 테스트용
+#
+# 사용법:
+#   docker compose -f docker-compose.demo.yml -f ops/compose.override.cost-guard.yml up -d api
+#   ./tools/run_llm_trace_smoke.sh --cost-guard
+#
+# 또는:
+#   make cost-guard
+# =============================================================================
+
+services:
+  api:
+    environment:
+      LLM_ENABLED: "1"
+      LLM_COST_GUARD: "1"
+      LLM_MODEL: "gpt-4o-mini"

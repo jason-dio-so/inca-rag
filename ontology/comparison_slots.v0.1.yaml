@@ -1,0 +1,156 @@
+# Comparison Slots v0.1 - 암진단비 담보군
+# 슬롯 기반 보험 비교 정의
+#
+# A2 정책 유지:
+#   - comparable=true인 슬롯은 가입설계서/상품요약서/사업방법서에서만 추출
+#   - comparable=false인 슬롯(정의/면책)은 약관에서 추출 (비교 계산 미사용)
+
+schema_version: "comparison_slots.v0.1"
+
+# 적용 대상 담보 코드
+target_coverage_codes:
+  - A4200_1    # 암진단비
+  - A4210      # 유사암진단비
+  - A4209      # 재진단암진단비
+
+slots:
+  # =========================================================================
+  # 1. 지급금액 (comparable=true)
+  # =========================================================================
+  - slot_key: payout_amount
+    label: 지급금액
+    label_en: Payout Amount
+    comparable: true
+    value_type: amount
+    description: 보험금 지급 금액 (진단 확정 시)
+    source_doc_types:
+      - 가입설계서
+      - 상품요약서
+      - 사업방법서
+    extraction_rules:
+      patterns:
+        - "(?P<amount>[0-9,]+)\\s*(?P<unit>만원|원|백만원)"
+        - "보험금\\s*[:：]?\\s*(?P<amount>[0-9,]+)\\s*(?P<unit>만원|원)"
+      exclude_patterns:
+        - "보험료"
+        - "월납"
+        - "연납"
+    display:
+      format: "{value} {unit}"
+      not_found: "미확인"
+
+  # =========================================================================
+  # 2. 담보 존재 여부 (comparable=true)
+  # =========================================================================
+  - slot_key: existence_status
+    label: 담보 존재 여부
+    label_en: Coverage Existence
+    comparable: true
+    value_type: enum
+    enum_values:
+      - found
+      - not_found
+      - partial
+    description: 해당 담보가 상품에 존재하는지 여부
+    source_doc_types:
+      - 가입설계서
+      - 상품요약서
+      - 사업방법서
+    extraction_rules:
+      found_condition: "evidence 1개 이상 존재"
+      not_found_reason_template: "{doc_types}에서 해당 담보를 찾을 수 없음"
+    display:
+      found: "있음"
+      not_found: "없음"
+      partial: "일부"
+
+  # =========================================================================
+  # 3. 지급조건 요약 (comparable=true)
+  # =========================================================================
+  - slot_key: payout_condition_summary
+    label: 지급조건 요약
+    label_en: Payout Condition Summary
+    comparable: true
+    value_type: text
+    max_length: 200
+    description: 보험금 지급 조건 핵심 요약 (암 진단 확정 등)
+    source_doc_types:
+      - 상품요약서
+      - 사업방법서
+      - 가입설계서
+    extraction_rules:
+      keywords:
+        - 진단 확정
+        - 최초 진단
+        - 보험기간 중
+        - 암보장개시일
+      llm_refinement_allowed: true
+    display:
+      format: "{value}"
+      not_found: "조건 미확인"
+
+  # =========================================================================
+  # 4. 진단 범위 정의 (comparable=false, 약관용)
+  # =========================================================================
+  - slot_key: diagnosis_scope_definition
+    label: 진단 범위 정의
+    label_en: Diagnosis Scope Definition
+    comparable: false
+    value_type: text
+    max_length: 500
+    description: 암/유사암의 정의 및 분류 기준 (약관 조문)
+    source_doc_types:
+      - 약관
+    extraction_rules:
+      keywords:
+        - 암의 정의
+        - 유사암
+        - 제자리암
+        - 경계성종양
+        - 악성신생물
+    display:
+      format: "{value}"
+      not_found: "정의 조문 미확인"
+
+  # =========================================================================
+  # 5. 대기기간/면책기간 (comparable=false, 약관용)
+  # =========================================================================
+  - slot_key: waiting_period
+    label: 대기기간
+    label_en: Waiting Period
+    comparable: false
+    value_type: text
+    max_length: 100
+    description: 암보장개시일까지의 대기기간 (면책기간)
+    source_doc_types:
+      - 약관
+    extraction_rules:
+      patterns:
+        - "(?P<period>[0-9]+)\\s*(?P<unit>일|개월)\\s*(면책|대기)"
+        - "암보장개시일"
+      keywords:
+        - 면책기간
+        - 대기기간
+        - 암보장개시일
+    display:
+      format: "{value}"
+      not_found: "대기기간 미확인"
+
+# 슬롯 표시 설정
+display_config:
+  # 기본 노출 슬롯 (UI 테이블에 기본 표시)
+  default_slots:
+    - payout_amount
+    - existence_status
+    - payout_condition_summary
+
+  # 확장 슬롯 (더보기 시 표시)
+  extended_slots:
+    - diagnosis_scope_definition
+    - waiting_period
+
+  # Evidence 표시 설정
+  evidence_display:
+    max_per_slot: 3
+    show_score: false  # score=0.00 같은 혼동 표현 제거
+    score_fallback: "N/A"

@@ -1,0 +1,17 @@
+# =============================================================================
+# LLM ON Override - U-4.8.1 LLM_ON_smoke 테스트용
+#
+# 사용법:
+#   docker compose -f docker-compose.demo.yml -f ops/compose.override.llm-on.yml up -d api
+#   ./tools/run_llm_trace_smoke.sh --llm-on
+#
+# 또는:
+#   make llm-on
+# =============================================================================
+
+services:
+  api:
+    environment:
+      LLM_ENABLED: "1"
+      LLM_COST_GUARD: "0"
+      LLM_MODEL: "gpt-4o-mini"

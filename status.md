@@ -46,6 +46,7 @@
 | **Step U-4.2** | **데모 스모크를 "양쪽 근거"로 고정** | **DevOps** | ✅ 완료 |
 | **Step U-4.3** | **데모 삼성/메리츠 전체 PDF 로딩 + 충분성 리포트** | **DevOps** | ✅ 완료 |
 | **Step U-4.4** | **데모 스모크 2단 구성 (안정성/시나리오) + UI Debug 강화** | **DevOps/UI** | ✅ 완료 |
+| **Step U-4.8** | **Comparison Slots v0.1 (암진단비 슬롯 기반 비교)** | **기능/UI** | ✅ 완료 |
 
 ---
 
@@ -1087,6 +1088,99 @@ if source_path_root:
 - `git clone` → `./tools/demo_up.sh` 한 번으로 데이터 적재까지 완료
 - /compare 스모크 테스트 PASS로 배포 검증
 - 컨테이너 경로 정합성으로 PDF Viewer 정상 동작
+
+---
+
+### 36. Step U-4.8: Comparison Slots v0.1 (암진단비 슬롯 기반 비교) [기능/UI]
+
+**목표:**
+- 암진단비 담보군에 대해 슬롯 기반 비교 제공
+- 슬롯별로 값(value)과 근거(evidence)가 연결
+- A2 정책 유지: 약관은 비교 계산에 사용하지 않되, 정의/면책 근거로는 제공
+
+**PRD:**
+- PRD: `docs/U-4.8_slots_PRD.md`
+- 대상 담보: A4200_1(암진단비), A4210(유사암진단비), A4209(재진단암진단비)
+
+**슬롯 정의 (v0.1):**
+| slot_key | label | comparable | source |
+|----------|-------|------------|--------|
+| payout_amount | 지급금액 | true | 가입설계서/상품요약서/사업방법서 |
+| existence_status | 담보 존재 여부 | true | 가입설계서/상품요약서/사업방법서 |
+| payout_condition_summary | 지급조건 요약 | true | 상품요약서/사업방법서/가입설계서 |
+| diagnosis_scope_definition | 진단 범위 정의 | false | 약관 |
+| waiting_period | 대기기간 | false | 약관 |
+
+**생성된 파일:**
+| 파일 | 설명 |
+|------|------|
+| `ontology/comparison_slots.v0.1.yaml` | 슬롯 정의 YAML |
+| `db/migrations/20251218_add_comparison_slots.sql` | DB 마이그레이션 (선택적 캐시) |
+| `services/extraction/slot_extractor.py` | 슬롯 추출 서비스 |
+| `apps/web/src/components/SlotsTable.tsx` | UI 슬롯 테이블 컴포넌트 |
+| `eval/goldset_u48_slots.csv` | 평가 골드셋 (10개 케이스) |
+| `tools/run_u48_eval.sh` | U-4.8 평가 스크립트 |
+
+**API 변경:**
+```json
+{
+  "slots": [
+    {
+      "slot_key": "payout_amount",
+      "label": "지급금액",
+      "comparable": true,
+      "insurers": [
+        {
+          "insurer_code": "SAMSUNG",
+          "value": "3,000만원",
+          "confidence": "high",
+          "evidence_refs": [{"document_id": 1, "page_start": 5}]
+        },
+        {
+          "insurer_code": "MERITZ",
+          "value": null,
+          "confidence": "not_found",
+          "reason": "가입설계서/상품요약서/사업방법서에서 금액 미확인"
+        }
+      ],
+      "diff_summary": "SAMSUNG: 3,000만원. MERITZ은(는) 미확인."
+    }
+  ]
+}
+```
+
+**UI 변경:**
+- Slots 탭 추가 (암진단비 요청 시 기본 탭)
+- 비교 항목: 테이블 형태로 보험사별 값/confidence 표시
+- 정의/참고: 약관 기반 정보 (비교 계산 미사용 안내)
+- A2 정책 안내 배지 표시
+
+**Acceptance Criteria:**
+- AC1: 최소 3개 슬롯(payout_amount, existence_status, payout_condition_summary) 표시
+- AC2: not_found 시 slot 단위로 reason 표시
+- AC3: evidence 최대 3개 기본 노출, score=0.00 → N/A 대체
+- AC4: demo_up.sh 스모크 유지 + U-4.8 eval 10개 PASS
+
+**실행 방법:**
+```bash
+# 1. 마이그레이션 (선택적)
+psql -U postgres -d inca_rag -f db/migrations/20251218_add_comparison_slots.sql
+
+# 2. 백엔드 (변경 자동 적용)
+python -m uvicorn api.main:app --reload
+
+# 3. 프론트엔드
+cd apps/web && npm run dev
+
+# 4. 스모크 + U-4.8 평가
+./tools/demo_up.sh --down
+./tools/run_u48_eval.sh
+```
+
+**효과:**
+- 암진단비 질문에 대해 구조화된 슬롯 비교 제공
+- "삼성과 메리츠의 암진단비 비교해줘" → 지급금액/존재여부/조건요약 슬롯 표시
+- A2 정책 유지: 약관은 정의/참고용으로만 제공
 
 ---
 
