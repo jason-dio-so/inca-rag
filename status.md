@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-δ-β)
+> 최종 업데이트: 2025-12-19 (STEP 3.7-δ-γ)
 
 ---
 
@@ -66,6 +66,7 @@
 | **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
 | **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
 
 ---
 
@@ -899,3 +900,95 @@ if (resolutionState !== "RESOLVED") {
 | Frontend Guard (렌더링 차단) | ✅ 구현 완료 |
 | similarity threshold 변경 없음 | ✅ 유지 |
 | 테스트 통과 | ✅ 5/5 (100%) |
+
+---
+
+## STEP 3.7-δ-γ: Frontend derives UI only from resolution_state (2025-12-19)
+
+### 목표
+- Frontend가 `coverage_resolution.status`에서 재계산하지 않고 `resolution_state`만 사용
+- UI 상태 결정 로직을 단순화하고 Single Source of Truth 원칙 준수
+
+### 문제 인식
+
+**현상:**
+- Frontend에서 `getUIResolutionState(coverage_resolution)`을 호출하여 상태 재계산
+- Backend와 Frontend 간 상태 불일치 가능성
+
+**원인:**
+- `coverage_resolution.status`를 Frontend에서 다시 해석
+- API 응답의 `resolution_state`를 직접 사용하지 않음
+
+### 구현 내용
+
+**1. conversation-hygiene.config.ts:**
+```typescript
+// Before: CoverageResolution에서 상태 재계산
+export function createCoverageGuideState(
+  resolution: CoverageResolution | null | undefined,
+  originalQuery: string
+): CoverageGuideState | null;
+
+// After: resolution_state 직접 사용
+export function createCoverageGuideState(
+  params: CreateGuideParams
+): CoverageGuideState | null;
+
+interface CreateGuideParams {
+  resolutionState: ResolutionState | null | undefined;
+  message?: string | null;
+  suggestedCoverages?: SuggestedCoverage[];
+  detectedDomain?: string | null;
+  originalQuery: string;
+}
+```
+
+**2. resolution-lock.config.ts:**
+```typescript
+// Before
+export function resolveAnchorUpdate(
+  currentAnchor, newAnchor, newResolution: CoverageResolution, resetCondition
+);
+
+// After: resolution_state 직접 사용
+export function resolveAnchorUpdate(
+  currentAnchor, newAnchor, newState: ResolutionState, resetCondition
+);
+```
+
+**3. page.tsx:**
+```typescript
+// Before
+const newState = getUIResolutionState(response.coverage_resolution);
+
+// After: API 응답의 resolution_state 직접 사용
+const newState: ResolutionState = response.resolution_state || "RESOLVED";
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/lib/conversation-hygiene.config.ts` | `createCoverageGuideState` params 객체 방식으로 변경 |
+| `apps/web/src/lib/resolution-lock.config.ts` | `CoverageResolution` → `ResolutionState` 직접 사용 |
+| `apps/web/src/app/page.tsx` | `response.resolution_state` 직접 사용 |
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 | UNRESOLVED + 후보 목록 | ✅ PASS |
+| 2 | 우측 패널 | "담보 선택 필요" + 결과 없음 | ✅ PASS |
+| 3 | 후보 버튼 클릭 가능 | "다빈치로봇암수술비" 버튼 | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| coverage_resolution.status 재계산 제거 | ✅ 구현 완료 |
+| resolution_state 직접 사용 | ✅ 구현 완료 |
+| UNRESOLVED → 후보 목록 표시 | ✅ 구현 완료 |
+| INVALID → 메시지만 표시 | ✅ 구현 완료 |
+| RESOLVED → 결과 탭 표시 | ✅ 구현 완료 |
+| Web UI 검증 | ✅ 스크린샷 확인 |
+| git 커밋 완료 | ✅ ba7aaad |
