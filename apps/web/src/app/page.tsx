@@ -2,11 +2,12 @@
 
 import { useState, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
-import { ChatMessage, CompareRequest, CompareResponse } from "@/lib/types";
+import { ChatMessage, CompareRequest, CompareResponseWithSlots } from "@/lib/types";
 
 // Deep-link 상태 타입
 interface DeepLinkState {
@@ -44,7 +45,7 @@ export default function Home() {
   const router = useRouter();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentResponse, setCurrentResponse] = useState<CompareResponse | null>(
+  const [currentResponse, setCurrentResponse] = useState<CompareResponseWithSlots | null>(
     null
   );
   const [isLoading, setIsLoading] = useState(false);
@@ -90,27 +91,19 @@ export default function Home() {
       const response = await compare(request);
       setCurrentResponse(response);
 
-      // Generate summary from diff_summary
-      const diffSummary = response.diff_summary || [];
+      // STEP 2.5: 사용자 친화적 요약 사용 (API에서 제공)
       let summaryText = "";
 
-      if (diffSummary.length > 0) {
-        // Generated type: DiffSummaryItem has coverage_code, coverage_name, bullets[]
-        const topDiffs = diffSummary.slice(0, 3);
-        const lines: string[] = [];
-        topDiffs.forEach((d, i) => {
-          const name = d.coverage_name || d.coverage_code || "항목";
-          // Defensive: filter out undefined/null/empty text
-          const bulletTexts = (d.bullets || [])
-            .map((b) => b.text || "")
-            .filter((t) => t.trim())
-            .join("; ");
-          lines.push(`${i + 1}. [${name}] ${bulletTexts || "상세 내용은 오른쪽 패널 참조"}`);
-        });
-        summaryText = lines.join("\n");
-        summaryText += "\n\n자세한 비교표/근거는 오른쪽 패널을 확인해주세요.";
+      // STEP 3.5: recovery_message가 있으면 먼저 표시
+      if (response.recovery_message) {
+        summaryText = `ℹ️ ${response.recovery_message}\n\n`;
+      }
+
+      // user_summary가 있으면 그대로 사용
+      if (response.user_summary) {
+        summaryText += response.user_summary;
       } else {
-        // No diff summary, show basic info
+        // Fallback: 기본 정보만 표시
         const compareAxis = response.compare_axis || [];
         const totalEvidence = compareAxis.reduce(
           (sum, item) => sum + (item.evidence?.length || 0),
@@ -164,10 +157,21 @@ export default function Home() {
       {/* Left: Chat Panel */}
       <div className="w-1/2 flex flex-col border-r">
         <header className="p-4 border-b">
-          <h1 className="text-lg font-semibold">보험 담보 비교</h1>
-          <p className="text-sm text-muted-foreground">
-            Insurance Coverage Comparison
-          </p>
+          <div className="flex items-center gap-4">
+            <Image
+              src="/incar_logo.png"
+              alt="INCAR Logo"
+              width={160}
+              height={160}
+              className="rounded"
+            />
+            <div className="flex-1 flex flex-col items-end">
+              <h1 className="text-3xl font-bold">AI RAG</h1>
+              <p className="text-sm text-muted-foreground">
+                Insurance Coverage Comparison
+              </p>
+            </div>
+          </div>
         </header>
         <div className="flex-1 overflow-hidden">
           <ChatPanel

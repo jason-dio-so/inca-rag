@@ -1,0 +1,29 @@
+# STEP 3.5: Insurer Guard / Auto-Recovery 설정
+# Advanced 옵션에서 insurer 0개 상태일 때 적용되는 기본 정책
+
+# 기본 insurer 세트 (insurer 0개 + 질의에 보험사 없을 때)
+default_insurers:
+  - SAMSUNG
+  - MERITZ
+  - LOTTE
+  - DB
+  - KB
+  - HANWHA
+  - HYUNDAI
+  - HEUNGKUK
+
+# 기본 정책 모드
+# - "all": 전체 보험사 비교
+# - "representative": 대표 insurer 세트만 사용
+default_policy_mode: "all"
+
+# 대표 insurer 세트 (policy_mode: "representative" 일 때)
+representative_insurers:
+  - SAMSUNG
+  - MERITZ
+
+# 보정 메시지 템플릿
+recovery_messages:
+  no_insurer_default: "보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
+  no_insurer_extracted: "질의에서 {insurers}를 인식하여 비교를 수행했습니다."
+  fallback_applied: "기본 비교 범위가 적용되었습니다."

@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 2.9)
+> 최종 업데이트: 2025-12-19 (STEP 3.5)
 
 ---
 
@@ -59,6 +59,7 @@
 | **Step U-4.18** | **수술 조건(방식/병원급) 비교 확장** | **기능** | ✅ 완료 |
 | **STEP 2.8** | **하드코딩 비즈니스 규칙 YAML 외부화** | **리팩토링** | ✅ 완료 |
 | **STEP 2.9** | **Query Anchor / Context Locking** | **기능** | ✅ 완료 |
+| **STEP 3.5** | **Advanced 옵션 Guard / Auto-Recovery** | **기능** | ✅ 완료 |
 
 ---
 
@@ -1219,3 +1220,109 @@ def _detect_follow_up_query_type(query: str, anchor: QueryAnchor | None) -> tupl
 | YAML 외부화 | ✅ query_anchor.yaml |
 | 테스트 작성 | ✅ 21개 테스트 |
 | 기능 회귀 없음 | ✅ 57개 기존 테스트 통과 |
+
+---
+
+## STEP 3.5: Advanced 옵션 Guard / Auto-Recovery (2025-12-19)
+
+### 목표
+- UI Advanced 옵션에서 insurer 0개 선택해도 시스템이 정상 동작
+- insurer auto-recovery 로직으로 질의에서 추출하거나 기본 정책 적용
+- 모든 규칙을 YAML 설정 파일로 외부화 (하드코딩 금지)
+
+### 핵심 원칙
+- **실행 차단 금지**: insurer 0개 상태에서도 쿼리 실행 허용
+- **Auto-Recovery 적용**:
+  1. 질의에서 insurer 추출 시도
+  2. 추출 실패 시 기본 정책 적용 (전체 보험사 비교)
+- **사용자 안내**: recovery 적용 시 안내 메시지 표시
+
+### 구현 내용
+
+**1. 설정 파일 (`config/rules/insurer_defaults.yaml`):**
+```yaml
+# 기본 보험사 리스트
+default_insurers:
+  - SAMSUNG
+  - MERITZ
+  - LOTTE
+  - KB
+  - DB
+  - HANWHA
+  - HYUNDAI
+  - HEUNGKUK
+
+# 기본 정책 모드
+default_policy_mode: "all"  # "all" | "representative"
+
+# 대표 보험사 (mode=representative 시 사용)
+representative_insurers:
+  - SAMSUNG
+  - MERITZ
+
+# 보정 메시지 템플릿
+recovery_messages:
+  no_insurer_default: "보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
+  no_insurer_extracted: "질의에서 {insurers}를 인식하여 비교를 수행했습니다."
+```
+
+**2. API 변경:**
+
+요청 (CompareRequest):
+```python
+# min_length=1 제거 → 빈 리스트 허용
+insurers: list[str] = Field(default=[], description="비교할 보험사 코드 리스트")
+```
+
+응답 (CompareResponse):
+```json
+{
+  "recovery_message": "보험사 선택이 없어 전체 보험사 비교를 수행했습니다.",
+  "debug": {
+    "insurer_scope_method": "auto_recovery_default",
+    "recovery_applied": true,
+    "recovery_reason": "no_insurer_selected"
+  }
+}
+```
+
+**3. Frontend 변경:**
+- ChatPanel: insurer 0개 체크 제거 (실행 허용)
+- page.tsx: recovery_message 채팅에 표시
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/insurer_defaults.yaml` | 신규 생성 (기본 정책 설정) |
+| `api/config_loader.py` | +34 lines: get_insurer_defaults_config, get_default_insurers, get_recovery_messages |
+| `api/compare.py` | min_length 제거, recovery_message 필드 추가, auto-recovery 로직 |
+| `apps/web/src/lib/types.ts` | recovery_message 필드 추가 |
+| `apps/web/src/components/ChatPanel.tsx` | insurer 0개 체크 제거 |
+| `apps/web/src/app/page.tsx` | recovery_message 표시 로직 |
+
+### 검증 시나리오
+
+| # | 질의 | insurers | 결과 |
+|---|------|----------|------|
+| 1 | "암진단비 알려줘" | [] | auto_recovery_default, 전체 보험사 비교 |
+| 2 | "삼성 암진단비" | [] | query_single_explicit, SAMSUNG 추출 |
+| 3 | "다빈치 수술비 비교" | [] | auto_recovery_default, 전체 보험사 비교, 5 slots |
+
+### 검증 결과
+
+```
+✅ Scenario 1: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
+✅ Scenario 2: query_extracted_insurers=["SAMSUNG"], insurer_scope_method=query_single_explicit
+✅ Scenario 3: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다.", slots_count=5
+```
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| insurer 0개 실행 허용 | ✅ Frontend/Backend 모두 허용 |
+| Auto-Recovery 로직 | ✅ 질의 추출 → 기본 정책 fallback |
+| YAML 외부화 | ✅ insurer_defaults.yaml |
+| recovery_message 표시 | ✅ 채팅창 안내 메시지 |
+| 검증 시나리오 통과 | ✅ 3/3 (100%) |

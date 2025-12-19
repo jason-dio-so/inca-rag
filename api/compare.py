@@ -23,6 +23,8 @@ from api.config_loader import (
     get_compare_patterns,
     get_coverage_keywords,
     get_insurer_only_patterns,
+    get_default_insurers,
+    get_recovery_messages,
 )
 
 router = APIRouter(tags=["compare"])
@@ -46,7 +48,8 @@ class QueryAnchor(BaseModel):
 
 class CompareRequest(BaseModel):
     """비교 검색 요청"""
-    insurers: list[str] = Field(..., description="비교할 보험사 코드 리스트", min_length=1)
+    # STEP 3.5: min_length 제거 - 0개도 허용 (auto-recovery 적용)
+    insurers: list[str] = Field(default=[], description="비교할 보험사 코드 리스트")
     query: str = Field(..., description="사용자 질의", min_length=1)
     coverage_codes: list[str] | None = Field(None, description="필터할 coverage_code 리스트")
     top_k_per_insurer: int = Field(10, description="보험사별 최대 결과 수", ge=1, le=100)
@@ -218,6 +221,8 @@ class CompareResponseModel(BaseModel):
     user_summary: str | None = None
     # STEP 2.9: Query Anchor (다음 질의에 전달할 anchor)
     anchor: QueryAnchor | None = None
+    # STEP 3.5: Insurer Auto-Recovery 메시지
+    recovery_message: str | None = None
     debug: dict[str, Any]
 
 
@@ -479,9 +484,13 @@ def _resolve_insurer_scope(
         debug_info["insurer_scope_method"] = "request_explicit"
         return request_insurers, debug_info
 
-    # Case 3: 둘 다 없는 경우 → 빈 리스트 반환 (API에서 에러 처리)
-    debug_info["insurer_scope_method"] = "none_found"
-    return [], debug_info
+    # Case 3: 둘 다 없는 경우 → STEP 3.5 Auto-Recovery 적용
+    # 기본 insurer 정책 적용 (하드코딩 금지 - config에서 로드)
+    default_insurers = get_default_insurers()
+    debug_info["insurer_scope_method"] = "auto_recovery_default"
+    debug_info["recovery_applied"] = True
+    debug_info["recovery_reason"] = "no_insurer_selected"
+    return default_insurers, debug_info
 
 
 def _detect_query_domain(query: str) -> str | None:
@@ -838,6 +847,7 @@ def _convert_response(
     insurer_scope_debug: dict[str, Any],
     anchor_debug: dict[str, Any] | None = None,
     input_anchor: QueryAnchor | None = None,
+    recovery_message: str | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -949,6 +959,8 @@ def _convert_response(
         user_summary=user_summary,
         # STEP 2.9: Query Anchor
         anchor=new_anchor,
+        # STEP 3.5: Insurer Auto-Recovery 메시지
+        recovery_message=recovery_message,
         debug=merged_debug,
     )
 
@@ -968,17 +980,30 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
     """
     try:
         # STEP 2.6: Insurer Scope 결정 (룰 기반, LLM 미사용)
+        # STEP 3.5: Auto-Recovery 적용 - 빈 insurers도 처리됨
         final_insurers, insurer_scope_debug = _resolve_insurer_scope(
             request_insurers=request.insurers,
             query=request.query,
         )
 
-        # final_insurers가 비어있으면 에러
-        if not final_insurers:
-            raise HTTPException(
-                status_code=400,
-                detail="보험사를 선택하거나 질의에 보험사를 명시해주세요.",
-            )
+        # STEP 3.5: Recovery 메시지 생성
+        recovery_message: str | None = None
+        if insurer_scope_debug.get("recovery_applied"):
+            recovery_messages = get_recovery_messages()
+            # 질의에서 보험사 추출된 경우
+            if insurer_scope_debug.get("query_extracted_insurers"):
+                display_names = get_display_names()
+                insurer_display = display_names.get("insurer_names", {})
+                insurer_names = [
+                    insurer_display.get(ic, ic)
+                    for ic in insurer_scope_debug["query_extracted_insurers"]
+                ]
+                recovery_message = recovery_messages.get(
+                    "no_insurer_extracted", ""
+                ).format(insurers=", ".join(insurer_names))
+            else:
+                # 기본 정책 적용
+                recovery_message = recovery_messages.get("no_insurer_default", "")
 
         # STEP 2.9: Query Anchor 기반 후속 질의 판별
         query_type, anchor_debug = _detect_follow_up_query_type(
@@ -1013,6 +1038,7 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             insurer_scope_debug,
             anchor_debug=anchor_debug,
             input_anchor=request.anchor,
+            recovery_message=recovery_message,
         )
     except HTTPException:
         raise

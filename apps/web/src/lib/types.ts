@@ -71,10 +71,17 @@ export interface ComparisonSlot {
   diff_summary?: string | null;
 }
 
-// Extend CompareResponse to include slots
+// Extend CompareResponse to include slots and STEP 2.5 fields
 // (Until types.generated.ts is regenerated)
 export type CompareResponseWithSlots = CompareResponse & {
   slots?: ComparisonSlot[];
+  // STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
+  primary_coverage_code?: string | null;
+  primary_coverage_name?: string | null;
+  related_coverage_codes?: string[];
+  user_summary?: string | null;
+  // STEP 3.5: Insurer Auto-Recovery 메시지
+  recovery_message?: string | null;
 };
 
 // =============================================================================

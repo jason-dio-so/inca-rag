@@ -253,3 +253,39 @@ def get_intent_extension_keywords() -> dict[str, list[str]]:
     """intent 확장 키워드 매핑"""
     config = get_query_anchor_config()
     return config.get("intent_extension_keywords", {})
+
+
+# =============================================================================
+# STEP 3.5: Insurer Guard / Auto-Recovery 설정 로더
+# =============================================================================
+
+def get_insurer_defaults_config() -> dict:
+    """
+    Insurer 기본 정책 설정 전체 반환
+
+    Returns:
+        {
+            "default_insurers": [...],
+            "default_policy_mode": "all",
+            "representative_insurers": [...],
+            "recovery_messages": {...}
+        }
+    """
+    return _load_yaml("rules/insurer_defaults.yaml")
+
+
+def get_default_insurers() -> list[str]:
+    """기본 insurer 리스트 반환 (insurer 0개 상태 시 사용)"""
+    config = get_insurer_defaults_config()
+    mode = config.get("default_policy_mode", "all")
+
+    if mode == "representative":
+        return config.get("representative_insurers", ["SAMSUNG", "MERITZ"])
+    else:
+        return config.get("default_insurers", [])
+
+
+def get_recovery_messages() -> dict[str, str]:
+    """보정 메시지 템플릿 반환"""
+    config = get_insurer_defaults_config()
+    return config.get("recovery_messages", {})

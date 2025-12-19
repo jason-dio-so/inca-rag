@@ -56,13 +56,17 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
   const [policyKeywords, setPolicyKeywords] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    // Find the scroll viewport inside ScrollArea
+    if (scrollContainerRef.current) {
+      const viewport = scrollContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
     }
   }, [messages]);
 
@@ -75,7 +79,8 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
   };
 
   const handleSend = () => {
-    if (!query.trim() || selectedInsurers.length === 0 || isLoading) return;
+    // STEP 3.5: insurer 0개도 허용 (서버에서 auto-recovery 적용)
+    if (!query.trim() || isLoading) return;
 
     const request: CompareRequest = {
       insurers: selectedInsurers,
@@ -114,48 +119,52 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages Area */}
-      <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-        <div className="space-y-4">
-          {messages.length === 0 && (
-            <div className="text-center text-muted-foreground py-8">
-              <p className="text-lg font-medium">보험 담보 비교 챗봇</p>
-              <p className="text-sm mt-2">
-                질문을 입력하고 보험사를 선택해서 담보를 비교해보세요
-              </p>
-            </div>
-          )}
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Messages Area - STEP 2.5: 스크롤 버그 수정 */}
+      <div className="flex-1 overflow-hidden" ref={scrollContainerRef}>
+        <ScrollArea className="h-full">
+          <div className="p-4 space-y-4">
+            {messages.length === 0 && (
+              <div className="text-center text-muted-foreground py-8">
+                <p className="text-lg font-medium">보험 담보 비교 챗봇</p>
+                <p className="text-sm mt-2">
+                  질문을 입력하고 보험사를 선택해서 담보를 비교해보세요
+                </p>
+              </div>
+            )}
 
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
+            {messages.map((message) => (
               <div
-                className={`max-w-[85%] rounded-lg px-4 py-2 ${
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
+                key={message.id}
+                className={`flex ${
+                  message.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                {message.isLoading ? (
-                  <div className="space-y-2">
-                    <Skeleton className="h-4 w-[200px]" />
-                    <Skeleton className="h-4 w-[150px]" />
-                  </div>
-                ) : message.error ? (
-                  <div className="text-destructive">{message.error}</div>
-                ) : (
-                  <div className="whitespace-pre-wrap">{message.content}</div>
-                )}
+                <div
+                  className={`max-w-[85%] rounded-lg px-4 py-2 ${
+                    message.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted"
+                  }`}
+                >
+                  {message.isLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-[200px]" />
+                      <Skeleton className="h-4 w-[150px]" />
+                    </div>
+                  ) : message.error ? (
+                    <div className="text-destructive">{message.error}</div>
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words overflow-y-auto max-h-[400px]">
+                      {message.content}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
 
       {/* Input Area */}
       <div className="border-t bg-background p-4 space-y-3">
@@ -294,7 +303,7 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
           />
           <Button
             onClick={handleSend}
-            disabled={!query.trim() || selectedInsurers.length === 0 || isLoading}
+            disabled={!query.trim() || isLoading}
             className="px-4"
           >
             <Send className="h-4 w-4" />
