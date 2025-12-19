@@ -84,7 +84,7 @@ export function createCoverageGuideState(
       resolutionState: "AMBIGUOUS",
       message: resolution.message || "여러 담보가 검색되었습니다. 아래에서 선택해 주세요.",
       suggestedCoverages: resolution.suggested_coverages || [],
-      detectedDomain: resolution.detected_domain,
+      detectedDomain: resolution.detected_domain ?? undefined,
       originalQuery,
     };
   }

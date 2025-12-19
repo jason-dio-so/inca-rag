@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-β)
+> 최종 업데이트: 2025-12-19 (STEP 3.7-γ)
 
 ---
 
@@ -64,6 +64,7 @@
 | **STEP 3.7** | **Coverage Resolution Failure Handling** | **기능** | ✅ 완료 |
 | **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
+| **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
 
 ---
 
@@ -1630,4 +1631,118 @@ export const RESULTS_PANEL_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
 | 연관 담보 자동 노출 차단 | ✅ 구현 완료 |
 | 하드코딩 없음 | ✅ config 기반 |
 | git 커밋 완료 | ✅ e1052d9 |
+| status.md 업데이트 완료 | ✅ 본 항목 |
+
+## STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene (2025-12-19)
+
+### 목표
+- 담보 미확정(AMBIGUOUS/NOT_FOUND) 상태에서 가이드 메시지가 대화 로그에 누적되는 문제 제거
+- 담보 선택 안내를 단일 상태 패널(UI State)로 격리
+- Chat 영역은 "대화"로서의 역할만 수행
+
+### 문제 인식
+
+**현상:**
+- "삼성 암" (모호한 질의) 입력 시 "여러 담보가 검색되었습니다..." 가이드 메시지가 ChatMessage로 누적
+- 연속 질의 시 가이드 메시지가 계속 쌓여 대화 로그가 오염됨
+- 좌측 Chat 영역과 담보 선택 안내의 역할이 혼재
+
+**원인:**
+- 담보 미확정 안내를 ChatMessage로 취급
+- AMBIGUOUS/NOT_FOUND 상태에서도 assistant 메시지가 chat log에 추가됨
+
+### 적용 원칙
+
+| 원칙 | 설명 |
+|------|------|
+| 상태와 대화의 분리 | 담보 미확정 안내는 ChatMessage가 아님 |
+| 가이드 단일성 원칙 | 가이드는 항상 1개만 존재 (교체, 누적 금지) |
+| EXACT 상태 우선 원칙 | EXACT 상태에서만 Chat 로그에 정상 응답 추가 |
+
+### 구현 내용
+
+**1. Conversation Hygiene 설정 (`conversation-hygiene.config.ts`):**
+```typescript
+// ChatMessage로 추가 가능한 상태 (EXACT만 허용)
+export const CHAT_MESSAGE_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
+
+// 응답이 ChatMessage로 추가될 수 있는지 확인
+export function canAddToChatLog(resolution: CoverageResolution | null | undefined): boolean {
+  const state = getUIResolutionState(resolution);
+  return CHAT_MESSAGE_ALLOWED_STATES.includes(state);
+}
+
+// Coverage Guide 상태 팩토리
+export function createCoverageGuideState(
+  resolution: CoverageResolution | null | undefined,
+  originalQuery: string
+): CoverageGuideState | null;
+```
+
+**2. CoverageGuidePanel 컴포넌트:**
+```typescript
+// 담보 미확정 상태에서 표시되는 상태 안내 패널
+// - ChatMessage가 아님
+// - 항상 단 하나만 존재
+// - EXACT 상태에서는 자동 제거
+export function CoverageGuidePanel({
+  guide,
+  onSelectCoverage,
+}: CoverageGuidePanelProps);
+```
+
+**3. page.tsx 상태 분기:**
+```typescript
+// STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
+const canAddToChat = canAddToChatLog(response.coverage_resolution);
+
+if (!canAddToChat) {
+  // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
+  const guide = createCoverageGuideState(response.coverage_resolution, request.query);
+  setCoverageGuide(guide);
+  return;
+}
+
+// (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
+setCoverageGuide(null);
+// ... 정상 응답 처리
+```
+
+### 생성/수정된 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/lib/conversation-hygiene.config.ts` | 상태와 대화 분리 규칙 정의 (신규) |
+| `apps/web/src/components/CoverageGuidePanel.tsx` | 담보 선택 가이드 UI 컴포넌트 (신규) |
+| `apps/web/src/app/page.tsx` | EXACT 상태에서만 ChatMessage 추가 |
+| `apps/web/src/components/ChatPanel.tsx` | CoverageGuidePanel 통합 |
+| `apps/web/src/__tests__/conversation-hygiene.test.ts` | 단위 테스트 (26개 케이스) |
+
+### UI 역할 분리
+
+| 영역 | 허용 출력 | 금지 출력 |
+|------|----------|----------|
+| Chat Log | 사용자 입력, EXACT 상태의 정상 응답 | 담보 선택 가이드, 안내 문구 |
+| Coverage Guide Panel | AMBIGUOUS/NOT_FOUND 상태 안내 | - |
+| Results Panel | EXACT 상태의 비교 결과 | AMBIGUOUS/NOT_FOUND 상태의 결과 |
+
+### 검증 시나리오
+
+| # | 쿼리 | 예상 동작 | 결과 |
+|---|------|----------|------|
+| 1 | "삼성 암" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
+| 2 | "삼성 암진단비" | Chat: 사용자+응답, Guide Panel: 없음 | ✅ |
+| 3 | "삼성 암zz" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
+| 4 | 연속 질의 | 이전 가이드 교체, 누적 없음 | ✅ |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| 담보 가이드가 ChatMessage에 누적되지 않음 | ✅ 구현 완료 |
+| 가이드는 항상 1개만 존재 | ✅ 구현 완료 |
+| EXACT 상태에서만 Chat 로그에 응답 추가 | ✅ 구현 완료 |
+| 하드코딩 없음 | ✅ config 기반 |
+| 단위 테스트 통과 | ✅ 26/26 pass |
+| git 커밋 완료 | ✅ 58b8231 |
 | status.md 업데이트 완료 | ✅ 본 항목 |
