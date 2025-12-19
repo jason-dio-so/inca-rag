@@ -170,10 +170,10 @@ function HomeContent() {
       const response = await compare(requestWithAnchor);
 
       // =======================================================================
-      // STEP 3.7-δ: Resolution Lock 적용
+      // STEP 3.7-δ-β: Resolution Lock 적용
       // - Lock 위반 시 기존 anchor 유지, 새 resolution 무시
       // =======================================================================
-      const currentState = currentAnchor ? "EXACT" : null; // anchor가 있으면 EXACT
+      const currentState = currentAnchor ? "RESOLVED" : null; // anchor가 있으면 RESOLVED
       const newState = getUIResolutionState(response.coverage_resolution);
 
       // Resolution Lock: anchor 업데이트 결정
@@ -184,7 +184,7 @@ function HomeContent() {
         resetCondition
       );
 
-      // Resolution Lock: 상태 결정 (Lock 위반 시 EXACT 유지)
+      // Resolution Lock: 상태 결정 (Lock 위반 시 RESOLVED 유지)
       const resolvedState = resolveResolutionState(
         currentAnchor,
         response.coverage_resolution,
@@ -194,7 +194,7 @@ function HomeContent() {
       // 디버그 로그
       logTransition(currentState, newState, resolvedState === newState, resetCondition ?? undefined);
 
-      // STEP 3.7-δ: Lock 위반 시 기존 anchor + 기존 response 유지
+      // STEP 3.7-δ-β: Lock 위반 시 기존 anchor + 기존 response 유지
       const isLockViolated = resolvedState !== newState;
       setCurrentAnchor(resolvedAnchor);
 
@@ -206,20 +206,20 @@ function HomeContent() {
       }
 
       // =======================================================================
-      // STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
-      // STEP 3.7-δ: resolvedState 기반으로 판단 (Lock 적용 후)
+      // STEP 3.7-δ-β: Conversation Hygiene - 상태별 분기 처리
+      // resolvedState 기반으로 판단 (Lock 적용 후)
       // =======================================================================
-      const canAddToChat = resolvedState === "EXACT";
+      const canAddToChat = resolvedState === "RESOLVED";
 
       if (!canAddToChat) {
-        // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
+        // (A) UNRESOLVED / INVALID: ChatMessage 추가 ❌, Guide Panel 표시 ✅
         const guide = createCoverageGuideState(response.coverage_resolution, request.query);
         setCoverageGuide(guide);
         // 사용자 메시지는 이미 추가됨, assistant 메시지는 추가하지 않음
         return;
       }
 
-      // (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
+      // (B) RESOLVED: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
       setCoverageGuide(null);
 
       // STEP 2.5: 사용자 친화적 요약 사용 (API에서 제공)

@@ -1,14 +1,14 @@
 "use client";
 
 /**
- * STEP 3.7-β: Results Panel with UI Gating
+ * STEP 3.7-δ-β: Results Panel with Resolution State Gate
  *
- * Coverage Resolution 상태에 따른 렌더링 제어:
- * - EXACT (resolved): Results Panel 전체 활성화
- * - AMBIGUOUS (suggest/clarify): Results Panel 렌더링 차단
- * - NOT_FOUND (failed): Results Panel 렌더링 차단
+ * Resolution State에 따른 렌더링 제어:
+ * - RESOLVED: Results Panel 전체 활성화
+ * - UNRESOLVED: Results Panel 렌더링 차단 (담보 선택 필요)
+ * - INVALID: Results Panel 렌더링 차단 (재입력 필요)
  *
- * 원칙: 대표 담보 미확정 상태에서 우측 패널은 비어 있어야 함
+ * 원칙: resolution_state !== "RESOLVED"일 때 우측 패널은 비어 있어야 함
  */
 
 import { useState, useMemo } from "react";
@@ -28,11 +28,7 @@ import { EvidencePanel } from "./EvidencePanel";
 import { SlotsTable } from "./SlotsTable";
 import { CompareResponseWithSlots, CoverageCompareItem } from "@/lib/types";
 import { ChevronDown, ChevronUp, Info, AlertCircle } from "lucide-react";
-import {
-  canRenderResultsPanel,
-  getResolutionMessage,
-  getUIResolutionState,
-} from "@/lib/ui-gating.config";
+import { getResolutionMessage } from "@/lib/ui-gating.config";
 
 interface ResultsPanelProps {
   response: CompareResponseWithSlots | null;
@@ -92,23 +88,22 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
   }
 
   // ===========================================================================
-  // STEP 3.7-β: UI Gating - Coverage Resolution 상태 확인
+  // STEP 3.7-δ-β: Resolution State Gate
+  // resolution_state !== "RESOLVED"이면 Results Panel 렌더링 차단
   // ===========================================================================
-  const resolutionState = getUIResolutionState(response.coverage_resolution);
-  const canRender = canRenderResultsPanel(response.coverage_resolution);
+  const resolutionState = response.resolution_state;
 
-  // 대표 담보 미확정 상태 (AMBIGUOUS / NOT_FOUND) → Results Panel 렌더링 차단
-  if (!canRender) {
+  if (resolutionState !== "RESOLVED") {
     const message = getResolutionMessage(response.coverage_resolution);
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground">
         <div className="text-center max-w-md">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
           <p className="text-lg font-medium mb-2">
-            {resolutionState === "AMBIGUOUS" ? "담보 선택 필요" : "담보 미확정"}
+            {resolutionState === "UNRESOLVED" ? "담보 선택 필요" : "담보 미확정"}
           </p>
           <p className="text-sm">{message}</p>
-          {/* STEP 3.7-β: 연관 담보 / 문서 / 결과 표시 완전 차단 */}
+          {/* STEP 3.7-δ-β: resolution_state !== RESOLVED → 결과 표시 완전 차단 */}
         </div>
       </div>
     );
@@ -221,7 +216,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           </TabsContent>
 
           <TabsContent value="evidence" className="m-0 p-4">
-            <EvidencePanel data={response.compare_axis} isPolicyMode={false} slots={response.slots} />
+            <EvidencePanel data={response.compare_axis} isPolicyMode={false} slots={response.slots ?? undefined} />
           </TabsContent>
 
           <TabsContent value="policy" className="m-0 p-4">

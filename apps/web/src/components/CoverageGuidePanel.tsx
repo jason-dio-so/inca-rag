@@ -2,13 +2,14 @@
 
 /**
  * STEP 3.7-γ: Coverage Guide Panel
+ * STEP 3.7-δ-β: State names updated (UNRESOLVED / INVALID)
  *
- * 담보 미확정(AMBIGUOUS / NOT_FOUND) 상태에서 표시되는 상태 안내 패널
+ * 담보 미확정(UNRESOLVED / INVALID) 상태에서 표시되는 상태 안내 패널
  *
  * 원칙:
  * - 이 컴포넌트는 ChatMessage가 아님
  * - 항상 단 하나만 존재 (마지막 질의 기준으로 갱신)
- * - EXACT 상태에서는 자동 제거
+ * - RESOLVED 상태에서는 자동 제거
  */
 
 import { Button } from "@/components/ui/button";
@@ -40,15 +41,15 @@ export function CoverageGuidePanel({
     return null;
   }
 
-  const isAmbiguous = guide.resolutionState === "AMBIGUOUS";
-  const isNotFound = guide.resolutionState === "NOT_FOUND";
-  const messages = isAmbiguous ? GUIDE_MESSAGES.AMBIGUOUS : GUIDE_MESSAGES.NOT_FOUND;
+  const isUnresolved = guide.resolutionState === "UNRESOLVED";
+  const isInvalid = guide.resolutionState === "INVALID";
+  const messages = isUnresolved ? GUIDE_MESSAGES.UNRESOLVED : GUIDE_MESSAGES.INVALID;
 
   return (
     <Card className="mx-4 my-2 border-amber-200 bg-amber-50/50">
       <CardHeader className="pb-2 pt-3">
         <CardTitle className="text-sm font-medium flex items-center gap-2 text-amber-800">
-          {isAmbiguous ? (
+          {isUnresolved ? (
             <HelpCircle className="h-4 w-4" />
           ) : (
             <AlertCircle className="h-4 w-4" />
@@ -69,8 +70,8 @@ export function CoverageGuidePanel({
           </div>
         )}
 
-        {/* 선택 가능한 담보 목록 (AMBIGUOUS 상태) */}
-        {isAmbiguous && guide.suggestedCoverages.length > 0 && (
+        {/* 선택 가능한 담보 목록 (UNRESOLVED 상태) */}
+        {isUnresolved && guide.suggestedCoverages.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs text-amber-600">{messages.hint}</p>
             <div className="flex flex-wrap gap-2">
@@ -90,8 +91,8 @@ export function CoverageGuidePanel({
           </div>
         )}
 
-        {/* NOT_FOUND 상태 힌트 */}
-        {isNotFound && (
+        {/* INVALID 상태 힌트 */}
+        {isInvalid && (
           <p className="text-xs text-amber-600">{messages.hint}</p>
         )}
 

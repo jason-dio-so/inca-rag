@@ -97,13 +97,13 @@ export interface SuggestedCoverage {
 
 export interface CoverageResolution {
   /**
-   * status:
-   * - resolved: 확정된 coverage_code 존재
-   * - suggest: 유사 담보 존재하지만 확정 불가 (유저 선택 필요)
-   * - failed: 매핑 불가 (재입력 필요)
-   * - clarify: 도메인만 추정 가능 (구체화 필요)
+   * STEP 3.7-δ-β: status (resolution_state)
+   * - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
+   * - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
+   * - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
    */
-  status: "resolved" | "suggest" | "failed" | "clarify";
+  status: "RESOLVED" | "UNRESOLVED" | "INVALID";
+  resolved_coverage_code?: string | null;
   message?: string | null;
   suggested_coverages: SuggestedCoverage[];
   detected_domain?: string | null;
@@ -112,7 +112,10 @@ export interface CoverageResolution {
 // Extend CompareResponse to include slots and STEP 2.5 fields
 // (Until types.generated.ts is regenerated)
 export type CompareResponseWithSlots = CompareResponse & {
-  slots?: ComparisonSlot[];
+  // STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
+  resolution_state: "RESOLVED" | "UNRESOLVED" | "INVALID";
+  resolved_coverage_code?: string | null;
+  slots?: ComparisonSlot[] | null;
   // STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
   primary_coverage_code?: string | null;
   primary_coverage_name?: string | null;
@@ -122,7 +125,7 @@ export type CompareResponseWithSlots = CompareResponse & {
   recovery_message?: string | null;
   // STEP 2.9 + 3.6: Query Anchor with Intent
   anchor?: QueryAnchor | null;
-  // STEP 3.7: Coverage Resolution
+  // STEP 3.7: Coverage Resolution (상세 정보)
   coverage_resolution?: CoverageResolution | null;
 };
 

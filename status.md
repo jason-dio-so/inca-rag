@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-γ)
+> 최종 업데이트: 2025-12-19 (STEP 3.7-δ-β)
 
 ---
 
@@ -65,6 +65,7 @@
 | **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
 | **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
 
 ---
 
@@ -786,3 +787,115 @@ setCoverageGuide(null);
 | 단위 테스트 통과 | ✅ 26/26 pass |
 | git 커밋 완료 | ✅ 58b8231 |
 | status.md 업데이트 완료 | ✅ 본 항목 |
+
+---
+
+## STEP 3.7-δ-β: Resolution State Reclassification (FAILED→UNRESOLVED) (2025-12-19)
+
+### 목표
+- coverage_resolution status "failed"를 "UNRESOLVED"로 재분류 (candidates >= 1인 경우)
+- Resolution State 체계를 3단계로 정규화: RESOLVED | UNRESOLVED | INVALID
+- Backend Gate: resolution_state !== RESOLVED일 때 compare/slots/diff/evidence 데이터 null 반환
+- Frontend Guard: resolution_state !== RESOLVED일 때 Results Panel 렌더링 차단
+
+### 문제 인식
+
+**현상:**
+- "다빈치 수술비" 질의 시 similarity 0.1923 < threshold 0.2로 인해 status="failed"
+- candidates가 존재함에도 "담보 미확정" 오류 표시
+- 사용자가 후보에서 선택할 기회 없이 차단됨
+
+**원인:**
+- "failed" status가 candidates 존재 여부와 관계없이 similarity threshold만으로 결정
+- candidates >= 1이면 사용자가 선택할 수 있어야 하는데 차단됨
+
+### Resolution State 정의
+
+| 상태 | 조건 | UI 동작 |
+|------|------|---------|
+| **RESOLVED** | candidates == 1 && similarity >= confident | Results Panel 표시 |
+| **UNRESOLVED** | candidates >= 1 (확정 불가) | 담보 선택 가이드 표시 |
+| **INVALID** | candidates == 0 | 재입력 안내 표시 |
+
+### 구현 내용
+
+**1. Backend (api/compare.py):**
+```python
+# CoverageResolutionResponse 모델 수정
+class CoverageResolutionResponse(BaseModel):
+    status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    resolved_coverage_code: str | None = None
+    message: str | None = None
+    suggested_coverages: list[SuggestedCoverageResponse] = []
+
+# _evaluate_coverage_resolution 로직 수정
+def _evaluate_coverage_resolution(...) -> CoverageResolutionResponse:
+    if len(candidates) == 0:
+        return CoverageResolutionResponse(status="INVALID", ...)
+    if len(candidates) == 1 and best_similarity >= confident_threshold:
+        return CoverageResolutionResponse(status="RESOLVED", ...)
+    return CoverageResolutionResponse(status="UNRESOLVED", ...)
+```
+
+**2. Backend Gate (CompareResponseModel):**
+```python
+# resolution_state !== RESOLVED일 때 데이터 null 반환
+class CompareResponseModel(BaseModel):
+    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    resolved_coverage_code: str | None = None
+    compare_axis: list[CompareAxisItemResponse] | None = None
+    policy_axis: list[PolicyAxisItemResponse] | None = None
+    coverage_compare_result: list[CoverageCompareItemResponse] | None = None
+    diff_summary: list[DiffSummaryItemResponse] | None = None
+    slots: list[SlotResponse] | None = None
+```
+
+**3. Frontend (ui-gating.config.ts, resolution-lock.config.ts):**
+```typescript
+// State 명칭 통일: EXACT→RESOLVED, AMBIGUOUS→UNRESOLVED, NOT_FOUND→INVALID
+export type ResolutionState = "RESOLVED" | "UNRESOLVED" | "INVALID";
+
+// RESOLVED 상태에서만 Results Panel 렌더링
+export const RESULTS_PANEL_ALLOWED_STATES: ResolutionState[] = ["RESOLVED"];
+```
+
+**4. ResultsPanel 수정:**
+```typescript
+const resolutionState = response.resolution_state;
+if (resolutionState !== "RESOLVED") {
+    return <EmptyState message="담보 선택 필요" />;
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | status 값 변경, resolution_state 필드 추가, backend gate 구현 |
+| `apps/web/src/lib/types.ts` | CoverageResolution.status 타입 변경, resolution_state 필드 추가 |
+| `apps/web/src/lib/ui-gating.config.ts` | ResolutionState 명칭 통일 |
+| `apps/web/src/lib/resolution-lock.config.ts` | ResolutionState 명칭 통일 |
+| `apps/web/src/lib/conversation-hygiene.config.ts` | ResolutionState 명칭 통일 |
+| `apps/web/src/components/ResultsPanel.tsx` | resolution_state 직접 사용 |
+| `apps/web/src/app/page.tsx` | RESOLVED 상태 참조 변경 |
+
+### 검증 결과
+
+| # | 테스트 | 예상 | 결과 |
+|---|--------|------|------|
+| 1 | "다빈치 수술비" | resolution_state=UNRESOLVED, compare_axis=null | ✅ PASS |
+| 2 | "삼성의 다빈치 수술비 비교" (0 candidates) | resolution_state=INVALID | ✅ PASS |
+| 3 | "유사암 제외" | resolution_state=UNRESOLVED | ✅ PASS |
+| 4 | "유사암진단비" | resolution_state=UNRESOLVED (4 candidates) | ✅ PASS |
+| 5 | explicit coverage_code | resolution_state=RESOLVED, compare_axis 정상 | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| FAILED → UNRESOLVED 재분류 (candidates >= 1) | ✅ 구현 완료 |
+| Resolution State 3단계 정규화 | ✅ RESOLVED/UNRESOLVED/INVALID |
+| Backend Gate (null 데이터) | ✅ 구현 완료 |
+| Frontend Guard (렌더링 차단) | ✅ 구현 완료 |
+| similarity threshold 변경 없음 | ✅ 유지 |
+| 테스트 통과 | ✅ 5/5 (100%) |

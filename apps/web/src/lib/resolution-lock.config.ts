@@ -1,16 +1,16 @@
 /**
- * STEP 3.7-δ: Resolution Lock & Single Source of Truth
+ * STEP 3.7-δ-β: Resolution Lock & Single Source of Truth
  *
- * Resolution 상태 전이 규칙을 정의하고, EXACT 상태에서의 퇴행을 방지합니다.
+ * Resolution 상태 전이 규칙을 정의하고, RESOLVED 상태에서의 퇴행을 방지합니다.
  *
  * 핵심 원칙:
- * 1. Resolution Lock: EXACT 상태는 명시적 리셋 없이 AMBIGUOUS/NOT_FOUND로 돌아갈 수 없음
+ * 1. Resolution Lock: RESOLVED 상태는 명시적 리셋 없이 UNRESOLVED/INVALID로 돌아갈 수 없음
  * 2. Single Source of Truth: QueryAnchor만 resolution 상태를 보유
  * 3. 모든 UI 컴포넌트는 anchor를 참조하여 렌더링
  */
 
 import { QueryAnchor, CoverageResolution } from "./types";
-import { UIResolutionState, getUIResolutionState } from "./ui-gating.config";
+import { ResolutionState, getUIResolutionState } from "./ui-gating.config";
 
 // =============================================================================
 // Resolution State Transition Rules
@@ -19,34 +19,34 @@ import { UIResolutionState, getUIResolutionState } from "./ui-gating.config";
 /**
  * 허용되는 상태 전이
  * - NULL → any: 초기 상태에서는 모든 전이 허용
- * - AMBIGUOUS → EXACT: 담보 선택으로 확정
- * - NOT_FOUND → EXACT: 재질의로 담보 확정
+ * - UNRESOLVED → RESOLVED: 담보 선택으로 확정
+ * - INVALID → RESOLVED: 재질의로 담보 확정
  */
-type TransitionKey = `${UIResolutionState | "NULL"}->${UIResolutionState}`;
+type TransitionKey = `${ResolutionState | "NULL"}->${ResolutionState}`;
 
 const ALLOWED_TRANSITIONS: Set<TransitionKey> = new Set([
   // NULL → any
-  "NULL->EXACT",
-  "NULL->AMBIGUOUS",
-  "NULL->NOT_FOUND",
-  // AMBIGUOUS → EXACT (선택으로 확정)
-  "AMBIGUOUS->EXACT",
-  // NOT_FOUND → EXACT (재질의로 확정)
-  "NOT_FOUND->EXACT",
+  "NULL->RESOLVED",
+  "NULL->UNRESOLVED",
+  "NULL->INVALID",
+  // UNRESOLVED → RESOLVED (선택으로 확정)
+  "UNRESOLVED->RESOLVED",
+  // INVALID → RESOLVED (재질의로 확정)
+  "INVALID->RESOLVED",
   // 동일 상태 유지 (no-op)
-  "EXACT->EXACT",
-  "AMBIGUOUS->AMBIGUOUS",
-  "NOT_FOUND->NOT_FOUND",
+  "RESOLVED->RESOLVED",
+  "UNRESOLVED->UNRESOLVED",
+  "INVALID->INVALID",
 ]);
 
 /**
  * 금지되는 상태 전이 (절대 금지)
- * - EXACT → AMBIGUOUS: 확정 후 다시 모호해질 수 없음
- * - EXACT → NOT_FOUND: 확정 후 다시 미확정이 될 수 없음
+ * - RESOLVED → UNRESOLVED: 확정 후 다시 모호해질 수 없음
+ * - RESOLVED → INVALID: 확정 후 다시 미확정이 될 수 없음
  */
 const FORBIDDEN_TRANSITIONS: Set<TransitionKey> = new Set([
-  "EXACT->AMBIGUOUS",
-  "EXACT->NOT_FOUND",
+  "RESOLVED->UNRESOLVED",
+  "RESOLVED->INVALID",
 ]);
 
 // =============================================================================
@@ -57,8 +57,8 @@ const FORBIDDEN_TRANSITIONS: Set<TransitionKey> = new Set([
  * 상태 전이가 허용되는지 확인
  */
 export function isTransitionAllowed(
-  fromState: UIResolutionState | null,
-  toState: UIResolutionState
+  fromState: ResolutionState | null,
+  toState: ResolutionState
 ): boolean {
   const from = fromState ?? "NULL";
   const key: TransitionKey = `${from}->${toState}`;
@@ -74,17 +74,17 @@ export function isTransitionAllowed(
 
 /**
  * Resolution Lock이 걸려있는지 확인
- * - anchor가 있고 resolution이 EXACT이면 Lock 상태
+ * - anchor가 있고 resolution이 RESOLVED이면 Lock 상태
  */
 export function isResolutionLocked(anchor: QueryAnchor | null): boolean {
   if (!anchor) return false;
-  // anchor가 있다는 것은 EXACT 상태 (resolved)를 의미
+  // anchor가 있다는 것은 RESOLVED 상태를 의미
   return !!anchor.coverage_code;
 }
 
 /**
  * 새 resolution이 현재 lock 상태를 위반하는지 확인
- * - Lock 상태에서 AMBIGUOUS/NOT_FOUND 응답이 오면 위반
+ * - Lock 상태에서 UNRESOLVED/INVALID 응답이 오면 위반
  */
 export function isLockViolation(
   currentAnchor: QueryAnchor | null,
@@ -102,8 +102,8 @@ export function isLockViolation(
 
   const newState = getUIResolutionState(newResolution);
 
-  // Lock 상태에서 EXACT가 아닌 응답이 오면 위반
-  return newState !== "EXACT";
+  // Lock 상태에서 RESOLVED가 아닌 응답이 오면 위반
+  return newState !== "RESOLVED";
 }
 
 // =============================================================================
@@ -204,7 +204,7 @@ export function resolveResolutionState(
   currentAnchor: QueryAnchor | null,
   newResolution: CoverageResolution | null | undefined,
   resetCondition: ResetCondition | null
-): UIResolutionState {
+): ResolutionState {
   // 리셋 조건이면 새 resolution 상태 사용
   if (resetCondition) {
     return getUIResolutionState(newResolution);
@@ -212,8 +212,8 @@ export function resolveResolutionState(
 
   // Lock 위반 체크
   if (isLockViolation(currentAnchor, newResolution)) {
-    // Lock 위반 시 EXACT 상태 유지
-    return "EXACT";
+    // Lock 위반 시 RESOLVED 상태 유지
+    return "RESOLVED";
   }
 
   // 정상 전이: 새 resolution 상태 사용
@@ -228,8 +228,8 @@ export function resolveResolutionState(
  * 상태 전이 로그 (개발용)
  */
 export function logTransition(
-  from: UIResolutionState | null,
-  to: UIResolutionState,
+  from: ResolutionState | null,
+  to: ResolutionState,
   allowed: boolean,
   reason?: string
 ): void {
