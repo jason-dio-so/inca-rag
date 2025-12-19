@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ4)
 
 ---
 
@@ -69,6 +69,7 @@
 | **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1076,3 +1077,43 @@ handleSendMessage({
 | UNRESOLVED 우선 렌더링 | ✅ 구현 완료 |
 | ResultsPanel resolution_state 직접 사용 | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ 2fc5770 |
+
+## STEP 3.7-δ-γ4: UNRESOLVED 후보 소스 정합화 (2025-12-20)
+
+### 목표
+- UNRESOLVED 상태에서 후보 소스를 `coverage_resolution.suggested_coverages`로 통일
+- 버튼 라벨 우선순위 정립
+
+### 구현 내용
+
+**후보 소스 우선순위:**
+1. `response.coverage_resolution.suggested_coverages` (PRIMARY)
+2. `response.coverage_candidates` (SECONDARY)
+3. empty array
+
+**버튼 라벨 우선순위:**
+1. `coverage_name`
+2. `coverage_name_ko`
+3. `coverage_code`
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/app/page.tsx` | 후보 소스 우선순위 로직 추가 |
+| `apps/web/src/components/CoverageGuidePanel.tsx` | 버튼 라벨 우선순위 로직 추가 |
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 | 3개 후보 버튼 | ✅ PASS |
+| 2 | 버튼 라벨 | 다빈치로봇암수술비, 유사암수술비, 암수술비(유사암 제외) | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| suggested_coverages 우선 사용 | ✅ 구현 완료 |
+| 전체 후보 렌더링 (map) | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ 62e88d8 |
