@@ -25,6 +25,10 @@ from api.config_loader import (
     get_insurer_only_patterns,
     get_default_insurers,
     get_recovery_messages,
+    # STEP 3.6: Intent Keywords
+    get_compare_trigger_keywords,
+    get_lookup_force_keywords,
+    get_ui_events_no_intent_change,
 )
 
 router = APIRouter(tags=["compare"])
@@ -39,11 +43,20 @@ class QueryAnchor(BaseModel):
     Query Anchor - 대화형 질의에서 기준 담보와 의도를 유지
 
     세션 단위로 유지되며, 후속 질의에서 담보 컨텍스트 유지에 사용됨
+
+    STEP 3.6: intent 필드 추가
+    - lookup: 단일 보험사 정보 조회
+    - compare: 복수 보험사 비교
     """
     coverage_code: str = Field(..., description="대표 담보 코드")
     coverage_name: str | None = Field(None, description="대표 담보 명칭")
     domain: str | None = Field(None, description="담보 도메인 (CANCER, CARDIO 등)")
     original_query: str = Field(..., description="anchor 생성 시점의 원본 질의")
+    # STEP 3.6: Intent Locking
+    intent: Literal["lookup", "compare"] = Field(
+        default="lookup",
+        description="질의 의도 (lookup=단일조회, compare=비교)"
+    )
 
 
 class CompareRequest(BaseModel):
@@ -70,6 +83,11 @@ class CompareRequest(BaseModel):
     gender: Literal["M", "F"] | None = Field(None, description="피보험자 성별 (M/F)")
     # STEP 2.9: Query Anchor
     anchor: QueryAnchor | None = Field(None, description="이전 질의의 anchor (후속 질의 시 전달)")
+    # STEP 3.6: UI 이벤트 타입 (intent 변경 차단용)
+    ui_event_type: str | None = Field(
+        None,
+        description="UI 이벤트 타입 (coverage_button_click 등 - intent 변경 차단)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -418,6 +436,129 @@ def _has_explicit_compare_intent(query: str) -> bool:
         if pattern in query:
             return True
     return False
+
+
+# =============================================================================
+# STEP 3.6: Intent Detection & Locking
+# =============================================================================
+
+def _detect_intent_from_query(query: str) -> tuple[Literal["lookup", "compare"], dict[str, Any]]:
+    """
+    STEP 3.6: Query에서 intent(lookup/compare) 감지
+
+    핵심 원칙:
+    - 기본 Intent는 lookup (단일 보험사 정보 조회)
+    - 비교 키워드가 명시적으로 포함된 경우에만 compare
+    - lookup_force_keywords가 있으면 compare 트리거 무시
+
+    Returns:
+        (intent, debug_info)
+    """
+    debug_info: dict[str, Any] = {
+        "has_compare_trigger": False,
+        "has_lookup_force": False,
+        "matched_compare_keyword": None,
+        "matched_lookup_keyword": None,
+    }
+
+    query_lower = query.lower()
+
+    # lookup 강제 키워드 확인
+    lookup_force_keywords = get_lookup_force_keywords()
+    for keyword in lookup_force_keywords:
+        if keyword in query_lower:
+            debug_info["has_lookup_force"] = True
+            debug_info["matched_lookup_keyword"] = keyword
+            break
+
+    # 비교 트리거 키워드 확인
+    compare_trigger_keywords = get_compare_trigger_keywords()
+    for keyword in compare_trigger_keywords:
+        if keyword in query_lower:
+            debug_info["has_compare_trigger"] = True
+            debug_info["matched_compare_keyword"] = keyword
+            break
+
+    # lookup 강제가 있으면 lookup 유지
+    if debug_info["has_lookup_force"]:
+        debug_info["intent_reason"] = "lookup_force_keyword"
+        return "lookup", debug_info
+
+    # 비교 트리거가 있으면 compare
+    if debug_info["has_compare_trigger"]:
+        debug_info["intent_reason"] = "compare_trigger_keyword"
+        return "compare", debug_info
+
+    # 기본값: lookup
+    debug_info["intent_reason"] = "default_lookup"
+    return "lookup", debug_info
+
+
+def _resolve_intent(
+    query: str,
+    anchor: QueryAnchor | None,
+    ui_event_type: str | None,
+    query_insurers: list[str],
+) -> tuple[Literal["lookup", "compare"], dict[str, Any]]:
+    """
+    STEP 3.6: Intent Locking - 최종 intent 결정
+
+    핵심 원칙:
+    1) UI 이벤트로 인한 intent 변경 금지
+    2) anchor에 intent가 있으면 유지 (명시적 변경 신호 없는 한)
+    3) 명시적 비교 키워드가 있을 때만 compare로 변경
+    4) insurer 변경, coverage 변경은 intent 변경 사유가 아님
+
+    Returns:
+        (final_intent, debug_info)
+    """
+    debug_info: dict[str, Any] = {
+        "anchor_intent": anchor.intent if anchor else None,
+        "ui_event_type": ui_event_type,
+        "ui_event_blocked_change": False,
+        "intent_locked": False,
+        "query_insurers_count": len(query_insurers),
+    }
+
+    # 1) UI 이벤트로 인한 요청인 경우 - intent 변경 금지
+    no_intent_change_events = get_ui_events_no_intent_change()
+    if ui_event_type and ui_event_type in no_intent_change_events:
+        debug_info["ui_event_blocked_change"] = True
+        if anchor:
+            debug_info["intent_locked"] = True
+            debug_info["intent_reason"] = "ui_event_blocked_anchor_preserved"
+            return anchor.intent, debug_info
+        else:
+            # anchor가 없는데 UI 이벤트인 경우 (비정상) → lookup 기본값
+            debug_info["intent_reason"] = "ui_event_no_anchor_default_lookup"
+            return "lookup", debug_info
+
+    # 2) Query에서 intent 감지
+    query_intent, query_intent_debug = _detect_intent_from_query(query)
+    debug_info["query_intent"] = query_intent
+    debug_info["query_intent_debug"] = query_intent_debug
+
+    # 3) anchor가 있는 경우 - Intent Locking 적용
+    if anchor:
+        # 명시적 비교 키워드가 있으면 compare로 전환 허용
+        if query_intent_debug.get("has_compare_trigger") and not query_intent_debug.get("has_lookup_force"):
+            debug_info["intent_reason"] = "explicit_compare_override"
+            return "compare", debug_info
+
+        # 그 외에는 anchor intent 유지
+        debug_info["intent_locked"] = True
+        debug_info["intent_reason"] = "anchor_intent_preserved"
+        return anchor.intent, debug_info
+
+    # 4) anchor가 없는 경우 - 새로운 intent 결정
+    # 복수 보험사가 질의에 명시된 경우 compare 가능성
+    if len(query_insurers) > 1 and query_intent == "compare":
+        debug_info["intent_reason"] = "new_query_multi_insurer_compare"
+        return "compare", debug_info
+
+    # 기본값 또는 query에서 감지된 intent 사용
+    debug_info["intent_reason"] = f"new_query_{query_intent}"
+    return query_intent, debug_info
 
 
 def _resolve_insurer_scope(
@@ -848,6 +989,9 @@ def _convert_response(
     anchor_debug: dict[str, Any] | None = None,
     input_anchor: QueryAnchor | None = None,
     recovery_message: str | None = None,
+    # STEP 3.6: Intent Locking
+    resolved_intent: Literal["lookup", "compare"] = "lookup",
+    intent_debug: dict[str, Any] | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -877,20 +1021,31 @@ def _convert_response(
     if anchor_debug:
         merged_debug["anchor"] = anchor_debug
 
-    # STEP 2.9: 새 anchor 생성
-    # insurer_only 후속 질의인 경우 기존 anchor 유지, 아닌 경우 새 anchor 생성
+    # STEP 3.6: intent debug 정보 추가
+    if intent_debug:
+        merged_debug["intent"] = intent_debug
+
+    # STEP 2.9 + 3.6: 새 anchor 생성 (intent 포함)
+    # 기존 anchor 유지 조건:
+    # 1. insurer_only 후속 질의인 경우
+    # 2. UI 이벤트로 인해 intent가 locked된 경우 (STEP 3.6)
     new_anchor: QueryAnchor | None = None
-    if anchor_debug and anchor_debug.get("query_type") == "insurer_only" and input_anchor:
-        # 기존 anchor 유지
+    should_preserve_anchor = (
+        (anchor_debug and anchor_debug.get("query_type") == "insurer_only") or
+        (intent_debug and intent_debug.get("intent_locked") and intent_debug.get("ui_event_blocked_change"))
+    )
+    if should_preserve_anchor and input_anchor:
+        # 기존 anchor 유지 (intent도 유지)
         new_anchor = input_anchor
     elif primary_code:
-        # 새 anchor 생성
+        # 새 anchor 생성 (STEP 3.6: intent 포함)
         coverage_domains = get_coverage_domains()
         new_anchor = QueryAnchor(
             coverage_code=primary_code,
             coverage_name=primary_name,
             domain=coverage_domains.get(primary_code),
             original_query=query,
+            intent=resolved_intent,  # STEP 3.6: intent 포함
         )
 
     return CompareResponseModel(
@@ -977,6 +1132,11 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
     - anchor가 있는 경우, insurer-only 후속 질의인지 판별
     - insurer-only면 anchor.coverage_code 사용
     - 아니면 신규 질의로 처리
+
+    STEP 3.6: Intent Locking
+    - intent(lookup/compare)는 명시적 신호가 있을 때만 변경
+    - UI 이벤트로 인한 intent 변경 금지
+    - coverage/insurer 변경은 intent 변경 사유가 아님
     """
     try:
         # STEP 2.6: Insurer Scope 결정 (룰 기반, LLM 미사용)
@@ -984,6 +1144,17 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         final_insurers, insurer_scope_debug = _resolve_insurer_scope(
             request_insurers=request.insurers,
             query=request.query,
+        )
+
+        # Query에서 추출된 insurers (intent 판단용)
+        query_insurers = insurer_scope_debug.get("query_extracted_insurers", [])
+
+        # STEP 3.6: Intent Locking - 최종 intent 결정
+        resolved_intent, intent_debug = _resolve_intent(
+            query=request.query,
+            anchor=request.anchor,
+            ui_event_type=request.ui_event_type,
+            query_insurers=query_insurers,
         )
 
         # STEP 3.5: Recovery 메시지 생성
@@ -1039,6 +1210,9 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             anchor_debug=anchor_debug,
             input_anchor=request.anchor,
             recovery_message=recovery_message,
+            # STEP 3.6: Intent 전달
+            resolved_intent=resolved_intent,
+            intent_debug=intent_debug,
         )
     except HTTPException:
         raise

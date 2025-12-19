@@ -1,4 +1,4 @@
-import { CompareRequest, CompareResponse } from "./types";
+import { CompareRequestWithIntent, CompareResponseWithSlots } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 const TIMEOUT_MS = 20000;
@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function compare(request: CompareRequest): Promise<CompareResponse> {
+export async function compare(request: CompareRequestWithIntent): Promise<CompareResponseWithSlots> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -38,6 +38,14 @@ export async function compare(request: CompareRequest): Promise<CompareResponse>
     }
     if (request.policy_keywords && request.policy_keywords.length > 0) {
       body.policy_keywords = request.policy_keywords;
+    }
+    // STEP 2.9 + 3.6: anchor with intent
+    if (request.anchor) {
+      body.anchor = request.anchor;
+    }
+    // STEP 3.6: UI event type (for intent locking)
+    if (request.ui_event_type) {
+      body.ui_event_type = request.ui_event_type;
     }
 
     const response = await fetch(`${API_BASE}/compare`, {

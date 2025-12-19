@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.5)
+> 최종 업데이트: 2025-12-19 (STEP 3.6)
 
 ---
 
@@ -60,6 +60,7 @@
 | **STEP 2.8** | **하드코딩 비즈니스 규칙 YAML 외부화** | **리팩토링** | ✅ 완료 |
 | **STEP 2.9** | **Query Anchor / Context Locking** | **기능** | ✅ 완료 |
 | **STEP 3.5** | **Advanced 옵션 Guard / Auto-Recovery** | **기능** | ✅ 완료 |
+| **STEP 3.6** | **Intent Locking / Mode Separation** | **기능** | ✅ 완료 |
 
 ---
 
@@ -1326,3 +1327,133 @@ insurers: list[str] = Field(default=[], description="비교할 보험사 코드 
 | YAML 외부화 | ✅ insurer_defaults.yaml |
 | recovery_message 표시 | ✅ 채팅창 안내 메시지 |
 | 검증 시나리오 통과 | ✅ 3/3 (100%) |
+
+---
+
+## STEP 3.6: Intent Locking / Mode Separation (2025-12-19)
+
+### 목표
+- 질의 Intent(lookup/compare)를 명시적으로 고정하여 임의 전환 방지
+- UI 이벤트(버튼 클릭, 연관 담보 선택)로 인한 intent 변경 차단
+- Query Anchor의 coverage / insurer / intent 일관성 보장
+
+### 핵심 원칙
+- **기본 Intent는 lookup** (단일 보험사 정보 조회)
+- **명시적 비교 키워드**가 있을 때만 compare로 변경
+- **UI 이벤트는 intent를 변경할 수 없음**
+- **coverage/insurer 변경은 intent 변경 사유가 아님**
+
+### Intent 정의
+
+| Intent | 설명 | 트리거 |
+|--------|------|--------|
+| lookup | 단일 보험사 정보 조회 | 기본값, "알려줘", "보여줘" 등 |
+| compare | 복수 보험사 비교 | "비교", "차이", "vs" 등 명시적 키워드 |
+
+### 구현 내용
+
+**1. 설정 파일 (`config/rules/intent_keywords.yaml`):**
+```yaml
+# 비교 의도 트리거 키워드
+compare_trigger_keywords:
+  - 비교
+  - 차이
+  - " vs "
+  - 어느 쪽
+  # ...
+
+# lookup 강제 유지 키워드
+lookup_force_keywords:
+  - 알려줘
+  - 보여줘
+  - 어떻게
+  # ...
+
+# Intent 변경 불가 UI 이벤트 타입
+ui_events_no_intent_change:
+  - coverage_button_click
+  - related_coverage_select
+  - slot_select
+```
+
+**2. QueryAnchor 모델 확장:**
+```python
+class QueryAnchor(BaseModel):
+    coverage_code: str
+    coverage_name: str | None
+    domain: str | None
+    original_query: str
+    # STEP 3.6: Intent Locking
+    intent: Literal["lookup", "compare"] = "lookup"
+```
+
+**3. Intent Resolution 로직:**
+```python
+def _resolve_intent(query, anchor, ui_event_type, query_insurers):
+    # 1. UI 이벤트인 경우 → intent 변경 금지, anchor 유지
+    # 2. anchor가 있는 경우 → 명시적 비교 키워드 없으면 유지
+    # 3. 새 질의인 경우 → 키워드 기반 판별
+```
+
+**4. Frontend 변경:**
+- `QueryAnchor` 타입에 intent 필드 추가
+- `CompareRequestWithIntent` 타입 추가 (anchor, ui_event_type 포함)
+- 응답에서 anchor 저장 후 다음 요청에 전달
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/intent_keywords.yaml` | 신규 생성 (intent 키워드 설정) |
+| `api/config_loader.py` | +42 lines: get_compare_trigger_keywords 등 함수 |
+| `api/compare.py` | QueryAnchor.intent 필드, _resolve_intent 로직, ui_event_type 처리 |
+| `apps/web/src/lib/types.ts` | QueryAnchor, CompareRequestWithIntent 타입 |
+| `apps/web/src/lib/api.ts` | anchor, ui_event_type 전달 |
+| `apps/web/src/app/page.tsx` | currentAnchor 상태 관리, 요청에 anchor 포함 |
+| `apps/web/src/components/ChatPanel.tsx` | CompareRequestWithIntent 타입 사용 |
+
+### 검증 시나리오
+
+| # | 질의 | anchor 상태 | 결과 |
+|---|------|-------------|------|
+| 1 | "삼성의 암진단비 알려줘" | 없음 | intent=lookup ✅ |
+| 2 | "일반암 진단금" (UI 클릭) | lookup | intent=lookup (차단) ✅ |
+| 3 | "삼성과 메리츠 암진단비 비교" | 없음 | intent=compare ✅ |
+| 4 | "유사암은?" | compare | intent=compare (유지) ✅ |
+
+### 검증 결과
+
+```
+=== Scenario 1 ===
+Expected: intent=lookup
+  anchor.intent: lookup
+Result: ✅ PASS
+
+=== Scenario 2 ===
+Expected: intent=lookup (UI 이벤트 - 차단)
+  anchor.intent: lookup
+  ui_event_blocked_change: True
+Result: ✅ PASS
+
+=== Scenario 3 ===
+Expected: intent=compare
+  anchor.intent: compare
+  matched_compare_keyword: 비교
+Result: ✅ PASS
+
+=== Scenario 4 ===
+Expected: intent=compare (anchor 유지)
+  anchor.intent: compare
+  intent_locked: True
+Result: ✅ PASS
+```
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| lookup/compare 분리 원칙 | ✅ 구현 완료 |
+| UI 이벤트 intent 변경 차단 | ✅ ui_events_no_intent_change 적용 |
+| coverage/insurer 변경 시 intent 유지 | ✅ anchor intent 보존 |
+| 하드코딩 없음 | ✅ YAML 외부화 |
+| 검증 시나리오 통과 | ✅ 4/4 (100%) |

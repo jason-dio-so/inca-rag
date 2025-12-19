@@ -289,3 +289,46 @@ def get_recovery_messages() -> dict[str, str]:
     """보정 메시지 템플릿 반환"""
     config = get_insurer_defaults_config()
     return config.get("recovery_messages", {})
+
+
+# =============================================================================
+# STEP 3.6: Intent Keywords 설정 로더
+# =============================================================================
+
+def get_intent_keywords_config() -> dict:
+    """
+    Intent 키워드 설정 전체 반환
+
+    Returns:
+        {
+            "compare_trigger_keywords": [...],
+            "lookup_force_keywords": [...],
+            "ui_events_no_intent_change": [...],
+            "compare_multi_insurer_patterns": [...]
+        }
+    """
+    return _load_yaml("rules/intent_keywords.yaml")
+
+
+def get_compare_trigger_keywords() -> list[str]:
+    """비교 의도 트리거 키워드 리스트 반환"""
+    config = get_intent_keywords_config()
+    return config.get("compare_trigger_keywords", [])
+
+
+def get_lookup_force_keywords() -> list[str]:
+    """lookup 강제 유지 키워드 리스트 반환"""
+    config = get_intent_keywords_config()
+    return config.get("lookup_force_keywords", [])
+
+
+def get_ui_events_no_intent_change() -> list[str]:
+    """Intent 변경 불가 UI 이벤트 타입 리스트 반환"""
+    config = get_intent_keywords_config()
+    return config.get("ui_events_no_intent_change", [])
+
+
+def get_compare_multi_insurer_patterns() -> list[str]:
+    """복수 보험사 비교 패턴 리스트 반환"""
+    config = get_intent_keywords_config()
+    return config.get("compare_multi_insurer_patterns", [])

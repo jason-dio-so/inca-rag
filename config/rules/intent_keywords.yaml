@@ -1,0 +1,66 @@
+# Intent Keywords Configuration
+# STEP 3.6: Intent Locking / Mode Separation
+#
+# 핵심 원칙:
+# - 기본 Intent는 lookup (단일 보험사 정보 조회)
+# - Intent는 "명시적 신호"가 있을 때만 compare로 변경
+# - UI 이벤트(버튼 클릭, 연관 담보 선택)는 intent 변경 불가
+
+# 비교 의도 트리거 키워드
+# 이 키워드가 포함된 경우에만 intent=compare로 설정
+compare_trigger_keywords:
+  # 명시적 비교 표현
+  - 비교
+  - 비교해
+  - 비교해줘
+  - 비교해 줘
+  - 대비
+  - 차이
+  - 차이점
+  - 차이가
+  - 다른점
+  # vs 표현
+  - " vs "
+  - " VS "
+  - vs.
+  # 복수 비교 표현
+  - 어느 쪽
+  - 어느쪽
+  - 어디가
+  - 뭐가 더
+  - 뭐가더
+  - 어떤 게
+  - 어떤게
+  # 각각 표현
+  - 각각
+  - 둘 다
+  - 둘다
+  - 모두
+  - 전부
+
+# lookup 유지 키워드 (비교 키워드와 함께 있어도 lookup 유지)
+# 이 키워드가 있으면 compare 트리거를 무시
+lookup_force_keywords:
+  - 알려줘
+  - 알려 줘
+  - 보여줘
+  - 보여 줘
+  - 어떻게
+  - 뭐야
+  - 뭐가 있어
+  - 있어?
+  - 없어?
+
+# Intent 변경이 불가능한 UI 이벤트 타입
+# 프론트엔드에서 이 이벤트 타입을 전달하면 intent 변경 금지
+ui_events_no_intent_change:
+  - coverage_button_click    # 담보 버튼 클릭
+  - related_coverage_select  # 연관 담보 선택
+  - slot_select              # 슬롯 선택
+  - evidence_view            # 근거 보기
+
+# 비교 의도 패턴 (정규식 - 복수 보험사 언급)
+# 패턴 매칭으로 복수 보험사가 명시된 경우 compare 감지
+compare_multi_insurer_patterns:
+  - "(과|와|,|하고)\\s*(\\w+)(을|를|의|은|는)?\\s*(비교|대비|차이)"
+  - "(삼성|메리츠|롯데|DB|KB|한화|현대|흥국).*(삼성|메리츠|롯데|DB|KB|한화|현대|흥국)"

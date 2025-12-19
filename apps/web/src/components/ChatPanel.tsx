@@ -12,7 +12,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChatMessage, CompareRequest } from "@/lib/types";
+import { ChatMessage, CompareRequestWithIntent } from "@/lib/types";
 import { ChevronDown, ChevronUp, Send } from "lucide-react";
 
 const ALL_INSURERS = [
@@ -39,7 +39,7 @@ const INSURER_NAMES: Record<string, string> = {
 
 interface ChatPanelProps {
   messages: ChatMessage[];
-  onSendMessage: (request: CompareRequest) => void;
+  onSendMessage: (request: CompareRequestWithIntent) => void;
   isLoading: boolean;
 }
 
@@ -82,7 +82,7 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
     // STEP 3.5: insurer 0개도 허용 (서버에서 auto-recovery 적용)
     if (!query.trim() || isLoading) return;
 
-    const request: CompareRequest = {
+    const request: CompareRequestWithIntent = {
       insurers: selectedInsurers,
       query: query.trim(),
       top_k_per_insurer: topK,

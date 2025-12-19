@@ -38,6 +38,19 @@ export type DiffBullet = components["schemas"]["DiffBulletResponse"];
 export type EvidenceRef = components["schemas"]["EvidenceRefResponse"];
 
 // =============================================================================
+// STEP 2.9 + 3.6: Query Anchor with Intent
+// =============================================================================
+
+export interface QueryAnchor {
+  coverage_code: string;
+  coverage_name?: string | null;
+  domain?: string | null;
+  original_query: string;
+  // STEP 3.6: Intent Locking
+  intent: "lookup" | "compare";
+}
+
+// =============================================================================
 // U-4.8: Comparison Slots Types
 // =============================================================================
 
@@ -82,7 +95,15 @@ export type CompareResponseWithSlots = CompareResponse & {
   user_summary?: string | null;
   // STEP 3.5: Insurer Auto-Recovery 메시지
   recovery_message?: string | null;
+  // STEP 2.9 + 3.6: Query Anchor with Intent
+  anchor?: QueryAnchor | null;
 };
+
+// STEP 3.6: Extended CompareRequest with ui_event_type
+export interface CompareRequestWithIntent extends CompareRequest {
+  anchor?: QueryAnchor | null;
+  ui_event_type?: string | null;
+}
 
 // =============================================================================
 // UI-Only Types (not from API)

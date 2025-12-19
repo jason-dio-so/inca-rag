@@ -7,7 +7,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
-import { ChatMessage, CompareRequest, CompareResponseWithSlots } from "@/lib/types";
+import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor } from "@/lib/types";
 
 // Deep-link 상태 타입
 interface DeepLinkState {
@@ -49,6 +49,8 @@ export default function Home() {
     null
   );
   const [isLoading, setIsLoading] = useState(false);
+  // STEP 3.6: Query Anchor with Intent (세션 유지)
+  const [currentAnchor, setCurrentAnchor] = useState<QueryAnchor | null>(null);
 
   // Deep-link: URL에서 viewer 상태 읽기
   const [deepLinkViewer, setDeepLinkViewer] = useState<DeepLinkState | null>(null);
@@ -65,7 +67,13 @@ export default function Home() {
     router.push("/", { scroll: false });
   }, [router]);
 
-  const handleSendMessage = useCallback(async (request: CompareRequest) => {
+  const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
+    // STEP 3.6: 이전 anchor가 있으면 요청에 포함
+    const requestWithAnchor: CompareRequestWithIntent = {
+      ...request,
+      anchor: currentAnchor ?? undefined,
+    };
+
     // Add user message
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -88,8 +96,13 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const response = await compare(request);
+      const response = await compare(requestWithAnchor);
       setCurrentResponse(response);
+
+      // STEP 3.6: 응답에서 anchor 저장 (다음 질의에 전달)
+      if (response.anchor) {
+        setCurrentAnchor(response.anchor);
+      }
 
       // STEP 2.5: 사용자 친화적 요약 사용 (API에서 제공)
       let summaryText = "";
@@ -135,7 +148,7 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentAnchor]); // STEP 3.6: anchor 의존성 추가
 
   return (
     <div className="flex h-screen bg-background">
