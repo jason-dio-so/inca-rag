@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ6)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ Final)
 
 ---
 
@@ -1178,3 +1178,42 @@ const candidates =
 | slice/filter 제거 | ✅ 구현 완료 |
 | 전체 후보 map() 렌더링 | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ 45f4a3a |
+
+## STEP 3.7-δ Final Verification (2025-12-20)
+
+### 최종 검증 결과
+
+**테스트 조건:**
+- Query: "다빈치 수술비"
+- Insurers: SAMSUNG + HYUNDAI
+- Expected: UNRESOLVED + 3 candidates
+
+**API 검증:**
+```json
+{
+  "resolution_state": "UNRESOLVED",
+  "suggested": 3,
+  "names": ["다빈치로봇암수술비", "유사암수술비", "암수술비(유사암 제외)"]
+}
+```
+
+**UI 검증:**
+| 항목 | 예상 | 결과 |
+|------|------|------|
+| Payload insurers | ["SAMSUNG","HYUNDAI"] | ✅ PASS |
+| 좌측: 후보 버튼 | 3개 | ✅ PASS |
+| 우측: 결과 패널 | "담보 선택 필요" | ✅ PASS |
+| 선택 전 Compare/Diff/Evidence | 렌더링 안됨 | ✅ PASS |
+
+### 시나리오 검증
+
+| 시나리오 | 결과 |
+|----------|------|
+| A: UNRESOLVED → 3 candidates 노출 | ✅ PASS |
+| B: 후보 선택 → RESOLVED 전환 | ✅ PASS |
+| C: INVALID → 우측 패널 비움 | ✅ PASS |
+
+### 결론
+- **프론트엔드 버그 없음** (insurers payload = UI selection)
+- **백엔드 버그 없음** (쿼리에 따라 정상 응답)
+- **STEP 3.7-δ 전체 완료**
