@@ -681,7 +681,7 @@ def get_amount_bearing_evidence(
         """
         target_param = (target_with_amount_pattern, f"%{target_keyword}%")
     else:
-        target_priority = "0"  # 모든 청크 동일 우선순위
+        target_priority = "(SELECT 0)"  # 모든 청크 동일 우선순위 (상수 서브쿼리로 ORDER BY 무효화)
         target_param = ()
 
     with conn.cursor() as cur:
