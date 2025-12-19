@@ -1,6 +1,18 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * STEP 3.8: Evidence Panel with View State Isolation
+ *
+ * Evidence/Policy 상세보기는 ViewContext를 통해 처리되며,
+ * Query State(messages, currentResponse, anchor)에 영향을 주지 않습니다.
+ *
+ * 핵심 원칙:
+ * - Evidence 클릭 = Read-only View Event
+ * - Query State 변경 없음
+ * - View State만 업데이트
+ */
+
+import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +30,7 @@ import {
 import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
 import { Copy, Check, Eye, ChevronDown, Star, FileText } from "lucide-react";
-import { PdfPageViewer } from "./PdfPageViewer";
+import { useViewContext } from "@/contexts/ViewContext";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -66,8 +78,10 @@ function buildRepresentativeEvidenceSet(slots: ComparisonSlot[] | undefined, ins
 
 export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePanelProps) {
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
-  const [viewingEvidence, setViewingEvidence] = useState<Evidence | null>(null);
   const [additionalOpen, setAdditionalOpen] = useState<Record<string, boolean>>({});
+
+  // STEP 3.8: ViewContext를 통한 문서 열기 (Query State 변경 없음)
+  const { openDocument } = useViewContext();
 
   if (!data || data.length === 0) {
     return (
@@ -122,9 +136,20 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
     }
   };
 
-  const handleView = (evidence: Evidence) => {
-    setViewingEvidence(evidence);
-  };
+  /**
+   * STEP 3.8: Evidence View 클릭 핸들러
+   * - ViewContext.openDocument()를 통해 View State만 변경
+   * - Query State(messages, currentResponse, anchor) 변경 없음
+   * - 좌측 요약 영역 불변 보장
+   */
+  const handleView = useCallback((evidence: Evidence) => {
+    openDocument({
+      documentId: evidence.document_id,
+      page: evidence.page_start ?? 1,
+      docType: evidence.doc_type,
+      highlightQuery: evidence.preview?.slice(0, 120) || undefined,
+    });
+  }, [openDocument]);
 
   const toggleAdditional = (insurer: string) => {
     setAdditionalOpen(prev => ({ ...prev, [insurer]: !prev[insurer] }));
@@ -132,16 +157,8 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
 
   return (
     <div className="space-y-2">
-      {/* PDF Page Viewer Modal (Step U-2.5: highlightQuery 추가) */}
-      {viewingEvidence && (
-        <PdfPageViewer
-          documentId={viewingEvidence.document_id}
-          initialPage={viewingEvidence.page_start ?? 1}
-          docType={viewingEvidence.doc_type}
-          highlightQuery={viewingEvidence.preview?.slice(0, 120) || undefined}
-          onClose={() => setViewingEvidence(null)}
-        />
-      )}
+      {/* STEP 3.8: PdfPageViewer는 이제 DocumentViewerLayer (page.tsx)에서 관리됨 */}
+      {/* ViewContext.openDocument()를 통해 View State만 변경하고, Query State는 불변 */}
 
       {/* U-4.9: Evidence Tab Clarification Notice */}
       {!isPolicyMode && (

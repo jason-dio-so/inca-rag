@@ -1,6 +1,16 @@
 "use client";
 
-import { useState, useCallback, useEffect, Suspense } from "react";
+/**
+ * STEP 3.8: Main Page with State Isolation
+ *
+ * Query State와 View State의 명확한 분리:
+ * - Query State: messages, currentResponse, currentAnchor, isLoading
+ *   → handleSendMessage로만 변경 가능
+ * - View State: ViewContext를 통해 관리
+ *   → Evidence/Document 열람은 Query State에 영향 없음
+ */
+
+import { useState, useCallback, useEffect, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -8,21 +18,15 @@ import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
 import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor } from "@/lib/types";
+import { ViewProvider, useViewContext, ViewingDocument } from "@/contexts/ViewContext";
 
-// Deep-link 상태 타입
-interface DeepLinkState {
-  documentId: string;
-  page: number;
-  highlightQuery?: string;
-}
+// =============================================================================
+// Deep-link Handler (View State만 변경, Query State 변경 없음)
+// =============================================================================
 
-// Deep-link 처리 컴포넌트 (Suspense 경계 내에서 사용)
-function DeepLinkHandler({
-  onOpen,
-}: {
-  onOpen: (state: DeepLinkState) => void;
-}) {
+function DeepLinkHandler() {
   const searchParams = useSearchParams();
+  const { openDeepLinkDocument } = useViewContext();
 
   useEffect(() => {
     const doc = searchParams.get("doc");
@@ -30,43 +34,83 @@ function DeepLinkHandler({
     const hl = searchParams.get("hl");
 
     if (doc && page) {
-      onOpen({
+      // STEP 3.8: View State만 변경 (Query State 변경 없음)
+      openDeepLinkDocument({
         documentId: doc,
         page: parseInt(page, 10) || 1,
         highlightQuery: hl || undefined,
       });
     }
-  }, [searchParams, onOpen]);
+  }, [searchParams, openDeepLinkDocument]);
 
   return null;
 }
 
-export default function Home() {
-  const router = useRouter();
+// =============================================================================
+// Document Viewer Wrapper (View State 기반, Query State 불변)
+// =============================================================================
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentResponse, setCurrentResponse] = useState<CompareResponseWithSlots | null>(
-    null
+function DocumentViewerLayer() {
+  const router = useRouter();
+  const { viewState, closeDocument, closeDeepLinkDocument } = useViewContext();
+  const { viewingDocument, deepLinkDocument } = viewState;
+
+  // Deep-link viewer 닫기 (Query State 변경 없음)
+  const handleCloseDeepLink = useCallback(() => {
+    closeDeepLinkDocument();
+    // URL에서 파라미터 제거 (View State 변경만, Query State 불변)
+    router.push("/", { scroll: false });
+  }, [closeDeepLinkDocument, router]);
+
+  // 일반 document viewer 닫기 (Query State 변경 없음)
+  const handleCloseDocument = useCallback(() => {
+    closeDocument();
+  }, [closeDocument]);
+
+  return (
+    <>
+      {/* Deep-link PDF Viewer (Step U-2.5, STEP 3.8: View State 분리) */}
+      {deepLinkDocument && (
+        <PdfPageViewer
+          documentId={deepLinkDocument.documentId}
+          initialPage={deepLinkDocument.page}
+          highlightQuery={deepLinkDocument.highlightQuery}
+          onClose={handleCloseDeepLink}
+        />
+      )}
+
+      {/* Evidence/Policy PDF Viewer (STEP 3.8: View State 분리) */}
+      {viewingDocument && (
+        <PdfPageViewer
+          documentId={viewingDocument.documentId}
+          initialPage={viewingDocument.page}
+          docType={viewingDocument.docType}
+          highlightQuery={viewingDocument.highlightQuery}
+          onClose={handleCloseDocument}
+        />
+      )}
+    </>
   );
+}
+
+// =============================================================================
+// Main Content (Query State 관리)
+// =============================================================================
+
+function HomeContent() {
+  // ===========================================================================
+  // Query State (handleSendMessage로만 변경 가능)
+  // STEP 3.8: 이 상태들은 Evidence/Document 열람으로 절대 변경되지 않음
+  // ===========================================================================
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [currentResponse, setCurrentResponse] = useState<CompareResponseWithSlots | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  // STEP 3.6: Query Anchor with Intent (세션 유지)
   const [currentAnchor, setCurrentAnchor] = useState<QueryAnchor | null>(null);
 
-  // Deep-link: URL에서 viewer 상태 읽기
-  const [deepLinkViewer, setDeepLinkViewer] = useState<DeepLinkState | null>(null);
-
-  // Deep-link 열기 핸들러
-  const handleDeepLinkOpen = useCallback((state: DeepLinkState) => {
-    setDeepLinkViewer(state);
-  }, []);
-
-  // Deep-link viewer 닫기
-  const handleCloseDeepLinkViewer = useCallback(() => {
-    setDeepLinkViewer(null);
-    // URL에서 파라미터 제거
-    router.push("/", { scroll: false });
-  }, [router]);
-
+  // ===========================================================================
+  // Query State 변경 함수 (유일한 Query State 변경 경로)
+  // STEP 3.8: send_message 이벤트만 Query State 변경 허용
+  // ===========================================================================
   const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
     // STEP 3.6: 이전 anchor가 있으면 요청에 포함
     const requestWithAnchor: CompareRequestWithIntent = {
@@ -168,26 +212,24 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentAnchor]); // STEP 3.6: anchor 의존성 추가
+  }, [currentAnchor]);
+
+  // ===========================================================================
+  // Memoized Response (STEP 3.8: 불필요한 re-render 방지)
+  // ===========================================================================
+  const memoizedResponse = useMemo(() => currentResponse, [currentResponse]);
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Deep-link URL 파라미터 처리 (Step U-2.5) */}
+      {/* Deep-link URL 파라미터 처리 (STEP 3.8: View State만 변경) */}
       <Suspense fallback={null}>
-        <DeepLinkHandler onOpen={handleDeepLinkOpen} />
+        <DeepLinkHandler />
       </Suspense>
 
-      {/* Deep-link PDF Viewer (Step U-2.5) */}
-      {deepLinkViewer && (
-        <PdfPageViewer
-          documentId={deepLinkViewer.documentId}
-          initialPage={deepLinkViewer.page}
-          highlightQuery={deepLinkViewer.highlightQuery}
-          onClose={handleCloseDeepLinkViewer}
-        />
-      )}
+      {/* Document Viewers (STEP 3.8: View State 기반, Query State 불변) */}
+      <DocumentViewerLayer />
 
-      {/* Left: Chat Panel */}
+      {/* Left: Chat Panel (Query State 표시) */}
       <div className="w-1/2 flex flex-col border-r">
         <header className="p-4 border-b">
           <div className="flex items-center gap-4">
@@ -215,15 +257,27 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Right: Results Panel */}
+      {/* Right: Results Panel (Query State 표시, View State 격리) */}
       <div className="w-1/2 flex flex-col">
         <header className="p-4 border-b">
           <h2 className="text-lg font-semibold">비교 결과</h2>
         </header>
         <div className="flex-1 overflow-hidden">
-          <ResultsPanel response={currentResponse} />
+          <ResultsPanel response={memoizedResponse} />
         </div>
       </div>
     </div>
+  );
+}
+
+// =============================================================================
+// Root Component with ViewProvider
+// =============================================================================
+
+export default function Home() {
+  return (
+    <ViewProvider>
+      <HomeContent />
+    </ViewProvider>
   );
 }
