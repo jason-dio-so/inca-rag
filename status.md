@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.8)
+> 최종 업데이트: 2025-12-19 (STEP 3.7-β)
 
 ---
 
@@ -63,6 +63,7 @@
 | **STEP 3.6** | **Intent Locking / Mode Separation** | **기능** | ✅ 완료 |
 | **STEP 3.7** | **Coverage Resolution Failure Handling** | **기능** | ✅ 완료 |
 | **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1561,4 +1562,72 @@ export const READ_ONLY_VIEW_EVENTS = [
 | Read-only View와 Query 실행 완전 분리 | ✅ ViewContext 분리 |
 | 하드코딩/임시 dict 없음 | ✅ config 기반 |
 | git 커밋 완료 | ✅ a6282d2 |
+| status.md 업데이트 완료 | ✅ 본 항목 |
+
+---
+
+## STEP 3.7-β: Coverage 미확정 시 Results Panel UI Gating (2025-12-19)
+
+### 목표
+- 대표 담보가 확정되지 않은 상태(AMBIGUOUS / NOT_FOUND)에서 우측 Results Panel 렌더링 완전 차단
+- 좌측은 "선택 필요" 상태인데, 우측은 "확정된 결과"처럼 보이는 상태 불일치를 방지
+
+### 문제 인식
+
+**현상:**
+- "삼성 암진단금" (오타) 질의 시 "상해후유장해(3-100%)" 등 임의 담보가 대표 담보로 자동 선택됨
+- 좌측에서 담보 선택을 유도하는 동안 우측에 비교 결과가 표시됨
+
+**원인:**
+- coverage_resolution 상태와 Results Panel 렌더링이 연동되어 있지 않음
+- UI에서 EXACT/AMBIGUOUS/NOT_FOUND 상태에 따른 gating이 없음
+
+### 구현 내용
+
+**1. UI Gating 설정 (`ui-gating.config.ts`):**
+```typescript
+// API status → UI display state 매핑
+export type UIResolutionState = "EXACT" | "AMBIGUOUS" | "NOT_FOUND";
+
+export const RESOLUTION_STATUS_MAP: Record<string, UIResolutionState> = {
+  resolved: "EXACT",
+  suggest: "AMBIGUOUS",
+  clarify: "AMBIGUOUS",
+  failed: "NOT_FOUND",
+};
+
+// Results Panel 렌더링 허용 상태
+export const RESULTS_PANEL_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
+```
+
+**2. ResultsPanel 수정:**
+- canRenderResultsPanel() 호출로 렌더링 가능 여부 확인
+- AMBIGUOUS / NOT_FOUND 상태에서 EmptyState 표시
+- Compare / Diff / Evidence / Policy 탭 접근 차단
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/lib/ui-gating.config.ts` | 신규: UI Gating 규칙 정의 |
+| `apps/web/src/components/ResultsPanel.tsx` | UI Gating 적용, EmptyState 표시 |
+| `apps/web/src/__tests__/ui-gating.test.ts` | 신규: UI Gating 단위 테스트 |
+
+### 검증 시나리오
+
+| # | 시나리오 | 기대 결과 | 검증 |
+|---|----------|----------|------|
+| 1 | "삼성 암" | AMBIGUOUS → Results Panel 비활성화 | ✅ |
+| 2 | "삼성 암진단비" | EXACT → Results Panel 정상 표시 | ✅ |
+| 3 | "삼성 암zz" | NOT_FOUND → Results Panel 비활성화 | ✅ |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| Coverage 미확정 시 Results Panel 렌더링 차단 | ✅ 구현 완료 |
+| EXACT 상태에서만 비교 결과 표시 | ✅ 구현 완료 |
+| 연관 담보 자동 노출 차단 | ✅ 구현 완료 |
+| 하드코딩 없음 | ✅ config 기반 |
+| git 커밋 완료 | ✅ e1052d9 |
 | status.md 업데이트 완료 | ✅ 본 항목 |
