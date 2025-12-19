@@ -217,3 +217,39 @@ def get_coverage_code_to_type() -> dict[str, str]:
         {"A4200_1": "cancer_diagnosis", "A4103": "cerebro_cardiovascular_diagnosis", ...}
     """
     return _load_yaml("mappings/coverage_code_to_type.yaml")
+
+
+# =============================================================================
+# STEP 2.9: Query Anchor 설정 로더
+# =============================================================================
+
+def get_query_anchor_config() -> dict:
+    """
+    Query Anchor 설정 전체 반환
+
+    Returns:
+        {
+            "coverage_keywords": [...],
+            "insurer_only_patterns": [...],
+            "intent_extension_keywords": {...}
+        }
+    """
+    return _load_yaml("rules/query_anchor.yaml")
+
+
+def get_coverage_keywords() -> list[str]:
+    """anchor 재설정 트리거가 되는 coverage 키워드 리스트"""
+    config = get_query_anchor_config()
+    return config.get("coverage_keywords", [])
+
+
+def get_insurer_only_patterns() -> list[str]:
+    """insurer-only 후속 질의 판별 패턴 리스트"""
+    config = get_query_anchor_config()
+    return config.get("insurer_only_patterns", [])
+
+
+def get_intent_extension_keywords() -> dict[str, list[str]]:
+    """intent 확장 키워드 매핑"""
+    config = get_query_anchor_config()
+    return config.get("intent_extension_keywords", {})

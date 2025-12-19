@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 2.8)
+> 최종 업데이트: 2025-12-19 (STEP 2.9)
 
 ---
 
@@ -58,6 +58,7 @@
 | **Step U-4.17** | **암 Subtype 비교 확장 (partial_payment + 약관 우선)** | **기능** | ✅ 완료 |
 | **Step U-4.18** | **수술 조건(방식/병원급) 비교 확장** | **기능** | ✅ 완료 |
 | **STEP 2.8** | **하드코딩 비즈니스 규칙 YAML 외부화** | **리팩토링** | ✅ 완료 |
+| **STEP 2.9** | **Query Anchor / Context Locking** | **기능** | ✅ 완료 |
 
 ---
 
@@ -1082,3 +1083,139 @@ Query                           Insurer    Slot                 Expected   Actua
 | 기존 코드 import 교체 | ✅ 3개 파일 수정 |
 | 테스트 통과 | ✅ 47 passed |
 | 기능 회귀 없음 | ✅ API 정상 동작 |
+
+---
+
+## STEP 2.9: Query Anchor / Context Locking (2025-12-19)
+
+### 목표
+- 대화형 질의에서 기준 담보(coverage)와 질의 의도를 세션 단위로 고정
+- "메리츠는?", "그럼 삼성은?" 같은 후속 질의에서 이전 coverage context 유지
+- 모든 규칙을 YAML 설정 파일로 외부화
+
+### 핵심 개념
+
+**Query Anchor:**
+```python
+class QueryAnchor(BaseModel):
+    coverage_code: str      # 대표 담보 코드 (예: A4200_1)
+    coverage_name: str | None  # 대표 담보 명칭 (예: 암진단비)
+    domain: str | None      # 담보 도메인 (CANCER, CARDIO 등)
+    original_query: str     # anchor 생성 시점의 원본 질의
+```
+
+**후속 질의 유형:**
+| 유형 | 설명 | 처리 |
+|------|------|------|
+| `new` | 신규 질의 (anchor 없음 또는 coverage 키워드 포함) | 새 anchor 생성 |
+| `insurer_only` | insurer만 변경하는 후속 질의 | anchor.coverage_code 유지 |
+
+### 구현 내용
+
+**1. 설정 파일 (`config/rules/query_anchor.yaml`):**
+```yaml
+# 후속 질의 판별용 coverage 키워드
+coverage_keywords:
+  - 암
+  - 암진단
+  - 뇌졸중
+  - 수술비
+  # ... 39개 키워드
+
+# insurer-only 후속 질의 패턴
+insurer_only_patterns:
+  - "은?"
+  - "는?"
+  - "그럼"
+  # ... 13개 패턴
+
+# intent 확장 키워드 (anchor 유지 + intent만 확장)
+intent_extension_keywords:
+  comparison: [비교, 대비, vs, 차이]
+  condition: [조건, 지급조건, 면책, 대기기간]
+  # ... 추가 그룹
+```
+
+**2. API 변경:**
+
+요청 (CompareRequest):
+```json
+{
+  "insurers": ["MERITZ"],
+  "query": "메리츠는?",
+  "anchor": {
+    "coverage_code": "A4200_1",
+    "coverage_name": "암진단비",
+    "domain": "CANCER",
+    "original_query": "삼성 암진단비 알려줘"
+  }
+}
+```
+
+응답 (CompareResponse):
+```json
+{
+  "anchor": {
+    "coverage_code": "A4200_1",
+    "coverage_name": "암진단비",
+    "domain": "CANCER",
+    "original_query": "삼성 암진단비 알려줘"
+  },
+  "debug": {
+    "anchor": {
+      "query_type": "insurer_only",
+      "has_anchor": true,
+      "has_coverage_keyword": false,
+      "extracted_insurers": ["MERITZ"],
+      "restored_from_anchor": true,
+      "anchor_coverage_code": "A4200_1"
+    }
+  }
+}
+```
+
+**3. 후속 질의 판별 로직:**
+```python
+def _detect_follow_up_query_type(query: str, anchor: QueryAnchor | None) -> tuple[str, dict]:
+    # 1. anchor 없으면 → "new"
+    # 2. coverage 키워드 있으면 → "new" (anchor 재설정)
+    # 3. insurer 키워드만 있으면 → "insurer_only"
+    # 4. 그 외 → "new" (안전한 기본값)
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/query_anchor.yaml` | 신규 생성 (coverage_keywords, insurer_only_patterns) |
+| `api/config_loader.py` | +29 lines: get_query_anchor_config, get_coverage_keywords 등 |
+| `api/compare.py` | +140 lines: QueryAnchor 모델, 후속 질의 판별, anchor 반환 |
+| `tests/test_query_anchor.py` | 신규 생성 (21개 테스트) |
+
+### 검증 시나리오
+
+| # | 질의 | anchor 상태 | query_type | 결과 |
+|---|------|-------------|------------|------|
+| 1 | "DB손해보험 암진단비 알려줘" | 없음 | new | anchor 생성 (암진단비) |
+| 2 | "메리츠는?" | 암진단비 | insurer_only | anchor 유지, MERITZ 검색 |
+| 3 | "그럼 삼성은?" | 암진단비 | insurer_only | anchor 유지, SAMSUNG 검색 |
+| 4 | "유사암은?" | 암진단비 | new | anchor 재설정 (유사암) |
+
+### 검증 결과
+
+```
+✅ pytest tests/test_query_anchor.py: 21 passed
+✅ pytest tests/test_compare_api.py: 57 passed
+✅ API 스모크 테스트: 정상 동작
+```
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| QueryAnchor 모델 정의 | ✅ 완료 |
+| 후속 질의 판별 로직 | ✅ 완료 |
+| API anchor 파라미터 | ✅ request/response 추가 |
+| YAML 외부화 | ✅ query_anchor.yaml |
+| 테스트 작성 | ✅ 21개 테스트 |
+| 기능 회귀 없음 | ✅ 57개 기존 테스트 통과 |

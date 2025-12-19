@@ -21,9 +21,27 @@ from api.config_loader import (
     get_coverage_priority_score,
     get_insurer_aliases,
     get_compare_patterns,
+    get_coverage_keywords,
+    get_insurer_only_patterns,
 )
 
 router = APIRouter(tags=["compare"])
+
+
+# =============================================================================
+# STEP 2.9: Query Anchor Model
+# =============================================================================
+
+class QueryAnchor(BaseModel):
+    """
+    Query Anchor - 대화형 질의에서 기준 담보와 의도를 유지
+
+    세션 단위로 유지되며, 후속 질의에서 담보 컨텍스트 유지에 사용됨
+    """
+    coverage_code: str = Field(..., description="대표 담보 코드")
+    coverage_name: str | None = Field(None, description="대표 담보 명칭")
+    domain: str | None = Field(None, description="담보 도메인 (CANCER, CARDIO 등)")
+    original_query: str = Field(..., description="anchor 생성 시점의 원본 질의")
 
 
 class CompareRequest(BaseModel):
@@ -47,6 +65,8 @@ class CompareRequest(BaseModel):
     # Step I: Plan 자동 선택
     age: int | None = Field(None, description="피보험자 나이 (plan 자동 선택용)", ge=0, le=150)
     gender: Literal["M", "F"] | None = Field(None, description="피보험자 성별 (M/F)")
+    # STEP 2.9: Query Anchor
+    anchor: QueryAnchor | None = Field(None, description="이전 질의의 anchor (후속 질의 시 전달)")
 
     model_config = {
         "json_schema_extra": {
@@ -196,6 +216,8 @@ class CompareResponseModel(BaseModel):
     primary_coverage_name: str | None = None
     related_coverage_codes: list[str] = []
     user_summary: str | None = None
+    # STEP 2.9: Query Anchor (다음 질의에 전달할 anchor)
+    anchor: QueryAnchor | None = None
     debug: dict[str, Any]
 
 
@@ -245,6 +267,102 @@ def _convert_evidence(e) -> EvidenceResponse:
 # 핵심 원칙:
 # - 코드 수정 없이 설정 파일만으로 규칙 변경 가능
 # - 질의 계열과 다른 담보가 대표로 선택되는 문제 차단
+
+# =============================================================================
+# STEP 2.9: Query Anchor / Follow-up Query Detection
+# =============================================================================
+
+def _has_coverage_keyword(query: str) -> bool:
+    """
+    질의에 coverage 키워드가 포함되어 있는지 확인
+
+    Returns:
+        True if query contains coverage keywords (anchor 재설정 필요)
+    """
+    coverage_keywords = get_coverage_keywords()
+    query_lower = query.lower()
+
+    for keyword in coverage_keywords:
+        if keyword.lower() in query_lower:
+            return True
+    return False
+
+
+def _is_insurer_only_query(query: str, anchor: QueryAnchor | None) -> bool:
+    """
+    insurer-only 후속 질의인지 판별
+
+    조건:
+    1. anchor가 존재해야 함
+    2. coverage 키워드가 없어야 함
+    3. insurer 키워드만 존재하거나, insurer-only 패턴이 있어야 함
+
+    Returns:
+        True if this is an insurer-only follow-up query
+    """
+    if anchor is None:
+        return False
+
+    # coverage 키워드가 있으면 insurer-only가 아님
+    if _has_coverage_keyword(query):
+        return False
+
+    # insurer 키워드가 있는지 확인
+    insurers = _extract_insurers_from_query(query)
+    if insurers:
+        return True
+
+    # insurer-only 패턴 확인
+    insurer_only_patterns = get_insurer_only_patterns()
+    for pattern in insurer_only_patterns:
+        if pattern in query:
+            # 패턴이 있더라도 insurer 키워드가 있어야 함
+            if insurers:
+                return True
+
+    return False
+
+
+def _detect_follow_up_query_type(
+    query: str,
+    anchor: QueryAnchor | None,
+) -> tuple[str, dict[str, Any]]:
+    """
+    후속 질의 유형 판별
+
+    Returns:
+        (query_type, debug_info)
+        query_type:
+          - "new": 신규 질의 (anchor 생성)
+          - "insurer_only": insurer만 변경하는 후속 질의 (anchor 유지)
+          - "intent_extension": intent 확장 후속 질의 (anchor 유지 + intent 추가)
+    """
+    debug_info = {
+        "has_anchor": anchor is not None,
+        "has_coverage_keyword": _has_coverage_keyword(query),
+        "extracted_insurers": _extract_insurers_from_query(query),
+    }
+
+    # anchor가 없으면 신규 질의
+    if anchor is None:
+        debug_info["reason"] = "no_anchor"
+        return "new", debug_info
+
+    # coverage 키워드가 있으면 anchor 재설정 (신규 질의)
+    if _has_coverage_keyword(query):
+        debug_info["reason"] = "coverage_keyword_found"
+        return "new", debug_info
+
+    # insurer 키워드만 있으면 insurer-only 후속 질의
+    insurers = debug_info["extracted_insurers"]
+    if insurers:
+        debug_info["reason"] = "insurer_only_followup"
+        return "insurer_only", debug_info
+
+    # 그 외에는 신규 질의로 처리 (안전한 기본값)
+    debug_info["reason"] = "fallback_to_new"
+    return "new", debug_info
+
 
 # =============================================================================
 # STEP 2.6: Insurer Scope Resolver (룰 기반, LLM 미사용)
@@ -718,6 +836,8 @@ def _convert_response(
     final_insurers: list[str],
     query: str,
     insurer_scope_debug: dict[str, Any],
+    anchor_debug: dict[str, Any] | None = None,
+    input_anchor: QueryAnchor | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -742,6 +862,26 @@ def _convert_response(
 
     # STEP 2.6: debug에 insurer scope 정보 추가
     merged_debug = {**result.debug, "insurer_scope": insurer_scope_debug}
+
+    # STEP 2.9: anchor debug 정보 추가
+    if anchor_debug:
+        merged_debug["anchor"] = anchor_debug
+
+    # STEP 2.9: 새 anchor 생성
+    # insurer_only 후속 질의인 경우 기존 anchor 유지, 아닌 경우 새 anchor 생성
+    new_anchor: QueryAnchor | None = None
+    if anchor_debug and anchor_debug.get("query_type") == "insurer_only" and input_anchor:
+        # 기존 anchor 유지
+        new_anchor = input_anchor
+    elif primary_code:
+        # 새 anchor 생성
+        coverage_domains = get_coverage_domains()
+        new_anchor = QueryAnchor(
+            coverage_code=primary_code,
+            coverage_name=primary_name,
+            domain=coverage_domains.get(primary_code),
+            original_query=query,
+        )
 
     return CompareResponseModel(
         compare_axis=[
@@ -807,6 +947,8 @@ def _convert_response(
         primary_coverage_name=primary_name,
         related_coverage_codes=related_codes,
         user_summary=user_summary,
+        # STEP 2.9: Query Anchor
+        anchor=new_anchor,
         debug=merged_debug,
     )
 
@@ -818,6 +960,11 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
 
     - **compare_axis**: 가입설계서/상품요약서/사업방법서에서 coverage_code 기반 근거 수집
     - **policy_axis**: 약관에서 키워드 기반 조문 근거 수집 (A2 정책)
+
+    STEP 2.9: Query Anchor
+    - anchor가 있는 경우, insurer-only 후속 질의인지 판별
+    - insurer-only면 anchor.coverage_code 사용
+    - 아니면 신규 질의로 처리
     """
     try:
         # STEP 2.6: Insurer Scope 결정 (룰 기반, LLM 미사용)
@@ -833,10 +980,25 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
                 detail="보험사를 선택하거나 질의에 보험사를 명시해주세요.",
             )
 
+        # STEP 2.9: Query Anchor 기반 후속 질의 판별
+        query_type, anchor_debug = _detect_follow_up_query_type(
+            query=request.query,
+            anchor=request.anchor,
+        )
+        anchor_debug["query_type"] = query_type
+
+        # insurer-only 후속 질의인 경우, anchor의 coverage_code 사용
+        coverage_codes_to_use = request.coverage_codes
+        if query_type == "insurer_only" and request.anchor:
+            # anchor에서 coverage_code 복원
+            coverage_codes_to_use = [request.anchor.coverage_code]
+            anchor_debug["restored_from_anchor"] = True
+            anchor_debug["anchor_coverage_code"] = request.anchor.coverage_code
+
         result = compare(
             insurers=final_insurers,  # STEP 2.6: resolved insurers 사용
             query=request.query,
-            coverage_codes=request.coverage_codes,
+            coverage_codes=coverage_codes_to_use,  # STEP 2.9: anchor에서 복원된 코드 사용
             top_k_per_insurer=request.top_k_per_insurer,
             compare_doc_types=request.compare_doc_types,
             policy_doc_types=request.policy_doc_types,
@@ -844,7 +1006,14 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             age=request.age,
             gender=request.gender,
         )
-        return _convert_response(result, final_insurers, request.query, insurer_scope_debug)
+        return _convert_response(
+            result,
+            final_insurers,
+            request.query,
+            insurer_scope_debug,
+            anchor_debug=anchor_debug,
+            input_anchor=request.anchor,
+        )
     except HTTPException:
         raise
     except Exception as e:
