@@ -506,6 +506,7 @@ SLOT_SEARCH_KEYWORDS = {
         "가입금액지급",
         "최초 1회",
         "최초1회",
+        "보험가입금액",
     ],
     # 암 진단비 전용 (상위 호환)
     "cancer_diagnosis": [
@@ -513,6 +514,19 @@ SLOT_SEARCH_KEYWORDS = {
         "암진단비",
         "유사암",
         "악성신생물",
+    ],
+    # 뇌/심혈관 진단비 전용 (U-4.15 수정: 복합 키워드만 사용하여 정밀도 향상)
+    # "뇌졸중" 단독 사용 시 "뇌졸중통원일당" 등과 매칭되므로 "진단비" 포함 복합어만 사용
+    "cerebro_cardiovascular": [
+        "뇌졸중진단비",
+        "뇌출혈진단비",
+        "뇌혈관질환진단비",
+        "급성심근경색증진단비",
+        "급성심근경색진단비",
+        "허혈성심장질환진단비",
+        "심장질환진단비",
+        "중대뇌혈관질환진단비",
+        "중대심장질환진단비",
     ],
     # 수술비 (향후 확장용)
     "surgery_benefit": [
@@ -534,6 +548,33 @@ LUMP_SUM_SEARCH_KEYWORDS = (
     SLOT_SEARCH_KEYWORDS["cancer_diagnosis"]
 )
 
+# U-4.15: coverage_codes → slot_type 매핑 (2-pass retrieval용)
+CANCER_COVERAGE_CODES = {"A4200_1", "A4210", "A4209", "A4299_1"}
+CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
+SURGERY_COVERAGE_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300"}
+
+
+def determine_slot_type_from_codes(coverage_codes: list[str] | None) -> str:
+    """
+    coverage_codes에서 2-pass retrieval용 slot_type 결정 (U-4.15)
+
+    Returns:
+        slot_type: "cancer_diagnosis", "cerebro_cardiovascular", "surgery_benefit", or "diagnosis_lump_sum"
+    """
+    if not coverage_codes:
+        return "diagnosis_lump_sum"
+
+    code_set = set(coverage_codes)
+
+    if code_set & CEREBRO_CARDIOVASCULAR_CODES:
+        return "cerebro_cardiovascular"
+    if code_set & CANCER_COVERAGE_CODES:
+        return "cancer_diagnosis"
+    if code_set & SURGERY_COVERAGE_CODES:
+        return "surgery_benefit"
+
+    return "diagnosis_lump_sum"
+
 
 def get_amount_bearing_evidence(
     conn: psycopg.Connection,
@@ -542,6 +583,7 @@ def get_amount_bearing_evidence(
     plan_id: int | None = None,
     top_k: int | None = None,
     slot_type: str = "diagnosis_lump_sum",  # 범용화: slot_type 인자 추가
+    target_keyword: str | None = None,  # U-4.15: 우선 검색 키워드 (예: "뇌졸중진단비")
 ) -> list[Evidence]:
     """
     2-Pass Retrieval: 금액을 포함한 chunk를 검색 (범용화)
@@ -556,6 +598,7 @@ def get_amount_bearing_evidence(
         plan_id: plan_id (있으면 plan_id 또는 NULL, 없으면 NULL만)
         top_k: 최대 결과 수 (None이면 RETRIEVAL_CONFIG 사용)
         slot_type: 검색할 슬롯 타입 (diagnosis_lump_sum, cancer_diagnosis 등)
+        target_keyword: 우선 검색 키워드 (있으면 해당 키워드 포함 청크 우선 반환)
 
     Returns:
         Evidence 리스트
@@ -570,13 +613,21 @@ def get_amount_bearing_evidence(
 
     # slot_type에 따른 키워드 선택
     search_keywords = SLOT_SEARCH_KEYWORDS.get(slot_type, [])
-    # cancer_diagnosis인 경우 diagnosis_lump_sum 키워드도 포함
-    if slot_type == "cancer_diagnosis":
-        search_keywords = search_keywords + SLOT_SEARCH_KEYWORDS.get("diagnosis_lump_sum", [])
+    lump_sum_keywords = SLOT_SEARCH_KEYWORDS.get("diagnosis_lump_sum", [])
 
-    if not search_keywords:
-        # fallback: 기본 진단비 키워드 사용
-        search_keywords = LUMP_SUM_SEARCH_KEYWORDS
+    # U-4.15: cerebro_cardiovascular는 복합 키워드만 사용 (이미 "진단비" 포함)
+    # "뇌졸중진단비", "급성심근경색증진단비" 등 구체적 키워드로 정밀 검색
+    if slot_type == "cerebro_cardiovascular":
+        # 복합 키워드만 사용 (diagnosis_lump_sum 추가 불필요)
+        primary_keywords = search_keywords
+    elif slot_type == "cancer_diagnosis":
+        # 암은 기존대로 OR 결합
+        primary_keywords = search_keywords + lump_sum_keywords
+    else:
+        # 기타 slot_type
+        if not search_keywords:
+            search_keywords = LUMP_SUM_SEARCH_KEYWORDS
+        primary_keywords = search_keywords
 
     # Plan condition
     if plan_id is not None:
@@ -586,15 +637,32 @@ def get_amount_bearing_evidence(
         plan_condition = "c.plan_id IS NULL"
         plan_params = ()
 
-    # Build keyword OR condition
-    keyword_conditions = " OR ".join(
-        "c.content ILIKE %s" for _ in search_keywords
-    )
-    keyword_params = tuple(f"%{kw}%" for kw in search_keywords)
+    # Build keyword conditions (OR 조건)
+    keyword_conditions = " OR ".join("c.content ILIKE %s" for _ in primary_keywords)
+    keyword_params = tuple(f"%{kw}%" for kw in primary_keywords)
 
     # Amount pattern: matches "X,XXX만원" or "X만원" or "X천만원"
     # PostgreSQL regex: digit(s) with optional commas, followed by 만원/천만원
     amount_pattern = r'[0-9][0-9,]*\s*만\s*원'
+
+    # U-4.15: target_keyword가 있으면 해당 키워드+금액 패턴이 가까이 있는 청크 우선
+    # 예: "뇌졸중진단비" 뒤에 "1천만원"이 50자 내에 있으면 우선
+    if target_keyword:
+        # target_keyword + 금액 패턴이 50자 내에 있으면 priority 0 (최우선)
+        # target_keyword만 있으면 priority 1
+        # 없으면 priority 2
+        target_with_amount_pattern = f"{target_keyword}.{{0,50}}[0-9][0-9,]*\\s*[천백]?\\s*만\\s*원"
+        target_priority = f"""
+            CASE
+                WHEN LEFT(c.content, {preview_len}) ~ %s THEN 0
+                WHEN LEFT(c.content, {preview_len}) ILIKE %s THEN 1
+                ELSE 2
+            END
+        """
+        target_param = (target_with_amount_pattern, f"%{target_keyword}%")
+    else:
+        target_priority = "0"  # 모든 청크 동일 우선순위
+        target_param = ()
 
     with conn.cursor() as cur:
         query = f"""
@@ -613,6 +681,7 @@ def get_amount_bearing_evidence(
               AND c.content ~ %s
               AND {plan_condition}
             ORDER BY
+                {target_priority},
                 CASE c.doc_type
                     WHEN '상품요약서' THEN 1
                     WHEN '사업방법서' THEN 2
@@ -627,18 +696,29 @@ def get_amount_bearing_evidence(
             preview_len,
             insurer_code,
             compare_doc_types,
-        ) + keyword_params + (amount_pattern,) + plan_params + (top_k,)
+        ) + keyword_params + (amount_pattern,) + plan_params + target_param + (top_k,)
 
         cur.execute(query, params)
         rows = cur.fetchall()
 
         for row in rows:
+            preview = row["preview"].replace("\n", " ").strip()
+
+            # U-4.15: target_keyword가 있으면 해당 키워드부터 시작하는 텍스트만 추출
+            # 이렇게 하면 추출기가 target_keyword 앞의 관련 없는 금액(암진단비 등)을 선택하는 것을 방지
+            if target_keyword and target_keyword in preview:
+                idx = preview.find(target_keyword)
+                # target_keyword부터 시작, 뒤 150자까지 (keyword + amount + context)
+                start = idx
+                end = min(len(preview), idx + len(target_keyword) + 150)
+                preview = preview[start:end]
+
             results.append(
                 Evidence(
                     document_id=row["document_id"],
                     doc_type=row["doc_type"],
                     page_start=row["page_start"],
-                    preview=row["preview"].replace("\n", " ").strip(),
+                    preview=preview,
                     score=0.0,
                 )
             )
@@ -1658,10 +1738,15 @@ def compare(
                                 existing_chunk_ids.add(ev.chunk_id)
 
         # U-4.11: 2-pass amount retrieval for payout_amount slot
+        # U-4.15: slot_type 기반 키워드 선택
         # Check each insurer's evidence for amounts, fetch additional if needed
         start = time.time()
         amount_pattern = re.compile(r'\d[\d,]*\s*만\s*원')
         amount_retrieval_used = {}
+
+        # U-4.15: coverage_codes에서 slot_type 결정
+        slot_type_for_retrieval = determine_slot_type_from_codes(resolved_coverage_codes)
+        debug["slot_type_for_retrieval"] = slot_type_for_retrieval
 
         for insurer_code in insurers:
             # Find insurer's compare_axis entries
@@ -1676,14 +1761,30 @@ def compare(
             )
 
             if not has_amount:
-                # 2nd pass: fetch amount-bearing chunks
+                # 2nd pass: fetch amount-bearing chunks (U-4.15: slot_type 전달)
                 plan_id = plan_ids.get(insurer_code) if plan_ids else None
+
+                # U-4.15: cerebro 쿼리 시 target_keyword 전달하여 정밀 검색
+                # 예: "뇌졸중진단비" 쿼리 → "뇌졸중진단비" 키워드 포함 청크 우선
+                target_kw = None
+                if slot_type_for_retrieval == "cerebro_cardiovascular":
+                    # query에서 진단비 패턴 추출 (예: "뇌졸중진단비", "급성심근경색증진단비")
+                    for kw in SLOT_SEARCH_KEYWORDS.get("cerebro_cardiovascular", []):
+                        if kw in query:
+                            target_kw = kw
+                            break
+                    # 없으면 query + "진단비" 조합 시도
+                    if not target_kw and "진단비" not in query:
+                        target_kw = query + "진단비" if query else None
+
                 amount_evidence = get_amount_bearing_evidence(
                     conn,
                     insurer_code,
                     compare_doc_types,
                     plan_id=plan_id,
                     top_k=3,
+                    slot_type=slot_type_for_retrieval,
+                    target_keyword=target_kw,
                 )
 
                 if amount_evidence:
