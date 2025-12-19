@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./api/
 COPY services/ ./services/
 COPY tools/ ./tools/
+COPY config/ ./config/
 
 # Create artifacts directory for cache
 RUN mkdir -p /app/artifacts/page_cache
