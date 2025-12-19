@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ10)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ Complete)
 
 ---
 
@@ -1248,3 +1248,31 @@ const candidates =
 | 후보 선택 후 insurers = UI 선택값 | ✅ 구현 완료 |
 | 하드코딩 insurers 제거 | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ af33cbe |
+
+---
+
+## STEP 3.7-δ 전체 완료 요약 (2025-12-20)
+
+### 완료된 서브스텝
+
+| 스텝 | 내용 | 커밋 |
+|------|------|------|
+| 3.7-δ-β | Resolution State Reclassification | - |
+| 3.7-δ-γ | Frontend resolution_state 직접 사용 | - |
+| 3.7-δ-γ2 | Candidate selection → RESOLVED | fbc36b1 |
+| 3.7-δ | Resolution Lock & UNRESOLVED UI | 2fc5770 |
+| 3.7-δ-γ4 | UNRESOLVED 후보 소스 정합화 | 62e88d8 |
+| 3.7-δ-γ5 | UNRESOLVED 최우선 렌더링 | 111bd6c |
+| 3.7-δ-γ6 | 전체 후보 렌더링 | 45f4a3a |
+| 3.7-δ-γ10 | Insurer Anchor Lock | af33cbe |
+
+### 최종 동작
+
+1. **UNRESOLVED 상태**: 후보 선택 UI 표시, Results 패널 차단
+2. **후보 선택**: coverage_code 전달 → 즉시 RESOLVED
+3. **Insurer 유지**: UI 선택 insurers가 후보 선택 후에도 유지
+4. **Resolution Lock**: RESOLVED 상태 퇴행 방지
+
+### 임시 로그 상태
+- 임시 디버그 로그: 없음 ✅
+- Resolution Lock 디버그 로그: 유지 (의도된 것)
