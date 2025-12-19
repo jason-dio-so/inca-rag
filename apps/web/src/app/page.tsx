@@ -3,6 +3,7 @@
 /**
  * STEP 3.8: Main Page with State Isolation
  * STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene
+ * STEP 3.7-δ-γ: Frontend derives UI only from resolution_state
  *
  * Query State와 View State의 명확한 분리:
  * - Query State: messages, currentResponse, currentAnchor, isLoading
@@ -12,9 +13,13 @@
  *
  * Conversation Hygiene (STEP 3.7-γ):
  * - 담보 미확정 안내는 ChatMessage가 아님
- * - AMBIGUOUS / NOT_FOUND는 UI State로 취급
+ * - UNRESOLVED / INVALID는 UI State로 취급
  * - 가이드는 항상 1개만 존재 (교체, 누적 금지)
- * - EXACT 상태에서만 Chat 로그에 정상 응답 추가
+ * - RESOLVED 상태에서만 Chat 로그에 정상 응답 추가
+ *
+ * STEP 3.7-δ-γ: resolution_state만 사용
+ * - coverage_resolution.status에서 재계산 금지
+ * - API 응답의 resolution_state를 직접 사용
  */
 
 import { useState, useCallback, useEffect, Suspense, useMemo } from "react";
@@ -25,20 +30,18 @@ import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
 import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor, SuggestedCoverage } from "@/lib/types";
-import { ViewProvider, useViewContext, ViewingDocument } from "@/contexts/ViewContext";
+import { ViewProvider, useViewContext } from "@/contexts/ViewContext";
 import {
   CoverageGuideState,
-  canAddToChatLog,
   createCoverageGuideState,
 } from "@/lib/conversation-hygiene.config";
 import {
   detectResetCondition,
   resolveAnchorUpdate,
   resolveResolutionState,
-  isResolutionLocked,
   logTransition,
 } from "@/lib/resolution-lock.config";
-import { getUIResolutionState } from "@/lib/ui-gating.config";
+import { ResolutionState } from "@/lib/ui-gating.config";
 
 // =============================================================================
 // Deep-link Handler (View State만 변경, Query State 변경 없음)
@@ -170,31 +173,31 @@ function HomeContent() {
       const response = await compare(requestWithAnchor);
 
       // =======================================================================
-      // STEP 3.7-δ-β: Resolution Lock 적용
+      // STEP 3.7-δ-γ: Resolution Lock 적용 (resolution_state 직접 사용)
       // - Lock 위반 시 기존 anchor 유지, 새 resolution 무시
       // =======================================================================
-      const currentState = currentAnchor ? "RESOLVED" : null; // anchor가 있으면 RESOLVED
-      const newState = getUIResolutionState(response.coverage_resolution);
+      const currentState: ResolutionState | null = currentAnchor ? "RESOLVED" : null;
+      const newState: ResolutionState = response.resolution_state || "RESOLVED";
 
       // Resolution Lock: anchor 업데이트 결정
       const resolvedAnchor = resolveAnchorUpdate(
         currentAnchor,
         response.anchor,
-        response.coverage_resolution,
+        newState,
         resetCondition
       );
 
       // Resolution Lock: 상태 결정 (Lock 위반 시 RESOLVED 유지)
       const resolvedState = resolveResolutionState(
         currentAnchor,
-        response.coverage_resolution,
+        newState,
         resetCondition
       );
 
       // 디버그 로그
       logTransition(currentState, newState, resolvedState === newState, resetCondition ?? undefined);
 
-      // STEP 3.7-δ-β: Lock 위반 시 기존 anchor + 기존 response 유지
+      // STEP 3.7-δ-γ: Lock 위반 시 기존 anchor + 기존 response 유지
       const isLockViolated = resolvedState !== newState;
       setCurrentAnchor(resolvedAnchor);
 
@@ -206,14 +209,19 @@ function HomeContent() {
       }
 
       // =======================================================================
-      // STEP 3.7-δ-β: Conversation Hygiene - 상태별 분기 처리
-      // resolvedState 기반으로 판단 (Lock 적용 후)
+      // STEP 3.7-δ-γ: Conversation Hygiene - resolution_state 직접 사용
       // =======================================================================
       const canAddToChat = resolvedState === "RESOLVED";
 
       if (!canAddToChat) {
         // (A) UNRESOLVED / INVALID: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-        const guide = createCoverageGuideState(response.coverage_resolution, request.query);
+        const guide = createCoverageGuideState({
+          resolutionState: resolvedState,
+          message: response.coverage_resolution?.message,
+          suggestedCoverages: response.coverage_resolution?.suggested_coverages,
+          detectedDomain: response.coverage_resolution?.detected_domain,
+          originalQuery: request.query,
+        });
         setCoverageGuide(guide);
         // 사용자 메시지는 이미 추가됨, assistant 메시지는 추가하지 않음
         return;

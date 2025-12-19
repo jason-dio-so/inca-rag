@@ -1,5 +1,6 @@
 /**
  * STEP 3.7-δ-β: Conversation Hygiene Configuration
+ * STEP 3.7-δ-γ: Frontend derives UI only from resolution_state
  *
  * 담보 미확정 상태에서 가이드 메시지가 대화 로그에 누적되는 문제를 방지하고,
  * 담보 선택 안내를 단일 상태 패널(UI State)로 격리합니다.
@@ -8,10 +9,11 @@
  * 1. 상태와 대화의 분리 - 담보 가이드 ≠ ChatMessage
  * 2. 가이드 단일성 원칙 - 가이드는 항상 1개만 존재 (교체, 누적 금지)
  * 3. RESOLVED 상태 우선 원칙 - RESOLVED일 때만 Chat 로그에 정상 응답 추가
+ * 4. resolution_state만 사용 - coverage_resolution.status에서 재계산 금지
  */
 
-import { CoverageResolution, SuggestedCoverage } from "./types";
-import { ResolutionState, getUIResolutionState } from "./ui-gating.config";
+import { SuggestedCoverage } from "./types";
+import { ResolutionState } from "./ui-gating.config";
 
 // =============================================================================
 // Coverage Guide State (UI State, NOT Chat State)
@@ -40,22 +42,23 @@ export interface CoverageGuideState {
 export const CHAT_MESSAGE_ALLOWED_STATES: ResolutionState[] = ["RESOLVED"];
 
 /**
- * 응답이 ChatMessage로 추가될 수 있는지 확인
+ * STEP 3.7-δ-γ: 응답이 ChatMessage로 추가될 수 있는지 확인
+ * resolution_state를 직접 사용 (coverage_resolution에서 재계산 금지)
  */
-export function canAddToChatLog(resolution: CoverageResolution | null | undefined): boolean {
-  const state = getUIResolutionState(resolution);
-  return CHAT_MESSAGE_ALLOWED_STATES.includes(state);
+export function canAddToChatLog(resolutionState: ResolutionState | null | undefined): boolean {
+  if (!resolutionState) return true; // backward compatibility
+  return CHAT_MESSAGE_ALLOWED_STATES.includes(resolutionState);
 }
 
 /**
- * Coverage Guide Panel 표시 필요 여부 확인
+ * STEP 3.7-δ-γ: Coverage Guide Panel 표시 필요 여부 확인
+ * resolution_state를 직접 사용
  */
 export function shouldShowCoverageGuide(
-  resolution: CoverageResolution | null | undefined
+  resolutionState: ResolutionState | null | undefined
 ): boolean {
-  if (!resolution) return false;
-  const state = getUIResolutionState(resolution);
-  return state === "UNRESOLVED" || state === "INVALID";
+  if (!resolutionState) return false;
+  return resolutionState === "UNRESOLVED" || resolutionState === "INVALID";
 }
 
 // =============================================================================
@@ -63,28 +66,40 @@ export function shouldShowCoverageGuide(
 // =============================================================================
 
 /**
- * CoverageResolution에서 CoverageGuideState 생성
+ * STEP 3.7-δ-γ: CoverageGuideState 생성을 위한 입력 파라미터
+ * API 응답에서 직접 추출한 값들을 사용
+ */
+export interface CreateGuideParams {
+  resolutionState: ResolutionState | null | undefined;
+  message?: string | null;
+  suggestedCoverages?: SuggestedCoverage[];
+  detectedDomain?: string | null;
+  originalQuery: string;
+}
+
+/**
+ * STEP 3.7-δ-γ: CoverageGuideState 생성
+ * resolution_state를 직접 사용 (coverage_resolution.status에서 재계산 금지)
  * - RESOLVED: null 반환 (가이드 불필요)
  * - UNRESOLVED / INVALID: 가이드 상태 생성
  */
 export function createCoverageGuideState(
-  resolution: CoverageResolution | null | undefined,
-  originalQuery: string
+  params: CreateGuideParams
 ): CoverageGuideState | null {
-  if (!resolution) return null;
+  const { resolutionState, message, suggestedCoverages, detectedDomain, originalQuery } = params;
 
-  const state = getUIResolutionState(resolution);
+  if (!resolutionState) return null;
 
   // RESOLVED 상태에서는 가이드 불필요
-  if (state === "RESOLVED") return null;
+  if (resolutionState === "RESOLVED") return null;
 
   // UNRESOLVED: 담보 선택 필요
-  if (state === "UNRESOLVED") {
+  if (resolutionState === "UNRESOLVED") {
     return {
       resolutionState: "UNRESOLVED",
-      message: resolution.message || "여러 담보가 검색되었습니다. 아래에서 선택해 주세요.",
-      suggestedCoverages: resolution.suggested_coverages || [],
-      detectedDomain: resolution.detected_domain ?? undefined,
+      message: message || "여러 담보가 검색되었습니다. 아래에서 선택해 주세요.",
+      suggestedCoverages: suggestedCoverages || [],
+      detectedDomain: detectedDomain ?? undefined,
       originalQuery,
     };
   }
@@ -92,8 +107,8 @@ export function createCoverageGuideState(
   // INVALID: 담보 미확정
   return {
     resolutionState: "INVALID",
-    message: resolution.message || "담보명을 인식하지 못했습니다. 좀 더 구체적으로 입력해 주세요.",
-    suggestedCoverages: resolution.suggested_coverages || [],
+    message: message || "담보명을 인식하지 못했습니다. 좀 더 구체적으로 입력해 주세요.",
+    suggestedCoverages: suggestedCoverages || [],
     originalQuery,
   };
 }

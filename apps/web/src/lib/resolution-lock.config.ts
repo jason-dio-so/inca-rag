@@ -1,5 +1,6 @@
 /**
  * STEP 3.7-δ-β: Resolution Lock & Single Source of Truth
+ * STEP 3.7-δ-γ: Frontend derives UI only from resolution_state
  *
  * Resolution 상태 전이 규칙을 정의하고, RESOLVED 상태에서의 퇴행을 방지합니다.
  *
@@ -7,10 +8,11 @@
  * 1. Resolution Lock: RESOLVED 상태는 명시적 리셋 없이 UNRESOLVED/INVALID로 돌아갈 수 없음
  * 2. Single Source of Truth: QueryAnchor만 resolution 상태를 보유
  * 3. 모든 UI 컴포넌트는 anchor를 참조하여 렌더링
+ * 4. resolution_state만 사용 - coverage_resolution.status에서 재계산 금지
  */
 
-import { QueryAnchor, CoverageResolution } from "./types";
-import { ResolutionState, getUIResolutionState } from "./ui-gating.config";
+import { QueryAnchor } from "./types";
+import { ResolutionState } from "./ui-gating.config";
 
 // =============================================================================
 // Resolution State Transition Rules
@@ -83,24 +85,23 @@ export function isResolutionLocked(anchor: QueryAnchor | null): boolean {
 }
 
 /**
- * 새 resolution이 현재 lock 상태를 위반하는지 확인
+ * STEP 3.7-δ-γ: 새 resolution_state가 현재 lock 상태를 위반하는지 확인
  * - Lock 상태에서 UNRESOLVED/INVALID 응답이 오면 위반
+ * - resolution_state를 직접 사용 (coverage_resolution에서 재계산 금지)
  */
 export function isLockViolation(
   currentAnchor: QueryAnchor | null,
-  newResolution: CoverageResolution | null | undefined
+  newState: ResolutionState | null | undefined
 ): boolean {
   // Lock이 없으면 위반 불가
   if (!isResolutionLocked(currentAnchor)) {
     return false;
   }
 
-  // 새 resolution이 없으면 위반 아님
-  if (!newResolution) {
+  // 새 resolution이 없으면 위반 아님 (backward compatibility: RESOLVED로 취급)
+  if (!newState) {
     return false;
   }
-
-  const newState = getUIResolutionState(newResolution);
 
   // Lock 상태에서 RESOLVED가 아닌 응답이 오면 위반
   return newState !== "RESOLVED";
@@ -168,14 +169,15 @@ export function detectResetCondition(
 // =============================================================================
 
 /**
- * Lock 위반 시 기존 anchor 유지 결정
+ * STEP 3.7-δ-γ: Lock 위반 시 기존 anchor 유지 결정
  * - Lock 위반이면 기존 anchor 유지
  * - 정상 전이면 새 anchor로 업데이트
+ * - resolution_state를 직접 사용 (coverage_resolution에서 재계산 금지)
  */
 export function resolveAnchorUpdate(
   currentAnchor: QueryAnchor | null,
   newAnchor: QueryAnchor | null | undefined,
-  newResolution: CoverageResolution | null | undefined,
+  newState: ResolutionState | null | undefined,
   resetCondition: ResetCondition | null
 ): QueryAnchor | null {
   // 리셋 조건이면 새 anchor 사용 (또는 null)
@@ -184,7 +186,7 @@ export function resolveAnchorUpdate(
   }
 
   // Lock 위반 체크
-  if (isLockViolation(currentAnchor, newResolution)) {
+  if (isLockViolation(currentAnchor, newState)) {
     // Lock 위반 시 기존 anchor 유지
     console.warn(
       "[Resolution Lock] Lock violation detected. Keeping current anchor:",
@@ -198,26 +200,27 @@ export function resolveAnchorUpdate(
 }
 
 /**
- * Lock 위반 시 기존 resolution 상태 유지 결정
+ * STEP 3.7-δ-γ: Lock 위반 시 기존 resolution 상태 유지 결정
+ * - resolution_state를 직접 사용 (coverage_resolution에서 재계산 금지)
  */
 export function resolveResolutionState(
   currentAnchor: QueryAnchor | null,
-  newResolution: CoverageResolution | null | undefined,
+  newState: ResolutionState | null | undefined,
   resetCondition: ResetCondition | null
 ): ResolutionState {
   // 리셋 조건이면 새 resolution 상태 사용
   if (resetCondition) {
-    return getUIResolutionState(newResolution);
+    return newState || "RESOLVED";
   }
 
   // Lock 위반 체크
-  if (isLockViolation(currentAnchor, newResolution)) {
+  if (isLockViolation(currentAnchor, newState)) {
     // Lock 위반 시 RESOLVED 상태 유지
     return "RESOLVED";
   }
 
   // 정상 전이: 새 resolution 상태 사용
-  return getUIResolutionState(newResolution);
+  return newState || "RESOLVED";
 }
 
 // =============================================================================
