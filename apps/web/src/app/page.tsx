@@ -209,13 +209,16 @@ function HomeContent() {
       }
 
       // =======================================================================
-      // STEP 3.7-δ-γ: Conversation Hygiene - resolution_state 직접 사용
+      // STEP 3.7-δ-γ5: resolution_state 우선순위 (UNRESOLVED > INVALID > RESOLVED)
+      // - UNRESOLVED: "담보 선택 필요" + 후보 버튼
+      // - INVALID: "담보 미확정" (후보 없음)
+      // - RESOLVED: 결과 표시
       // =======================================================================
       const canAddToChat = resolvedState === "RESOLVED";
 
       if (!canAddToChat) {
         // (A) UNRESOLVED / INVALID: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-        // STEP 3.7-δ-γ4: 후보 소스 우선순위
+        // STEP 3.7-δ-γ4/γ5: 후보 소스 우선순위
         // 1. coverage_resolution.suggested_coverages (PRIMARY)
         // 2. coverage_candidates (SECONDARY, if present)
         // 3. empty array
