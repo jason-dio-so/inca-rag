@@ -1161,6 +1161,7 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
 
     best_method = None
     best_doc_priority = 0
+    best_page_start = float('inf')  # U-4.16 tie-breaker: 낮은 page_start 우선
     best_refs = []
     found_davinci = False
     found_robot = False
@@ -1168,6 +1169,7 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
     for ev in evidence_list:
         # A2 정책: 약관 제외 안함 (정의 확인 필요)
         doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
 
         preview = getattr(ev, 'preview', '') or ''
         if not preview:
@@ -1175,12 +1177,21 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
 
         preview_lower = preview.lower()
 
+        # U-4.16: tie-breaker 안정화 - doc_priority > best, 또는 동일 시 page_start 비교
+        def _is_better(doc_pri, page_st):
+            if doc_pri > best_doc_priority:
+                return True
+            if doc_pri == best_doc_priority and page_st < best_page_start:
+                return True
+            return False
+
         # 다빈치 키워드 탐지
         if any(kw in preview_lower for kw in ["다빈치", "da vinci", "davinci"]):
             found_davinci = True
-            if doc_priority >= best_doc_priority:
+            if _is_better(doc_priority, page_start):
                 best_method = "다빈치"
                 best_doc_priority = doc_priority
+                best_page_start = page_start
                 best_refs = [SlotEvidenceRef(
                     document_id=ev.document_id,
                     page_start=ev.page_start,
@@ -1190,9 +1201,10 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
         # 로봇수술 키워드 탐지
         elif any(kw in preview_lower for kw in ["로봇수술", "로봇 수술", "robot"]):
             found_robot = True
-            if doc_priority >= best_doc_priority and not found_davinci:
+            if _is_better(doc_priority, page_start) and not found_davinci:
                 best_method = "로봇수술"
                 best_doc_priority = doc_priority
+                best_page_start = page_start
                 best_refs = [SlotEvidenceRef(
                     document_id=ev.document_id,
                     page_start=ev.page_start,
@@ -1339,6 +1351,8 @@ CANCER_SUBTYPE_KEYWORDS = {
 COVERAGE_POSITIVE_KEYWORDS = ["보장", "지급", "보험금", "해당"]
 # 보장 제외 키워드
 COVERAGE_NEGATIVE_KEYWORDS = ["제외", "면책", "지급하지", "해당하지", "보장하지"]
+# U-4.16: 감액/부분지급 키워드 (Unknown + reason으로 처리)
+PARTIAL_PAYMENT_KEYWORDS = ["감액", "50%", "20%", "10%", "지급률", "일부지급", "부분지급"]
 
 
 def extract_subtype_coverage_slot(
@@ -1367,6 +1381,7 @@ def extract_subtype_coverage_slot(
 
     best_result = None  # "Y", "N", or None
     best_confidence = 0  # higher is better
+    best_reason = None  # U-4.16: 감액/부분지급 등 reason
     best_refs = []
     found_subtype = False
 
@@ -1395,13 +1410,22 @@ def extract_subtype_coverage_slot(
         start = max(0, idx - 100)
         end = min(len(preview), idx + len(found_keyword) + 200)
         context = preview[start:end]
+        context_lower = context.lower()  # U-4.16: 대소문자 통일
 
-        # 포함/제외 키워드 탐지
-        has_positive = any(pk in context for pk in COVERAGE_POSITIVE_KEYWORDS)
-        has_negative = any(nk in context for nk in COVERAGE_NEGATIVE_KEYWORDS)
+        # 포함/제외 키워드 탐지 (lowercase 기반)
+        has_positive = any(pk.lower() in context_lower for pk in COVERAGE_POSITIVE_KEYWORDS)
+        has_negative = any(nk.lower() in context_lower for nk in COVERAGE_NEGATIVE_KEYWORDS)
+        # U-4.16: 감액/부분지급 키워드 탐지
+        has_partial = any(pp.lower() in context_lower for pp in PARTIAL_PAYMENT_KEYWORDS)
 
         # 판단
-        if has_negative and not has_positive:
+        reason = None
+        if has_partial:
+            # 감액/부분지급 발견 시 Unknown + reason
+            result = "Unknown"
+            reason = "감액/부분지급 가능성"
+            confidence = doc_priority
+        elif has_negative and not has_positive:
             result = "N"
             confidence = doc_priority + 1  # 제외 명시는 신뢰도 높음
         elif has_positive and not has_negative:
@@ -1419,6 +1443,7 @@ def extract_subtype_coverage_slot(
         if confidence > best_confidence or (confidence == best_confidence and result != "Unknown"):
             best_result = result
             best_confidence = confidence
+            best_reason = reason  # U-4.16: 감액 등 reason 저장
             best_refs = [SlotEvidenceRef(
                 document_id=ev.document_id,
                 page_start=ev.page_start,
@@ -1430,6 +1455,7 @@ def extract_subtype_coverage_slot(
             insurer_code=insurer_code,
             value=best_result,
             confidence="high" if best_result in ("Y", "N") and best_confidence >= 2 else "medium",
+            reason=best_reason,  # U-4.16: 감액/부분지급 reason 전달
             evidence_refs=best_refs,
             trace=trace,
         )
