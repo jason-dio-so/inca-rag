@@ -540,6 +540,26 @@ SLOT_SEARCH_KEYWORDS = {
         "입원 1일당",
         "일당",
     ],
+    # U-4.16: 다빈치/로봇 수술 키워드
+    "surgery_method": [
+        "다빈치",
+        "da vinci",
+        "로봇수술",
+        "로봇 수술",
+        "robot",
+        "복강경",
+    ],
+    # U-4.16: 암 subtype (경계성종양/제자리암) 키워드
+    "cancer_subtype": [
+        "제자리암",
+        "상피내암",
+        "경계성종양",
+        "경계성 종양",
+        "유사암",
+        "기타피부암",
+        "갑상선암",
+        "대장점막내암",
+    ],
 }
 
 # 하위 호환성을 위한 alias
@@ -551,7 +571,7 @@ LUMP_SUM_SEARCH_KEYWORDS = (
 # U-4.15: coverage_codes → slot_type 매핑 (2-pass retrieval용)
 CANCER_COVERAGE_CODES = {"A4200_1", "A4210", "A4209", "A4299_1"}
 CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
-SURGERY_COVERAGE_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300"}
+SURGERY_COVERAGE_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300", "A9630_1"}
 
 
 def determine_slot_type_from_codes(coverage_codes: list[str] | None) -> str:
@@ -1843,13 +1863,14 @@ def compare(
         diff_summary = build_diff_summary(coverage_compare_result)
         debug["timing_ms"]["diff_summary"] = round((time.time() - start) * 1000, 2)
 
-        # U-4.8: Comparison Slots 추출
+        # U-4.8: Comparison Slots 추출 (U-4.16: query 전달하여 조건부 슬롯 지원)
         start = time.time()
         slots = extract_slots(
             insurers=insurers,
             compare_axis=compare_axis,
             policy_axis=policy_axis,
             coverage_codes=resolved_coverage_codes,
+            query=query,  # U-4.16: 다빈치/경계성종양 쿼리 시 조건부 슬롯 추출
         )
         debug["timing_ms"]["slots"] = round((time.time() - start) * 1000, 2)
         debug["slots_count"] = len(slots)

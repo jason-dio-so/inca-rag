@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19
+> 최종 업데이트: 2025-12-19 (U-4.16)
 
 ---
 
@@ -54,6 +54,7 @@
 | **Step U-4.13** | **뇌/심혈관 + 수술비 슬롯 추출기 구현** | **기능** | ✅ 완료 |
 | **Step U-4.14** | **대규모 보험사 온보딩 + 안정성 검증** | **기능/검증** | ✅ 완료 |
 | **Step U-4.15** | **Cerebro 금액 추출 정밀도 향상** | **기능** | ✅ 완료 |
+| **Step U-4.16** | **고난도 핵심 질의 대응 (다빈치수술비/경계성종양)** | **기능** | ✅ 완료 |
 
 ---
 
@@ -798,3 +799,60 @@ Query                     Insurer    Slot                 Expected        Actual
 | existence_status 8/8 | ✅ 7/7 (100%) |
 | extractor 수정 없음 | ✅ retrieval 개선만 적용 |
 | insurer-specific 분기 없음 | ✅ 공통 로직만 사용 |
+
+---
+
+## Step U-4.16: 고난도 핵심 질의 대응 (다빈치수술비/경계성종양) (2025-12-19)
+
+### 목표
+- 다빈치(로봇) 수술비 비교 질의 대응
+- 경계성 종양 / 제자리암 비교 질의 대응
+- 기존 8개 보험사 데이터만 사용 (신규 보험사 추가 금지)
+
+### 작업 A: 다빈치(로봇) 수술비 비교
+
+**쿼리 예시:** "다빈치 수술비를 삼성과 현대를 비교해줘"
+
+**추가 슬롯:**
+| slot_key | label | 추출기 | 값 예시 |
+|----------|-------|--------|---------|
+| surgery_method | 수술 방식 | extract_surgery_method | 다빈치, 로봇수술, Unknown |
+| method_condition | 수술방식 적용조건 | extract_method_condition | "로봇수술 시" |
+
+**구현:**
+- `extract_surgery_method_slot()`: 다빈치/로봇수술 키워드 탐지
+- `extract_method_condition_slot()`: 수술방식 주변 조건 텍스트 추출
+- 쿼리에 다빈치/로봇 키워드 포함 시 조건부 슬롯 추출
+
+### 작업 B: 경계성 종양 / 제자리암 비교
+
+**쿼리 예시:** "경계성 종양 및 제자리암을 한화와 흥국을 비교해줘"
+
+**추가 슬롯:**
+| slot_key | label | 추출기 | 값 예시 |
+|----------|-------|--------|---------|
+| subtype_in_situ_covered | 제자리암 보장 여부 | extract_subtype_coverage | Y/N/Unknown |
+| subtype_borderline_covered | 경계성종양 보장 여부 | extract_subtype_coverage | Y/N/Unknown |
+| subtype_similar_cancer_covered | 유사암 보장 여부 | extract_subtype_coverage | Y/N/Unknown |
+| subtype_definition_excerpt | 암 유형 정의/조건 발췌 | extract_subtype_definition | 텍스트 |
+
+**구현:**
+- `CANCER_SUBTYPE_KEYWORDS`: 제자리암/경계성종양/유사암 키워드 정의
+- `COVERAGE_POSITIVE_KEYWORDS`: 보장/지급 긍정 키워드
+- `COVERAGE_NEGATIVE_KEYWORDS`: 제외/면책 부정 키워드
+- 컨텍스트 분석으로 보장 여부 판정 (Y/N/Unknown)
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/slot_definitions.yaml` | surgery_method, subtype 슬롯 정의 추가 (v0.3) |
+| `services/extraction/slot_extractor.py` | 4개 신규 추출 함수 |
+| `services/retrieval/compare_service.py` | retrieval 키워드 추가, A9630_1 coverage 코드 추가 |
+| `eval/goldset_u416_core.csv` | 10개 평가 케이스 |
+
+### 검증 상태
+
+- 단위 테스트: 47 passed ✅
+- 통합 테스트: Docker DB 필요 (별도 실행)
+- Goldset: `eval/goldset_u416_core.csv` 생성 완료

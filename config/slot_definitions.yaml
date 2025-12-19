@@ -4,7 +4,7 @@
 # 이 파일은 코드에 하드코딩된 슬롯 정의를 외부화하여 관리합니다.
 # slot_extractor.py의 load_slot_definitions()가 이 파일을 로드합니다.
 
-version: "0.2"
+version: "0.3"  # U-4.16: 다빈치 수술비 + 경계성종양/제자리암 슬롯 추가
 
 # =============================================================================
 # Coverage Type -> Slot Definitions Mapping
@@ -52,6 +52,31 @@ coverage_types:
         source_doc_types: ["약관"]
         extractor: policy_snippet
 
+      # U-4.16: 암 subtype 보장 여부 슬롯 (경계성종양/제자리암 비교용)
+      - slot_key: subtype_in_situ_covered
+        label: "제자리암 보장 여부"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        extractor: subtype_coverage
+
+      - slot_key: subtype_borderline_covered
+        label: "경계성종양 보장 여부"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        extractor: subtype_coverage
+
+      - slot_key: subtype_similar_cancer_covered
+        label: "유사암 보장 여부"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        extractor: subtype_coverage
+
+      - slot_key: subtype_definition_excerpt
+        label: "암 유형 정의/조건 발췌"
+        comparable: false
+        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        extractor: subtype_definition
+
   # -------------------------------------------------------------------------
   # 뇌/심혈관 진단비 (U-4.14 수정: 신정원 표준코드 반영)
   # -------------------------------------------------------------------------
@@ -95,6 +120,7 @@ coverage_types:
       - A5200     # 암수술비(유사암제외)
       - A5298_001 # 유사암수술비
       - A5300     # 상해수술비
+      - A9630_1   # 다빈치로봇암수술비 (U-4.16 추가)
     slots:
       - slot_key: surgery_amount
         label: "수술비 지급금액"
@@ -113,6 +139,21 @@ coverage_types:
         comparable: true
         source_doc_types: ["가입설계서", "상품요약서", "사업방법서"]
         extractor: existence_check
+
+      # U-4.16: 다빈치/로봇 수술 관련 슬롯
+      - slot_key: surgery_method
+        label: "수술 방식"
+        comparable: true
+        source_doc_types: ["상품요약서", "사업방법서", "가입설계서"]
+        extractor: surgery_method
+        # 값 예시: 다빈치, 로봇수술, 로봇수술(다빈치 포함), 해당없음, Unknown
+
+      - slot_key: method_condition
+        label: "수술방식 적용조건"
+        comparable: false
+        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        extractor: method_condition
+        # 값 예시: "로봇수술(다빈치 포함) 시", "특정 수술에 한함"
 
   # -------------------------------------------------------------------------
   # 입원일당 (U-4.12 신규 - stub)
@@ -187,6 +228,28 @@ extractors:
     description: "일수 제한 추출 (구현 예정)"
     function: null
 
+  # U-4.16: 다빈치/로봇 수술 추출기
+  surgery_method:
+    type: rule_based
+    description: "수술 방식 추출 (다빈치, 로봇수술 키워드 탐지)"
+    function: extract_surgery_method
+
+  method_condition:
+    type: rule_based
+    description: "수술방식 적용조건 추출"
+    function: extract_method_condition
+
+  # U-4.16: 암 subtype 보장 추출기
+  subtype_coverage:
+    type: rule_based
+    description: "암 subtype(제자리암/경계성종양/유사암) 보장 여부 추출"
+    function: extract_subtype_coverage
+
+  subtype_definition:
+    type: rule_based
+    description: "암 유형 정의/조건 발췌"
+    function: extract_subtype_definition
+
 # =============================================================================
 # Search Keywords Registry (2-pass retrieval용)
 # =============================================================================
@@ -226,3 +289,23 @@ search_keywords:
     - "입원 1일당"
     - "일당"
     - "입원일수"
+
+  # U-4.16: 다빈치/로봇 수술 키워드
+  surgery_method:
+    - "다빈치"
+    - "da vinci"
+    - "로봇수술"
+    - "로봇 수술"
+    - "robot"
+    - "복강경"
+
+  # U-4.16: 암 subtype 키워드 (경계성종양/제자리암)
+  cancer_subtype:
+    - "제자리암"
+    - "상피내암"
+    - "경계성종양"
+    - "경계성 종양"
+    - "유사암"
+    - "기타피부암"
+    - "갑상선암"
+    - "대장점막내암"

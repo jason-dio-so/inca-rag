@@ -1,0 +1,11 @@
+case_id,query,insurers,coverage_codes,expected_slot_count_min,expected_slots,acceptance_criteria
+u416_01,다빈치 수술비 비교,"SAMSUNG,HYUNDAI","A5100,A5200",2,"surgery_method,existence_status",AC1: surgery_method 슬롯 추출
+u416_02,로봇수술비 삼성 현대 비교,"SAMSUNG,HYUNDAI","A5100,A5200",2,"surgery_method,existence_status",AC1: 로봇수술 키워드로 surgery_method 추출
+u416_03,다빈치 수술 보장 비교,"SAMSUNG,HYUNDAI","A5100,A5200",2,"surgery_method,method_condition",AC2: method_condition 슬롯 포함
+u416_04,경계성 종양 및 제자리암 비교,"HANWHA,HEUNGKUK","A4200_1,A4210",3,"subtype_borderline_covered,subtype_in_situ_covered,existence_status",AC3: subtype 보장 여부 슬롯 추출
+u416_05,제자리암 보장 비교,"HANWHA,HEUNGKUK","A4200_1,A4210",2,"subtype_in_situ_covered,existence_status",AC3: 제자리암 단독 쿼리
+u416_06,경계성종양 암진단비 비교,"HANWHA,HEUNGKUK","A4200_1,A4210",2,"subtype_borderline_covered,existence_status",AC3: 경계성종양 단독 쿼리
+u416_07,유사암 보장 여부 비교,"HANWHA,HEUNGKUK","A4200_1,A4210",2,"subtype_similar_cancer_covered,existence_status",AC4: 유사암 보장 슬롯 추출
+u416_08,삼성 다빈치 수술비,SAMSUNG,"A5100,A5200",2,"surgery_method,existence_status",단일 보험사 케이스
+u416_09,한화 경계성종양 제자리암,HANWHA,"A4200_1,A4210",3,"subtype_borderline_covered,subtype_in_situ_covered,existence_status",단일 보험사 케이스
+u416_10,암 수술비 다빈치 로봇,"SAMSUNG,HYUNDAI","A5200",2,"surgery_method,existence_status",암수술비 + 다빈치 복합 쿼리

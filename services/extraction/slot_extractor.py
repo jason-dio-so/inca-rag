@@ -798,7 +798,7 @@ def extract_waiting_period(policy_evidence: list, insurer_code: str) -> SlotInsu
 
 # Coverage type별 coverage_codes 매핑 (U-4.14 수정: 신정원 표준코드 반영)
 CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
-SURGERY_BENEFIT_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300"}
+SURGERY_BENEFIT_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300", "A9630_1"}
 
 
 def _determine_coverage_type(coverage_codes: list[str] | None) -> str | None:
@@ -823,15 +823,17 @@ def extract_slots(
     compare_axis: list,
     policy_axis: list,
     coverage_codes: list[str] | None = None,
+    query: str = "",  # U-4.16: 쿼리 전달하여 조건부 슬롯 추출
 ) -> list[ComparisonSlot]:
     """
-    슬롯 추출 메인 함수 (U-4.13: 다중 coverage_type 지원)
+    슬롯 추출 메인 함수 (U-4.13: 다중 coverage_type 지원, U-4.16: 조건부 슬롯)
 
     Args:
         insurers: 보험사 코드 리스트
         compare_axis: compare_axis 결과 (가입설계서/상품요약서/사업방법서)
         policy_axis: policy_axis 결과 (약관)
         coverage_codes: 필터할 coverage_codes
+        query: 원본 쿼리 (조건부 슬롯 추출용)
 
     Returns:
         추출된 슬롯 리스트
@@ -855,19 +857,20 @@ def extract_slots(
 
     # Coverage type별 슬롯 추출
     if coverage_type == "surgery_benefit":
-        return _extract_surgery_benefit_slots(insurers, compare_by_insurer, policy_by_insurer)
+        return _extract_surgery_benefit_slots(insurers, compare_by_insurer, policy_by_insurer, query)
     elif coverage_type == "cerebro_cardiovascular_diagnosis":
         return _extract_cerebro_cardiovascular_slots(insurers, compare_by_insurer, policy_by_insurer)
     else:  # cancer_diagnosis (기본)
-        return _extract_cancer_diagnosis_slots(insurers, compare_by_insurer, policy_by_insurer)
+        return _extract_cancer_diagnosis_slots(insurers, compare_by_insurer, policy_by_insurer, query)
 
 
 def _extract_cancer_diagnosis_slots(
     insurers: list[str],
     compare_by_insurer: dict[str, list],
     policy_by_insurer: dict[str, list],
+    query: str = "",
 ) -> list[ComparisonSlot]:
-    """암진단비 슬롯 추출"""
+    """암진단비 슬롯 추출 (U-4.16: subtype 슬롯 추가)"""
     slots = []
 
     # 1. diagnosis_lump_sum_amount (범용화: 진단비 일시금 전용)
@@ -933,6 +936,67 @@ def _extract_cancer_diagnosis_slots(
     )
     slots.append(waiting_slot)
 
+    # U-4.16: 경계성종양/제자리암/유사암 관련 쿼리인 경우 subtype 슬롯 추출
+    subtype_keywords = ["제자리암", "상피내암", "경계성종양", "경계성 종양", "유사암"]
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in subtype_keywords):
+        # 모든 evidence 합쳐서 검색 (compare + policy)
+        all_evidence_by_insurer = {
+            ic: compare_by_insurer.get(ic, []) + policy_by_insurer.get(ic, [])
+            for ic in insurers
+        }
+
+        # 6. subtype_in_situ_covered (제자리암 보장 여부)
+        in_situ_slot = ComparisonSlot(
+            slot_key="subtype_in_situ_covered",
+            label="제자리암 보장 여부",
+            comparable=True,
+            insurers=[
+                extract_subtype_coverage_slot(all_evidence_by_insurer.get(ic, []), ic, "in_situ", query)
+                for ic in insurers
+            ],
+        )
+        in_situ_slot.diff_summary = _generate_slot_diff_summary(in_situ_slot)
+        slots.append(in_situ_slot)
+
+        # 7. subtype_borderline_covered (경계성종양 보장 여부)
+        borderline_slot = ComparisonSlot(
+            slot_key="subtype_borderline_covered",
+            label="경계성종양 보장 여부",
+            comparable=True,
+            insurers=[
+                extract_subtype_coverage_slot(all_evidence_by_insurer.get(ic, []), ic, "borderline", query)
+                for ic in insurers
+            ],
+        )
+        borderline_slot.diff_summary = _generate_slot_diff_summary(borderline_slot)
+        slots.append(borderline_slot)
+
+        # 8. subtype_similar_cancer_covered (유사암 보장 여부)
+        similar_slot = ComparisonSlot(
+            slot_key="subtype_similar_cancer_covered",
+            label="유사암 보장 여부",
+            comparable=True,
+            insurers=[
+                extract_subtype_coverage_slot(all_evidence_by_insurer.get(ic, []), ic, "similar_cancer", query)
+                for ic in insurers
+            ],
+        )
+        similar_slot.diff_summary = _generate_slot_diff_summary(similar_slot)
+        slots.append(similar_slot)
+
+        # 9. subtype_definition_excerpt (정의/조건 발췌)
+        definition_slot = ComparisonSlot(
+            slot_key="subtype_definition_excerpt",
+            label="암 유형 정의/조건 발췌",
+            comparable=False,
+            insurers=[
+                extract_subtype_definition_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        slots.append(definition_slot)
+
     return slots
 
 
@@ -989,8 +1053,9 @@ def _extract_surgery_benefit_slots(
     insurers: list[str],
     compare_by_insurer: dict[str, list],
     policy_by_insurer: dict[str, list],
+    query: str = "",
 ) -> list[ComparisonSlot]:
-    """수술비 슬롯 추출 (U-4.13)"""
+    """수술비 슬롯 추출 (U-4.13 + U-4.16)"""
     slots = []
 
     # 1. surgery_amount (수술비 지급금액)
@@ -1032,7 +1097,423 @@ def _extract_surgery_benefit_slots(
     existence_slot.diff_summary = _generate_slot_diff_summary(existence_slot)
     slots.append(existence_slot)
 
+    # U-4.16: 다빈치/로봇 수술 관련 쿼리인 경우 추가 슬롯 추출
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in ["다빈치", "로봇", "da vinci", "robot"]):
+        # 4. surgery_method (수술 방식)
+        # 모든 evidence 합쳐서 검색 (compare + policy)
+        all_evidence_by_insurer = {
+            ic: compare_by_insurer.get(ic, []) + policy_by_insurer.get(ic, [])
+            for ic in insurers
+        }
+        surgery_method_slot = ComparisonSlot(
+            slot_key="surgery_method",
+            label="수술 방식",
+            comparable=True,
+            insurers=[
+                extract_surgery_method_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        surgery_method_slot.diff_summary = _generate_slot_diff_summary(surgery_method_slot)
+        slots.append(surgery_method_slot)
+
+        # 5. method_condition (수술방식 적용조건)
+        method_condition_slot = ComparisonSlot(
+            slot_key="method_condition",
+            label="수술방식 적용조건",
+            comparable=False,
+            insurers=[
+                extract_method_condition_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        slots.append(method_condition_slot)
+
     return slots
+
+
+# =============================================================================
+# U-4.16: 다빈치/로봇 수술 슬롯 추출
+# =============================================================================
+
+# 다빈치/로봇 수술 키워드
+SURGERY_METHOD_KEYWORDS = [
+    "다빈치",
+    "da vinci",
+    "davinci",
+    "로봇수술",
+    "로봇 수술",
+    "robot",
+    "복강경",
+]
+
+
+def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    수술 방식 슬롯 추출 (U-4.16)
+
+    다빈치/로봇수술 키워드를 탐지하여 수술 방식 반환
+    값: 다빈치, 로봇수술, 로봇수술(다빈치 포함), 해당없음, Unknown
+    """
+    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_method = None
+    best_doc_priority = 0
+    best_refs = []
+    found_davinci = False
+    found_robot = False
+
+    for ev in evidence_list:
+        # A2 정책: 약관 제외 안함 (정의 확인 필요)
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        preview_lower = preview.lower()
+
+        # 다빈치 키워드 탐지
+        if any(kw in preview_lower for kw in ["다빈치", "da vinci", "davinci"]):
+            found_davinci = True
+            if doc_priority >= best_doc_priority:
+                best_method = "다빈치"
+                best_doc_priority = doc_priority
+                best_refs = [SlotEvidenceRef(
+                    document_id=ev.document_id,
+                    page_start=ev.page_start,
+                    chunk_id=getattr(ev, 'chunk_id', None),
+                )]
+
+        # 로봇수술 키워드 탐지
+        elif any(kw in preview_lower for kw in ["로봇수술", "로봇 수술", "robot"]):
+            found_robot = True
+            if doc_priority >= best_doc_priority and not found_davinci:
+                best_method = "로봇수술"
+                best_doc_priority = doc_priority
+                best_refs = [SlotEvidenceRef(
+                    document_id=ev.document_id,
+                    page_start=ev.page_start,
+                    chunk_id=getattr(ev, 'chunk_id', None),
+                )]
+
+    # 결과 반환
+    if found_davinci and found_robot:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="로봇수술(다빈치 포함)",
+            confidence="high",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+    elif best_method:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_method,
+            confidence="high" if best_doc_priority >= 2 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # 쿼리에 다빈치/로봇이 있는데 못 찾은 경우
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in ["다빈치", "로봇"]):
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="not_found",
+            reason="해당 보험사 문서에서 다빈치/로봇수술 관련 정보 미확인",
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="해당없음",
+        confidence="low",
+        reason="다빈치/로봇수술 관련 정보 미확인",
+        trace=trace,
+    )
+
+
+def extract_method_condition_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    수술방식 적용조건 슬롯 추출 (U-4.16)
+
+    다빈치/로봇수술 키워드 주변에서 조건 문구 추출
+    """
+    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1, "약관": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_condition = None
+    best_doc_priority = 0
+    best_refs = []
+
+    surgery_keywords = ["다빈치", "da vinci", "davinci", "로봇수술", "로봇 수술"]
+    condition_patterns = [
+        r'(다빈치|로봇수술|로봇\s*수술)[^。.]*?(시|경우|때)[^。.]{0,100}',
+        r'[^。.]{0,50}(다빈치|로봇수술|로봇\s*수술)[^。.]{0,100}',
+    ]
+
+    for ev in evidence_list:
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        preview_lower = preview.lower()
+
+        # 수술 키워드 포함 여부 확인
+        if not any(kw in preview_lower for kw in surgery_keywords):
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        if doc_priority < best_doc_priority:
+            continue
+
+        # 조건 문구 추출 시도
+        for pattern in condition_patterns:
+            match = re.search(pattern, preview, re.IGNORECASE)
+            if match:
+                condition_text = match.group(0).strip()
+                # 너무 짧거나 긴 경우 필터링
+                if 10 <= len(condition_text) <= 200:
+                    if doc_priority >= best_doc_priority:
+                        best_condition = condition_text
+                        best_doc_priority = doc_priority
+                        best_refs = [SlotEvidenceRef(
+                            document_id=ev.document_id,
+                            page_start=ev.page_start,
+                            chunk_id=getattr(ev, 'chunk_id', None),
+                        )]
+                    break
+
+        # 패턴 매칭 실패 시 키워드 주변 텍스트 추출
+        if not best_condition and doc_priority >= best_doc_priority:
+            for kw in surgery_keywords:
+                if kw in preview_lower:
+                    idx = preview_lower.find(kw)
+                    start = max(0, idx - 30)
+                    end = min(len(preview), idx + len(kw) + 100)
+                    snippet = preview[start:end].strip()
+                    if len(snippet) >= 20:
+                        best_condition = snippet
+                        best_doc_priority = doc_priority
+                        best_refs = [SlotEvidenceRef(
+                            document_id=ev.document_id,
+                            page_start=ev.page_start,
+                            chunk_id=getattr(ev, 'chunk_id', None),
+                        )]
+                    break
+
+    if best_condition:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_condition,
+            confidence="medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value=None,
+        confidence="not_found",
+        reason="수술방식 적용조건 정보 미확인",
+        trace=trace,
+    )
+
+
+# =============================================================================
+# U-4.16: 암 Subtype 보장 슬롯 추출 (경계성종양/제자리암)
+# =============================================================================
+
+# 암 subtype 키워드
+CANCER_SUBTYPE_KEYWORDS = {
+    "in_situ": ["제자리암", "상피내암", "carcinoma in situ"],
+    "borderline": ["경계성종양", "경계성 종양", "borderline tumor"],
+    "similar_cancer": ["유사암", "기타피부암", "갑상선암", "대장점막내암"],
+}
+
+# 보장 포함 키워드
+COVERAGE_POSITIVE_KEYWORDS = ["보장", "지급", "보험금", "해당"]
+# 보장 제외 키워드
+COVERAGE_NEGATIVE_KEYWORDS = ["제외", "면책", "지급하지", "해당하지", "보장하지"]
+
+
+def extract_subtype_coverage_slot(
+    evidence_list: list,
+    insurer_code: str,
+    subtype: str,  # "in_situ", "borderline", "similar_cancer"
+    query: str = ""
+) -> SlotInsurerValue:
+    """
+    암 subtype 보장 여부 슬롯 추출 (U-4.16)
+
+    제자리암/경계성종양/유사암의 보장 여부를 Y/N/Unknown으로 반환
+    """
+    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1, "약관": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    subtype_keywords = CANCER_SUBTYPE_KEYWORDS.get(subtype, [])
+    if not subtype_keywords:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="not_found",
+            reason=f"지원하지 않는 subtype: {subtype}",
+            trace=trace,
+        )
+
+    best_result = None  # "Y", "N", or None
+    best_confidence = 0  # higher is better
+    best_refs = []
+    found_subtype = False
+
+    for ev in evidence_list:
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        preview_lower = preview.lower()
+
+        # Subtype 키워드 포함 여부 확인
+        found_keyword = None
+        for kw in subtype_keywords:
+            if kw.lower() in preview_lower:
+                found_keyword = kw
+                found_subtype = True
+                break
+
+        if not found_keyword:
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+
+        # 키워드 주변 텍스트 분석 (300자 윈도우)
+        idx = preview_lower.find(found_keyword.lower())
+        start = max(0, idx - 100)
+        end = min(len(preview), idx + len(found_keyword) + 200)
+        context = preview[start:end]
+
+        # 포함/제외 키워드 탐지
+        has_positive = any(pk in context for pk in COVERAGE_POSITIVE_KEYWORDS)
+        has_negative = any(nk in context for nk in COVERAGE_NEGATIVE_KEYWORDS)
+
+        # 판단
+        if has_negative and not has_positive:
+            result = "N"
+            confidence = doc_priority + 1  # 제외 명시는 신뢰도 높음
+        elif has_positive and not has_negative:
+            result = "Y"
+            confidence = doc_priority + 1
+        elif has_positive and has_negative:
+            # 둘 다 있으면 문맥 분석 필요 - 보수적으로 Unknown
+            result = "Unknown"
+            confidence = doc_priority
+        else:
+            # 키워드만 있고 포함/제외 판단 불가
+            result = "Unknown"
+            confidence = doc_priority - 1
+
+        if confidence > best_confidence or (confidence == best_confidence and result != "Unknown"):
+            best_result = result
+            best_confidence = confidence
+            best_refs = [SlotEvidenceRef(
+                document_id=ev.document_id,
+                page_start=ev.page_start,
+                chunk_id=getattr(ev, 'chunk_id', None),
+            )]
+
+    if best_result:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_result,
+            confidence="high" if best_result in ("Y", "N") and best_confidence >= 2 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # Subtype 키워드를 아예 못 찾은 경우
+    subtype_names = {"in_situ": "제자리암", "borderline": "경계성종양", "similar_cancer": "유사암"}
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="Unknown",
+        confidence="not_found",
+        reason=f"{subtype_names.get(subtype, subtype)} 관련 정보 미확인",
+        trace=trace,
+    )
+
+
+def extract_subtype_definition_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    암 유형 정의/조건 발췌 슬롯 추출 (U-4.16)
+
+    제자리암/경계성종양/유사암 관련 정의나 조건 문구 추출
+    """
+    doc_type_priority = {"약관": 3, "상품요약서": 2, "사업방법서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    all_subtype_keywords = []
+    for keywords in CANCER_SUBTYPE_KEYWORDS.values():
+        all_subtype_keywords.extend(keywords)
+
+    best_excerpt = None
+    best_doc_priority = 0
+    best_refs = []
+
+    for ev in evidence_list:
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        preview_lower = preview.lower()
+
+        # Subtype 키워드 포함 여부 확인
+        found_keyword = None
+        for kw in all_subtype_keywords:
+            if kw.lower() in preview_lower:
+                found_keyword = kw
+                break
+
+        if not found_keyword:
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        if doc_priority < best_doc_priority:
+            continue
+
+        # 키워드 주변 텍스트 추출 (정의 문구 포함)
+        idx = preview_lower.find(found_keyword.lower())
+        start = max(0, idx - 50)
+        end = min(len(preview), idx + len(found_keyword) + 150)
+        excerpt = preview[start:end].strip()
+
+        if len(excerpt) >= 30 and doc_priority >= best_doc_priority:
+            best_excerpt = excerpt
+            best_doc_priority = doc_priority
+            best_refs = [SlotEvidenceRef(
+                document_id=ev.document_id,
+                page_start=ev.page_start,
+                chunk_id=getattr(ev, 'chunk_id', None),
+            )]
+
+    if best_excerpt:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_excerpt[:200],  # 최대 200자
+            confidence="medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value=None,
+        confidence="not_found",
+        reason="암 유형 정의/조건 정보 미확인",
+        trace=trace,
+    )
 
 
 def _generate_slot_diff_summary(slot: ComparisonSlot) -> str | None:
