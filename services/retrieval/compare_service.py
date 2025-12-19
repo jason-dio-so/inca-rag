@@ -614,10 +614,11 @@ def determine_slot_type_from_codes(coverage_codes: list[str] | None) -> str:
     cancer_codes = set(code_groups.get("cancer", []))
     surgery_codes = set(code_groups.get("surgery", []))
 
-    if code_set & cerebro_codes:
-        return "cerebro_cardiovascular"
+    # 우선순위: cancer > cerebro > surgery (cancer가 가장 빈번한 쿼리)
     if code_set & cancer_codes:
         return "cancer_diagnosis"
+    if code_set & cerebro_codes:
+        return "cerebro_cardiovascular"
     if code_set & surgery_codes:
         return "surgery_benefit"
 
