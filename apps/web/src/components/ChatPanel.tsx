@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * STEP 3.7-γ: ChatPanel with Coverage Guide Isolation
+ *
+ * Chat 영역은 "대화"로서의 역할만 수행
+ * 담보 선택 가이드는 CoverageGuidePanel로 분리되어 표시
+ */
+
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,8 +19,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChatMessage, CompareRequestWithIntent } from "@/lib/types";
+import { ChatMessage, CompareRequestWithIntent, SuggestedCoverage } from "@/lib/types";
 import { ChevronDown, ChevronUp, Send } from "lucide-react";
+import { CoverageGuidePanel } from "./CoverageGuidePanel";
+import { CoverageGuideState } from "@/lib/conversation-hygiene.config";
 
 const ALL_INSURERS = [
   "SAMSUNG",
@@ -41,9 +50,19 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSendMessage: (request: CompareRequestWithIntent) => void;
   isLoading: boolean;
+  /** STEP 3.7-γ: Coverage Guide State (UI State) */
+  coverageGuide?: CoverageGuideState | null;
+  /** STEP 3.7-γ: 담보 선택 핸들러 */
+  onSelectCoverage?: (coverage: SuggestedCoverage) => void;
 }
 
-export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps) {
+export function ChatPanel({
+  messages,
+  onSendMessage,
+  isLoading,
+  coverageGuide,
+  onSelectCoverage,
+}: ChatPanelProps) {
   const [query, setQuery] = useState("");
   const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
     "SAMSUNG",
@@ -162,6 +181,13 @@ export function ChatPanel({ messages, onSendMessage, isLoading }: ChatPanelProps
                 </div>
               </div>
             ))}
+
+            {/* STEP 3.7-γ: Coverage Guide Panel (UI State, NOT Chat State) */}
+            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재 */}
+            <CoverageGuidePanel
+              guide={coverageGuide ?? null}
+              onSelectCoverage={onSelectCoverage}
+            />
           </div>
         </ScrollArea>
       </div>

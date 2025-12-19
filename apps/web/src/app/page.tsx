@@ -2,12 +2,19 @@
 
 /**
  * STEP 3.8: Main Page with State Isolation
+ * STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene
  *
  * Query State와 View State의 명확한 분리:
  * - Query State: messages, currentResponse, currentAnchor, isLoading
  *   → handleSendMessage로만 변경 가능
  * - View State: ViewContext를 통해 관리
  *   → Evidence/Document 열람은 Query State에 영향 없음
+ *
+ * Conversation Hygiene (STEP 3.7-γ):
+ * - 담보 미확정 안내는 ChatMessage가 아님
+ * - AMBIGUOUS / NOT_FOUND는 UI State로 취급
+ * - 가이드는 항상 1개만 존재 (교체, 누적 금지)
+ * - EXACT 상태에서만 Chat 로그에 정상 응답 추가
  */
 
 import { useState, useCallback, useEffect, Suspense, useMemo } from "react";
@@ -17,8 +24,13 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
-import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor } from "@/lib/types";
+import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor, SuggestedCoverage } from "@/lib/types";
 import { ViewProvider, useViewContext, ViewingDocument } from "@/contexts/ViewContext";
+import {
+  CoverageGuideState,
+  canAddToChatLog,
+  createCoverageGuideState,
+} from "@/lib/conversation-hygiene.config";
 
 // =============================================================================
 // Deep-link Handler (View State만 변경, Query State 변경 없음)
@@ -108,8 +120,16 @@ function HomeContent() {
   const [currentAnchor, setCurrentAnchor] = useState<QueryAnchor | null>(null);
 
   // ===========================================================================
+  // STEP 3.7-γ: Coverage Guide State (UI State, NOT Chat State)
+  // - 담보 미확정 안내는 ChatMessage가 아님
+  // - 항상 1개만 존재 (새 질의 시 교체)
+  // ===========================================================================
+  const [coverageGuide, setCoverageGuide] = useState<CoverageGuideState | null>(null);
+
+  // ===========================================================================
   // Query State 변경 함수 (유일한 Query State 변경 경로)
   // STEP 3.8: send_message 이벤트만 Query State 변경 허용
+  // STEP 3.7-γ: EXACT 상태에서만 Chat 로그에 응답 추가
   // ===========================================================================
   const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
     // STEP 3.6: 이전 anchor가 있으면 요청에 포함
@@ -117,6 +137,9 @@ function HomeContent() {
       ...request,
       anchor: currentAnchor ?? undefined,
     };
+
+    // STEP 3.7-γ: 새 질의 시 기존 가이드 제거 (교체 준비)
+    setCoverageGuide(null);
 
     // Add user message
     const userMessage: ChatMessage = {
@@ -126,17 +149,9 @@ function HomeContent() {
       timestamp: new Date(),
     };
 
-    // Add loading assistant message
+    // STEP 3.7-γ: 일단 사용자 메시지만 추가, 로딩 메시지는 EXACT일 때만 표시
     const assistantId = `assistant-${Date.now()}`;
-    const loadingMessage: ChatMessage = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      timestamp: new Date(),
-      isLoading: true,
-    };
-
-    setMessages((prev) => [...prev, userMessage, loadingMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
     try {
@@ -148,6 +163,22 @@ function HomeContent() {
         setCurrentAnchor(response.anchor);
       }
 
+      // =======================================================================
+      // STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
+      // =======================================================================
+      const canAddToChat = canAddToChatLog(response.coverage_resolution);
+
+      if (!canAddToChat) {
+        // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
+        const guide = createCoverageGuideState(response.coverage_resolution, request.query);
+        setCoverageGuide(guide);
+        // 사용자 메시지는 이미 추가됨, assistant 메시지는 추가하지 않음
+        return;
+      }
+
+      // (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
+      setCoverageGuide(null);
+
       // STEP 2.5: 사용자 친화적 요약 사용 (API에서 제공)
       let summaryText = "";
 
@@ -156,27 +187,7 @@ function HomeContent() {
         summaryText = `ℹ️ ${response.recovery_message}\n\n`;
       }
 
-      // STEP 3.7: Coverage Resolution 실패 처리
-      const resolution = response.coverage_resolution;
-      if (resolution && resolution.status !== "resolved") {
-        // 실패/추천/재질문 응답 처리
-        if (resolution.message) {
-          summaryText += `⚠️ ${resolution.message}`;
-        }
-
-        // suggested_coverages가 있으면 버튼 형태로 표시할 수 있도록 안내
-        if (resolution.suggested_coverages && resolution.suggested_coverages.length > 0) {
-          const suggestions = resolution.suggested_coverages
-            .map((s) => `• ${s.coverage_name || s.coverage_code}`)
-            .join("\n");
-          summaryText += `\n\n${suggestions}`;
-        }
-
-        // 도메인이 감지된 경우 추가 안내
-        if (resolution.detected_domain) {
-          summaryText += `\n\n위 담보 중 하나를 선택하거나, 좀 더 구체적인 담보명을 입력해 주세요.`;
-        }
-      } else if (response.user_summary) {
+      if (response.user_summary) {
         // user_summary가 있으면 그대로 사용
         summaryText += response.user_summary;
       } else {
@@ -186,33 +197,54 @@ function HomeContent() {
           (sum, item) => sum + (item.evidence?.length || 0),
           0
         );
-        summaryText += `검색 완료: ${totalEvidence}건의 근거를 찾았습니다.\n\n자세한 비교표/근거는 오른쪽 패널을 확인해주세요.`;
+        summaryText += `검색 완료: ${totalEvidence}건의 근거를 찾았습니다.\n\n자세한 비교 내용은 오른쪽 패널을 확인해주세요.`;
       }
 
-      // Update assistant message
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantId
-            ? { ...msg, content: summaryText, isLoading: false }
-            : msg
-        )
-      );
+      // Add assistant message (EXACT 상태에서만)
+      const assistantMessage: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: summaryText,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "알 수 없는 오류";
 
-      // Update assistant message with error
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantId
-            ? { ...msg, isLoading: false, error: errorMessage }
-            : msg
-        )
-      );
+      // 에러 발생 시 assistant 메시지로 표시 (이것은 대화의 일부)
+      const errorAssistantMessage: ChatMessage = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+        error: errorMessage,
+      };
+      setMessages((prev) => [...prev, errorAssistantMessage]);
     } finally {
       setIsLoading(false);
     }
   }, [currentAnchor]);
+
+  // ===========================================================================
+  // STEP 3.7-γ: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // ===========================================================================
+  const handleSelectCoverage = useCallback((coverage: SuggestedCoverage) => {
+    // 선택된 담보로 새 질의 실행
+    const newQuery = coverage.coverage_name || coverage.coverage_code;
+    if (newQuery) {
+      // 가이드 제거 후 새 질의 실행
+      setCoverageGuide(null);
+      // ChatPanel의 인터페이스를 통해 질의하지 않고, 직접 비교 요청
+      // 이전 request의 insurers 등을 유지하기 위해 기본값 사용
+      handleSendMessage({
+        query: newQuery,
+        insurers: ["SAMSUNG", "MERITZ"], // 기본값, 실제로는 이전 선택 유지 필요
+        top_k_per_insurer: 5,
+      });
+    }
+  }, [handleSendMessage]);
 
   // ===========================================================================
   // Memoized Response (STEP 3.8: 불필요한 re-render 방지)
@@ -253,6 +285,8 @@ function HomeContent() {
             messages={messages}
             onSendMessage={handleSendMessage}
             isLoading={isLoading}
+            coverageGuide={coverageGuide}
+            onSelectCoverage={handleSelectCoverage}
           />
         </div>
       </div>
