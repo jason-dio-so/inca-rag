@@ -170,22 +170,26 @@ SLOT_DEFINITIONS_BY_COVERAGE_TYPE = {
 }
 
 # Coverage code → Coverage type 매핑
+# coverage_standard 기준 정확한 매핑 (U-4.14)
 COVERAGE_CODE_TO_TYPE = {
     # 암진단비
     "A4200_1": "cancer_diagnosis",
     "A4210": "cancer_diagnosis",
     "A4209": "cancer_diagnosis",
     "A4299_1": "cancer_diagnosis",
-    # 뇌/심혈관 진단비 (U-4.12)
-    "A5200": "cerebro_cardiovascular_diagnosis",
-    "A5210": "cerebro_cardiovascular_diagnosis",
-    "A5220": "cerebro_cardiovascular_diagnosis",
-    "A5230": "cerebro_cardiovascular_diagnosis",
-    # 수술비 (U-4.12)
-    "A6100": "surgery_benefit",
-    "A6110": "surgery_benefit",
-    "A6120": "surgery_benefit",
-    "A6130": "surgery_benefit",
+    # 뇌/심혈관 진단비 (U-4.14 수정: A41xx 계열)
+    "A4101": "cerebro_cardiovascular_diagnosis",  # 뇌혈관질환진단비
+    "A4102": "cerebro_cardiovascular_diagnosis",  # 뇌출혈진단비
+    "A4103": "cerebro_cardiovascular_diagnosis",  # 뇌졸중진단비
+    "A4104_1": "cerebro_cardiovascular_diagnosis",  # 심장질환진단비
+    "A4105": "cerebro_cardiovascular_diagnosis",  # 허혈성심장질환진단비
+    # 수술비 (U-4.14 수정: A5xxx 계열)
+    "A5100": "surgery_benefit",  # 질병수술비
+    "A5104_1": "surgery_benefit",  # 뇌혈관질환수술비
+    "A5107_1": "surgery_benefit",  # 허혈성심장질환수술비
+    "A5200": "surgery_benefit",  # 암수술비(유사암제외)
+    "A5298_001": "surgery_benefit",  # 유사암수술비
+    "A5300": "surgery_benefit",  # 상해수술비
 }
 
 # Default YAML path
@@ -792,9 +796,9 @@ def extract_waiting_period(policy_evidence: list, insurer_code: str) -> SlotInsu
 # Main Extraction Function
 # =============================================================================
 
-# Coverage type별 coverage_codes 매핑
-CEREBRO_CARDIOVASCULAR_CODES = {"A5200", "A5210", "A5220", "A5230"}
-SURGERY_BENEFIT_CODES = {"A6100", "A6110", "A6120", "A6130"}
+# Coverage type별 coverage_codes 매핑 (U-4.14 수정: 신정원 표준코드 반영)
+CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
+SURGERY_BENEFIT_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300"}
 
 
 def _determine_coverage_type(coverage_codes: list[str] | None) -> str | None:
