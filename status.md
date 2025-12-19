@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ4)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ5)
 
 ---
 
@@ -70,6 +70,7 @@
 | **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1117,3 +1118,33 @@ handleSendMessage({
 | suggested_coverages 우선 사용 | ✅ 구현 완료 |
 | 전체 후보 렌더링 (map) | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ 62e88d8 |
+
+## STEP 3.7-δ-γ5: UNRESOLVED 최우선 렌더링 강제 (2025-12-20)
+
+### 목표
+- resolution_state 우선순위 명시화: UNRESOLVED > INVALID > RESOLVED
+- UNRESOLVED일 때 "담보 미확정" 텍스트가 표시되지 않도록 보장
+
+### 구현 내용
+
+**resolution_state 우선순위:**
+1. UNRESOLVED → "담보 선택 필요" + 후보 버튼
+2. INVALID → "담보 미확정" (후보 없음)
+3. RESOLVED → 결과 표시
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 | UNRESOLVED | ✅ PASS |
+| 2 | 좌측 패널 | "담보 선택 필요" + 3개 버튼 | ✅ PASS |
+| 3 | 우측 패널 | "담보 선택 필요" | ✅ PASS |
+| 4 | "담보 미확정" 텍스트 | 화면에 없음 | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| UNRESOLVED > INVALID 우선순위 | ✅ 구현 완료 |
+| 문서화 주석 추가 | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ 111bd6c |
