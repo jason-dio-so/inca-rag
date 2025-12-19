@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-δ-γ)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ2)
 
 ---
 
@@ -67,6 +67,7 @@
 | **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
 
 ---
 
@@ -992,3 +993,61 @@ const newState: ResolutionState = response.resolution_state || "RESOLVED";
 | RESOLVED → 결과 탭 표시 | ✅ 구현 완료 |
 | Web UI 검증 | ✅ 스크린샷 확인 |
 | git 커밋 완료 | ✅ ba7aaad |
+
+## STEP 3.7-δ-γ2: Candidate selection passes coverage_codes → RESOLVED (2025-12-20)
+
+### 목표
+- UNRESOLVED 상태에서 후보 버튼 클릭 시 즉시 RESOLVED로 전환
+- coverage_codes를 명시적으로 전달하여 재질의 없이 결과 표시
+
+### 문제 인식
+
+**현상:**
+- 후보 버튼 클릭 시 coverage_name으로 재질의
+- 동일한 애매한 질의가 반복되어 UNRESOLVED 유지
+
+**원인:**
+- `handleSelectCoverage`가 coverage_name만 전달
+- API가 다시 coverage resolution을 수행
+
+### 구현 내용
+
+**page.tsx:**
+```typescript
+// Before: coverage_name만 전달
+handleSendMessage({
+  query: coverageName,
+  insurers: ["SAMSUNG", "MERITZ"],
+  top_k_per_insurer: 5,
+});
+
+// After: coverage_codes 명시 전달 → 즉시 RESOLVED
+handleSendMessage({
+  query: coverageName,
+  insurers: ["SAMSUNG", "MERITZ"],
+  coverage_codes: [coverageCode],
+  top_k_per_insurer: 5,
+});
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/app/page.tsx` | `handleSelectCoverage`에 `coverage_codes` 추가 |
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 (SAMSUNG+HYUNDAI) | UNRESOLVED + 3 후보 버튼 | ✅ PASS |
+| 2 | 후보 버튼 클릭 | RESOLVED + 결과 표시 | ✅ PASS |
+| 3 | API coverage_codes 파라미터 | resolution_state="RESOLVED" | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| 후보 클릭 → RESOLVED 전환 | ✅ 구현 완료 |
+| Results Panel 결과 표시 | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ fbc36b1 |
