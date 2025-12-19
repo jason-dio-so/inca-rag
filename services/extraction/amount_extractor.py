@@ -68,11 +68,10 @@ NEGATIVE_KEYWORDS = [
 # =============================================================================
 
 # LUMP_SUM 키워드: 진단비 일시금 관련 (반드시 근처에 있어야 함)
+# NOTE: U-4.13 - 암 특화 키워드(유사암, 악성신생물) 제거 → 질병 공통 키워드만
 LUMP_SUM_KEYWORDS = [
     "진단비",
     "진단보험금",
-    "암 진단비",
-    "암진단비",
     "가입금액 지급",
     "가입금액지급",
     "일시금",
@@ -80,6 +79,41 @@ LUMP_SUM_KEYWORDS = [
     "진단확정",
     "최초 1회",
     "최초1회",
+]
+
+# =============================================================================
+# U-4.13: 수술비 전용 키워드
+# =============================================================================
+
+SURGERY_POSITIVE_KEYWORDS = [
+    "수술비",
+    "수술보험금",
+    "수술급여",
+    "수술 시",
+    "수술시",
+    "1~5종수술",
+    "종수술",
+    "수술보장",
+]
+
+SURGERY_NEGATIVE_KEYWORDS = [
+    "입원일당",
+    "통원일당",
+    "치료비",
+    "검사비",
+    "보험료",
+    "진단비",
+    "일당",
+]
+
+# 수술 횟수 제한 패턴
+SURGERY_COUNT_PATTERNS = [
+    r"연\s*(\d+)\s*회",          # 연 1회, 연 2회
+    r"통산\s*(\d+)\s*회",        # 통산 10회
+    r"최대\s*(\d+)\s*회",        # 최대 5회
+    r"(\d+)\s*회\s*한",          # 1회 한, 3회 한
+    r"회당",                     # 회당 (횟수 제한 없음 표시)
+    r"(\d+)\s*회\s*(?:까지|이내)", # 5회까지, 3회이내
 ]
 
 # DAILY_ANCILLARY 키워드: 일당/특약 금액 관련 (제외해야 함)
@@ -924,4 +958,223 @@ def extract_diagnosis_lump_sum(text: str, doc_type: str | None = None) -> Diagno
         amount_text=None,
         confidence="not_found",
         reason="진단비 일시금 관련 키워드 근처에 금액 미발견",
+    )
+
+
+# =============================================================================
+# U-4.13: 수술비 추출 함수
+# =============================================================================
+
+@dataclass
+class SurgeryAmountResult:
+    """수술비 추출 결과"""
+    amount_value: int | None
+    amount_text: str | None
+    confidence: str  # "high"|"medium"|"low"|"not_found"
+    reason: str | None
+    method: str = "regex"
+
+
+def _has_surgery_keyword_nearby(text: str, position: int, window: int = 60) -> bool:
+    """
+    금액 위치 주변(±window 자)에 SURGERY_POSITIVE 키워드가 있는지 확인
+    """
+    start = max(0, position - window)
+    end = min(len(text), position + window)
+    context = text[start:end]
+
+    for keyword in SURGERY_POSITIVE_KEYWORDS:
+        if keyword in context:
+            return True
+    return False
+
+
+def _has_surgery_negative_keyword_nearby(text: str, position: int, window: int = 30) -> bool:
+    """
+    금액 위치 주변(±window 자)에 SURGERY_NEGATIVE 키워드가 있는지 확인
+
+    NOTE: premium-negative 거리 비교 로직 재사용
+    """
+    start = max(0, position - window)
+    end = min(len(text), position + window)
+    context = text[start:end]
+
+    # Find closest SURGERY_NEGATIVE keyword
+    closest_neg_dist = float('inf')
+    for keyword in SURGERY_NEGATIVE_KEYWORDS:
+        idx = context.find(keyword)
+        if idx != -1:
+            keyword_center = idx + len(keyword) // 2
+            amount_pos_in_context = position - start
+            dist = abs(keyword_center - amount_pos_in_context)
+            closest_neg_dist = min(closest_neg_dist, dist)
+
+    if closest_neg_dist == float('inf'):
+        return False
+
+    # Find closest SURGERY_POSITIVE keyword
+    closest_pos_dist = float('inf')
+    for keyword in SURGERY_POSITIVE_KEYWORDS:
+        idx = context.find(keyword)
+        if idx != -1:
+            keyword_center = idx + len(keyword) // 2
+            amount_pos_in_context = position - start
+            dist = abs(keyword_center - amount_pos_in_context)
+            closest_pos_dist = min(closest_pos_dist, dist)
+
+    # If SURGERY_POSITIVE is closer, this is not a negative match
+    if closest_pos_dist < closest_neg_dist:
+        return False
+
+    return True
+
+
+def extract_surgery_amount(text: str, doc_type: str | None = None) -> SurgeryAmountResult:
+    """
+    수술비 금액 추출 (U-4.13)
+
+    Args:
+        text: 추출 대상 텍스트
+        doc_type: 문서 유형
+
+    Returns:
+        SurgeryAmountResult
+    """
+    if not text or len(text.strip()) == 0:
+        return SurgeryAmountResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="텍스트 없음",
+        )
+
+    # 모든 금액 표현 찾기
+    amounts = _find_amounts_with_positions(text)
+
+    if not amounts:
+        return SurgeryAmountResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="금액 표현 미발견",
+        )
+
+    # 보험료/NEGATIVE 금액 제외
+    filtered_amounts = [
+        (pos, matched, unit, value)
+        for pos, matched, unit, value in amounts
+        if not _has_surgery_negative_keyword_nearby(text, pos)
+        and not _has_close_negative_keyword(text, pos)
+    ]
+
+    if not filtered_amounts:
+        return SurgeryAmountResult(
+            amount_value=None,
+            amount_text=None,
+            confidence="not_found",
+            reason="수술비 외 금액만 발견",
+        )
+
+    # 수술비 키워드 근처 금액 우선
+    surgery_amounts = [
+        (pos, matched, unit, value)
+        for pos, matched, unit, value in filtered_amounts
+        if _has_surgery_keyword_nearby(text, pos)
+    ]
+
+    if surgery_amounts:
+        # 가장 큰 금액 선택
+        surgery_amounts.sort(key=lambda x: x[3] or 0, reverse=True)
+        pos, matched_text, unit, value = surgery_amounts[0]
+        return SurgeryAmountResult(
+            amount_value=value,
+            amount_text=matched_text,
+            confidence="high",
+            reason=None,
+        )
+
+    # fallback: 필터링된 금액 중 가장 큰 것
+    if filtered_amounts:
+        filtered_amounts.sort(key=lambda x: x[3] or 0, reverse=True)
+        pos, matched_text, unit, value = filtered_amounts[0]
+        if value and value >= 100_000:  # 10만원 이상
+            return SurgeryAmountResult(
+                amount_value=value,
+                amount_text=matched_text,
+                confidence="medium",
+                reason="fallback_amount",
+            )
+
+    return SurgeryAmountResult(
+        amount_value=None,
+        amount_text=None,
+        confidence="not_found",
+        reason="수술비 키워드 근처에 금액 미발견",
+    )
+
+
+@dataclass
+class SurgeryCountLimitResult:
+    """수술 횟수 제한 추출 결과"""
+    count_text: str | None  # "연 1회", "통산 10회", "회당" 등
+    count_value: int | None  # 숫자 추출 시 값
+    confidence: str  # "high"|"medium"|"not_found"
+    reason: str | None
+
+
+def extract_surgery_count_limit(text: str) -> SurgeryCountLimitResult:
+    """
+    수술 횟수 제한 추출 (U-4.13)
+
+    Args:
+        text: 추출 대상 텍스트
+
+    Returns:
+        SurgeryCountLimitResult
+    """
+    if not text or len(text.strip()) == 0:
+        return SurgeryCountLimitResult(
+            count_text=None,
+            count_value=None,
+            confidence="not_found",
+            reason="텍스트 없음",
+        )
+
+    # 수술 관련 키워드 확인 (수술비 문맥인지)
+    has_surgery_context = any(kw in text for kw in SURGERY_POSITIVE_KEYWORDS)
+
+    results = []
+
+    for pattern in SURGERY_COUNT_PATTERNS:
+        for match in re.finditer(pattern, text):
+            matched_text = match.group(0).strip()
+            # 숫자 추출 시도
+            count_value = None
+            if match.lastindex and match.lastindex >= 1:
+                try:
+                    count_value = int(match.group(1))
+                except (ValueError, TypeError):
+                    pass
+
+            results.append((matched_text, count_value, match.start()))
+
+    if not results:
+        return SurgeryCountLimitResult(
+            count_text=None,
+            count_value=None,
+            confidence="not_found",
+            reason="횟수 제한 표현 미발견",
+        )
+
+    # 가장 먼저 등장한 것 선택
+    results.sort(key=lambda x: x[2])
+    matched_text, count_value, _ = results[0]
+
+    confidence = "high" if has_surgery_context else "medium"
+
+    return SurgeryCountLimitResult(
+        count_text=matched_text,
+        count_value=count_value,
+        confidence=confidence,
+        reason=None,
     )

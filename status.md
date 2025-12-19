@@ -1577,11 +1577,11 @@ Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
 
 **우선순위 높음:**
 1. ~~**Main 브랜치 병합**~~ ✅ U-4.11에서 완료
-2. **Goldset 확장** - 현재 4건 → 뇌졸중, 수술비 케이스 추가
-3. **뇌/심혈관 진단비 추출기 구현** - diagnosis_lump_sum 재사용
+2. ~~**뇌/심혈관 진단비 추출기 구현**~~ ✅ U-4.13에서 완료
+3. ~~**수술비 전용 추출기 구현**~~ ✅ U-4.13에서 완료
 
 **우선순위 중간:**
-4. **수술비 전용 추출기 구현** - surgery_amount, count_limit
+4. **Goldset 확장** - 현재 4건 → 뇌졸중, 수술비 케이스 추가
 5. **추가 보험사 데이터 적재** - 현재 SAMSUNG, MERITZ만 chunk 있음
 6. **LLM 슬롯 추출 활성화** - 현재 rule-based만 사용 중
 7. **UI 개선** - SlotsTable 디자인, diff 시각화
@@ -1590,3 +1590,48 @@ Eval: 100% coverage resolve, 100% slot fill, 100% value correctness
 8. **coverage_code 자동 추천 개선** - similarity threshold 조정
 9. **Evidence doc_type 매칭** - 현재 0% (API 응답 구조 제한)
 10. 사용자 피드백 기반 개선
+
+---
+
+## Step U-4.13: 뇌/심혈관 + 수술비 추출기 구현 (2025-12-19)
+
+### 구현 내용
+
+1. **뇌/심혈관 진단비 슬롯 추출** (`cerebro_cardiovascular_diagnosis`)
+   - Coverage codes: A5200 (뇌졸중), A5210 (급성심근경색), A5220 (뇌혈관질환), A5230 (허혈성심장질환)
+   - 진단비 일시금 추출: 암진단비와 동일한 `diagnosis_lump_sum` 추출기 재사용
+   - 슬롯: `diagnosis_lump_sum_amount`, `existence_status`, `waiting_period`
+
+2. **수술비 슬롯 추출** (`surgery_benefit`)
+   - Coverage codes: A6100 (질병수술비), A6110 (상해수술비), A6120 (암수술비), A6130 (1~5종수술비)
+   - 신규 추출기:
+     - `extract_surgery_amount()`: 수술비 금액 추출 (premium 패턴 제외)
+     - `extract_surgery_count_limit()`: 수술 횟수 제한 추출 (연 N회, 통산 N회 등)
+   - 슬롯: `surgery_amount`, `surgery_count_limit`, `existence_status`
+
+3. **2-pass Retrieval 키워드 확장**
+   - `POLICY_KEYWORD_PATTERNS` 22개로 확장
+   - 뇌/심혈관: 뇌졸중, 급성심근경색, 뇌혈관, 허혈성심장
+   - 수술비: 수술비, 종수술, 수술급여, 수술보험금
+
+4. **Coverage type별 슬롯 추출 라우팅**
+   - `_determine_coverage_type()`: coverage_codes → coverage_type 결정
+   - `extract_slots()`: coverage_type별 전용 추출 함수 호출
+     - `_extract_cancer_diagnosis_slots()`
+     - `_extract_cerebro_cardiovascular_slots()`
+     - `_extract_surgery_benefit_slots()`
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/extraction/amount_extractor.py` | +257 lines: 수술비/횟수제한 추출 로직 |
+| `services/extraction/slot_extractor.py` | +288 lines: 다중 coverage_type 슬롯 추출 |
+| `services/retrieval/compare_service.py` | +35 lines: 키워드 확장 |
+
+### 검증 결과
+
+```
+✅ pytest tests/test_extraction.py: 47 passed
+✅ eval/eval_runner.py: 100% value correctness (4/4)
+```

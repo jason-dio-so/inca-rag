@@ -18,7 +18,12 @@ import yaml
 from pathlib import Path
 
 from .llm_trace import LLMTrace
-from .amount_extractor import extract_amount, extract_diagnosis_lump_sum
+from .amount_extractor import (
+    extract_amount,
+    extract_diagnosis_lump_sum,
+    extract_surgery_amount,
+    extract_surgery_count_limit,
+)
 
 
 # =============================================================================
@@ -338,6 +343,139 @@ def extract_diagnosis_lump_sum_slot(evidence_list: list, insurer_code: str) -> S
 extract_payout_amount = extract_diagnosis_lump_sum_slot
 
 
+# =============================================================================
+# U-4.13: Surgery Benefit Slot Extractors
+# =============================================================================
+
+def extract_surgery_amount_slot(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
+    """
+    수술비 지급금액 슬롯 추출 (U-4.13)
+
+    수술비 일시금 추출 (진단비와 구별)
+    우선순위:
+      1. doc_type: 상품요약서 > 사업방법서 > 가입설계서
+      2. confidence: high > medium (within same doc_type)
+    """
+    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1}
+    confidence_priority = {"high": 2, "medium": 1, "low": 0, "not_found": -1}
+    trace = LLMTrace.from_llm_flag()
+
+    best_amount = None
+    best_doc_priority = 0
+    best_conf_priority = -1
+    best_refs = []
+
+    for ev in evidence_list:
+        # A2 정책: 약관 제외
+        if ev.doc_type == "약관":
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+
+        # Skip if doc_type priority is lower
+        if doc_priority < best_doc_priority:
+            continue
+
+        # Get preview text
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        # Extract surgery amount
+        surgery_result = extract_surgery_amount(preview, doc_type=ev.doc_type)
+
+        if surgery_result.amount_text and surgery_result.confidence not in ("low", "not_found"):
+            conf_priority = confidence_priority.get(surgery_result.confidence, 0)
+
+            # Update if: higher doc_type OR same doc_type with higher confidence
+            if doc_priority > best_doc_priority or (doc_priority == best_doc_priority and conf_priority > best_conf_priority):
+                best_amount = surgery_result.amount_text
+                best_doc_priority = doc_priority
+                best_conf_priority = conf_priority
+                best_refs = [SlotEvidenceRef(
+                    document_id=ev.document_id,
+                    page_start=ev.page_start,
+                    chunk_id=getattr(ev, 'chunk_id', None),
+                )]
+
+    if best_amount:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_amount,
+            confidence="high" if best_doc_priority >= 2 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value=None,
+        confidence="not_found",
+        reason="가입설계서/상품요약서/사업방법서에서 수술비 금액 미확인",
+        trace=trace,
+    )
+
+
+def extract_surgery_count_limit_slot(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
+    """
+    수술 횟수 제한 슬롯 추출 (U-4.13)
+
+    수술 횟수 제한 정보 추출 (연 N회, 통산 N회 등)
+    """
+    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1}
+    trace = LLMTrace.from_llm_flag()
+
+    best_count = None
+    best_doc_priority = 0
+    best_refs = []
+
+    for ev in evidence_list:
+        # A2 정책: 약관 제외
+        if ev.doc_type == "약관":
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+
+        # Skip if doc_type priority is lower
+        if doc_priority < best_doc_priority:
+            continue
+
+        # Get preview text
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        # Extract surgery count limit
+        count_result = extract_surgery_count_limit(preview)
+
+        if count_result.count_text and count_result.confidence not in ("low", "not_found"):
+            if doc_priority > best_doc_priority:
+                best_count = count_result.count_text
+                best_doc_priority = doc_priority
+                best_refs = [SlotEvidenceRef(
+                    document_id=ev.document_id,
+                    page_start=ev.page_start,
+                    chunk_id=getattr(ev, 'chunk_id', None),
+                )]
+
+    if best_count:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_count,
+            confidence="medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value=None,
+        confidence="not_found",
+        reason="수술 횟수 제한 정보 미확인",
+        trace=trace,
+    )
+
+
 def extract_existence_status(evidence_list: list, insurer_code: str) -> SlotInsurerValue:
     """
     담보 존재 여부 슬롯 추출
@@ -654,6 +792,28 @@ def extract_waiting_period(policy_evidence: list, insurer_code: str) -> SlotInsu
 # Main Extraction Function
 # =============================================================================
 
+# Coverage type별 coverage_codes 매핑
+CEREBRO_CARDIOVASCULAR_CODES = {"A5200", "A5210", "A5220", "A5230"}
+SURGERY_BENEFIT_CODES = {"A6100", "A6110", "A6120", "A6130"}
+
+
+def _determine_coverage_type(coverage_codes: list[str] | None) -> str | None:
+    """coverage_codes에서 coverage_type 결정"""
+    if not coverage_codes:
+        return None
+
+    code_set = set(coverage_codes)
+
+    if code_set & CANCER_COVERAGE_CODES:
+        return "cancer_diagnosis"
+    if code_set & CEREBRO_CARDIOVASCULAR_CODES:
+        return "cerebro_cardiovascular_diagnosis"
+    if code_set & SURGERY_BENEFIT_CODES:
+        return "surgery_benefit"
+
+    return None
+
+
 def extract_slots(
     insurers: list[str],
     compare_axis: list,
@@ -661,7 +821,7 @@ def extract_slots(
     coverage_codes: list[str] | None = None,
 ) -> list[ComparisonSlot]:
     """
-    슬롯 추출 메인 함수
+    슬롯 추출 메인 함수 (U-4.13: 다중 coverage_type 지원)
 
     Args:
         insurers: 보험사 코드 리스트
@@ -672,12 +832,9 @@ def extract_slots(
     Returns:
         추출된 슬롯 리스트
     """
-    # 암진단비 관련 요청인지 확인
-    target_codes = coverage_codes or []
-    is_cancer_query = bool(set(target_codes) & CANCER_COVERAGE_CODES)
+    coverage_type = _determine_coverage_type(coverage_codes)
 
-    if not is_cancer_query:
-        # 암진단비가 아니면 빈 슬롯 반환
+    if coverage_type is None:
         return []
 
     # 보험사별 evidence 그룹화
@@ -692,12 +849,26 @@ def extract_slots(
         if item.insurer_code in policy_by_insurer:
             policy_by_insurer[item.insurer_code].extend(item.evidence)
 
+    # Coverage type별 슬롯 추출
+    if coverage_type == "surgery_benefit":
+        return _extract_surgery_benefit_slots(insurers, compare_by_insurer, policy_by_insurer)
+    elif coverage_type == "cerebro_cardiovascular_diagnosis":
+        return _extract_cerebro_cardiovascular_slots(insurers, compare_by_insurer, policy_by_insurer)
+    else:  # cancer_diagnosis (기본)
+        return _extract_cancer_diagnosis_slots(insurers, compare_by_insurer, policy_by_insurer)
+
+
+def _extract_cancer_diagnosis_slots(
+    insurers: list[str],
+    compare_by_insurer: dict[str, list],
+    policy_by_insurer: dict[str, list],
+) -> list[ComparisonSlot]:
+    """암진단비 슬롯 추출"""
     slots = []
 
     # 1. diagnosis_lump_sum_amount (범용화: 진단비 일시금 전용)
-    # NOTE: 하위 호환성을 위해 payout_amount도 동일한 슬롯으로 매핑
     lump_sum_slot = ComparisonSlot(
-        slot_key="payout_amount",  # 하위 호환성 유지 (향후 diagnosis_lump_sum_amount로 마이그레이션)
+        slot_key="payout_amount",  # 하위 호환성 유지
         label="진단비 지급금액(일시금)",
         comparable=True,
         insurers=[
@@ -757,6 +928,105 @@ def extract_slots(
         ],
     )
     slots.append(waiting_slot)
+
+    return slots
+
+
+def _extract_cerebro_cardiovascular_slots(
+    insurers: list[str],
+    compare_by_insurer: dict[str, list],
+    policy_by_insurer: dict[str, list],
+) -> list[ComparisonSlot]:
+    """뇌/심혈관 진단비 슬롯 추출 (U-4.13)"""
+    slots = []
+
+    # 1. diagnosis_lump_sum_amount (진단비 일시금 - 암진단비와 동일 추출기 사용)
+    lump_sum_slot = ComparisonSlot(
+        slot_key="diagnosis_lump_sum_amount",
+        label="진단비 지급금액(일시금)",
+        comparable=True,
+        insurers=[
+            extract_diagnosis_lump_sum_slot(compare_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    lump_sum_slot.diff_summary = _generate_slot_diff_summary(lump_sum_slot)
+    slots.append(lump_sum_slot)
+
+    # 2. existence_status
+    existence_slot = ComparisonSlot(
+        slot_key="existence_status",
+        label="담보 존재 여부",
+        comparable=True,
+        insurers=[
+            extract_existence_status(compare_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    existence_slot.diff_summary = _generate_slot_diff_summary(existence_slot)
+    slots.append(existence_slot)
+
+    # 3. waiting_period (약관 - comparable=False)
+    waiting_slot = ComparisonSlot(
+        slot_key="waiting_period",
+        label="대기기간",
+        comparable=False,
+        insurers=[
+            extract_waiting_period(policy_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    slots.append(waiting_slot)
+
+    return slots
+
+
+def _extract_surgery_benefit_slots(
+    insurers: list[str],
+    compare_by_insurer: dict[str, list],
+    policy_by_insurer: dict[str, list],
+) -> list[ComparisonSlot]:
+    """수술비 슬롯 추출 (U-4.13)"""
+    slots = []
+
+    # 1. surgery_amount (수술비 지급금액)
+    surgery_amount_slot = ComparisonSlot(
+        slot_key="surgery_amount",
+        label="수술비 지급금액",
+        comparable=True,
+        insurers=[
+            extract_surgery_amount_slot(compare_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    surgery_amount_slot.diff_summary = _generate_slot_diff_summary(surgery_amount_slot)
+    slots.append(surgery_amount_slot)
+
+    # 2. surgery_count_limit (수술 횟수 제한)
+    count_limit_slot = ComparisonSlot(
+        slot_key="surgery_count_limit",
+        label="수술 횟수 제한",
+        comparable=True,
+        insurers=[
+            extract_surgery_count_limit_slot(compare_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    count_limit_slot.diff_summary = _generate_slot_diff_summary(count_limit_slot)
+    slots.append(count_limit_slot)
+
+    # 3. existence_status
+    existence_slot = ComparisonSlot(
+        slot_key="existence_status",
+        label="담보 존재 여부",
+        comparable=True,
+        insurers=[
+            extract_existence_status(compare_by_insurer.get(ic, []), ic)
+            for ic in insurers
+        ],
+    )
+    existence_slot.diff_summary = _generate_slot_diff_summary(existence_slot)
+    slots.append(existence_slot)
 
     return slots
 

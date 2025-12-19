@@ -42,16 +42,39 @@ from services.retrieval.plan_selector import (
 # policy_keywords 자동 추출을 위한 키워드 매핑
 # 정규화: 다양한 표현 → 검색용 키워드
 POLICY_KEYWORD_PATTERNS: dict[str, str] = {
+    # 암진단비 관련
     "경계성종양": "경계성",
     "경계성": "경계성",
     "유사암": "유사암",
     "제자리암": "제자리암",
     "상피내암": "제자리암",  # 상피내암 → 제자리암으로 정규화
     "갑상선암": "유사암",    # 갑상선암 → 유사암으로 정규화
+    "암진단비": "암진단",
+    "암 진단비": "암진단",
+    # U-4.13: 뇌/심혈관 진단비 관련
+    "뇌졸중": "뇌졸중",
+    "뇌졸중진단비": "뇌졸중",
+    "급성심근경색": "급성심근경색",
+    "급성심근경색진단비": "급성심근경색",
+    "뇌혈관질환": "뇌혈관",
+    "뇌혈관": "뇌혈관",
+    "허혈성심장질환": "허혈성심장",
+    "허혈성심장": "허혈성심장",
+    "뇌출혈": "뇌출혈",
+    # U-4.13: 수술비 관련
+    "수술비": "수술비",
+    "수술급여": "수술비",
+    "수술보험금": "수술비",
+    "1~5종수술": "종수술",
+    "종수술": "종수술",
 }
 
 # 기본 policy_keywords (아무것도 못 찾았을 때)
 DEFAULT_POLICY_KEYWORDS = ["경계성", "유사암", "제자리암"]
+
+# U-4.13: Coverage type별 기본 키워드
+CEREBRO_CARDIOVASCULAR_KEYWORDS = ["뇌졸중", "급성심근경색", "뇌혈관", "허혈성심장"]
+SURGERY_BENEFIT_KEYWORDS = ["수술비", "종수술", "수술"]
 
 # source_doc_type 우선순위 가중치 (높을수록 우선)
 DOC_TYPE_PRIORITY = {
@@ -198,16 +221,17 @@ def recommend_coverage_codes(
     return coverage_codes, recommendations
 
 
-def extract_policy_keywords(query: str) -> list[str]:
+def extract_policy_keywords(query: str, coverage_type: str | None = None) -> list[str]:
     """
-    query에서 policy_keywords를 자동 추출
+    query에서 policy_keywords를 자동 추출 (U-4.13: coverage_type 지원)
 
     규칙:
     - 매칭된 토큰을 정규화하여 반환
-    - 하나도 못 찾으면 기본값 반환
+    - 하나도 못 찾으면 coverage_type에 맞는 기본값 반환
 
     Args:
         query: 사용자 질의
+        coverage_type: 담보 유형 (cancer_diagnosis, cerebro_cardiovascular_diagnosis, surgery_benefit)
 
     Returns:
         추출된 키워드 리스트 (중복 제거)
@@ -224,6 +248,11 @@ def extract_policy_keywords(query: str) -> list[str]:
             found_keywords.add(normalized)
 
     if not found_keywords:
+        # U-4.13: Coverage type별 기본 키워드
+        if coverage_type == "cerebro_cardiovascular_diagnosis":
+            return CEREBRO_CARDIOVASCULAR_KEYWORDS.copy()
+        elif coverage_type == "surgery_benefit":
+            return SURGERY_BENEFIT_KEYWORDS.copy()
         return DEFAULT_POLICY_KEYWORDS.copy()
 
     return list(found_keywords)
