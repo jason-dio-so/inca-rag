@@ -279,19 +279,19 @@ function HomeContent() {
   }, [currentAnchor]);
 
   // ===========================================================================
-  // STEP 3.7-γ: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // STEP 3.7-δ-γ2: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // coverage_code를 직접 전달하여 즉시 RESOLVED 상태로 전환
   // ===========================================================================
   const handleSelectCoverage = useCallback((coverage: SuggestedCoverage) => {
-    // 선택된 담보로 새 질의 실행
-    const newQuery = coverage.coverage_name || coverage.coverage_code;
-    if (newQuery) {
-      // 가이드 제거 후 새 질의 실행
+    const coverageCode = coverage.coverage_code;
+    const coverageName = coverage.coverage_name || coverageCode;
+    if (coverageCode) {
       setCoverageGuide(null);
-      // ChatPanel의 인터페이스를 통해 질의하지 않고, 직접 비교 요청
-      // 이전 request의 insurers 등을 유지하기 위해 기본값 사용
+      // STEP 3.7-δ-γ2: coverage_codes 명시 전달 → 즉시 RESOLVED
       handleSendMessage({
-        query: newQuery,
-        insurers: ["SAMSUNG", "MERITZ"], // 기본값, 실제로는 이전 선택 유지 필요
+        query: coverageName,
+        insurers: ["SAMSUNG", "MERITZ"], // 기본값
+        coverage_codes: [coverageCode],
         top_k_per_insurer: 5,
       });
     }
