@@ -1068,8 +1068,14 @@ def _extract_surgery_benefit_slots(
     policy_by_insurer: dict[str, list],
     query: str = "",
 ) -> list[ComparisonSlot]:
-    """수술비 슬롯 추출 (U-4.13 + U-4.16)"""
+    """수술비 슬롯 추출 (U-4.13 + U-4.16 + U-4.18)"""
     slots = []
+
+    # 모든 evidence 합쳐서 검색 (compare + policy) - U-4.18에서 기본 사용
+    all_evidence_by_insurer = {
+        ic: compare_by_insurer.get(ic, []) + policy_by_insurer.get(ic, [])
+        for ic in insurers
+    }
 
     # 1. surgery_amount (수술비 지급금액)
     surgery_amount_slot = ComparisonSlot(
@@ -1110,18 +1116,14 @@ def _extract_surgery_benefit_slots(
     existence_slot.diff_summary = _generate_slot_diff_summary(existence_slot)
     slots.append(existence_slot)
 
-    # U-4.16: 다빈치/로봇 수술 관련 쿼리인 경우 추가 슬롯 추출
     query_lower = query.lower()
-    if any(kw in query_lower for kw in ["다빈치", "로봇", "da vinci", "robot"]):
+
+    # U-4.16/U-4.18: 다빈치/로봇/내시경 수술 관련 쿼리인 경우 추가 슬롯 추출
+    if any(kw in query_lower for kw in ["다빈치", "로봇", "da vinci", "robot", "내시경"]):
         # 4. surgery_method (수술 방식)
-        # 모든 evidence 합쳐서 검색 (compare + policy)
-        all_evidence_by_insurer = {
-            ic: compare_by_insurer.get(ic, []) + policy_by_insurer.get(ic, [])
-            for ic in insurers
-        }
         surgery_method_slot = ComparisonSlot(
             slot_key="surgery_method",
-            label="수술 방식",
+            label="수술 방식 조건",
             comparable=True,
             insurers=[
                 extract_surgery_method_slot(all_evidence_by_insurer.get(ic, []), ic, query)
@@ -1143,6 +1145,51 @@ def _extract_surgery_benefit_slots(
         )
         slots.append(method_condition_slot)
 
+    # U-4.18: 병원급 조건 쿼리인 경우 추가 슬롯 추출
+    if any(kw in query_lower for kw in ["상급종합", "종합병원", "병원급", "의원"]):
+        # 6. hospital_tier_condition (병원급 조건)
+        hospital_tier_slot = ComparisonSlot(
+            slot_key="hospital_tier_condition",
+            label="병원급 조건",
+            comparable=True,
+            insurers=[
+                extract_hospital_tier_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        hospital_tier_slot.diff_summary = _generate_slot_diff_summary(hospital_tier_slot)
+        slots.append(hospital_tier_slot)
+
+    # U-4.18: 경증 제외 쿼리인 경우 추가 슬롯 추출
+    if any(kw in query_lower for kw in ["경증", "백내장", "치질", "탈장", "제외"]):
+        # 7. minor_exclusion_rule (경증 제외 조건)
+        minor_exclusion_slot = ComparisonSlot(
+            slot_key="minor_exclusion_rule",
+            label="경증 제외/제한 조건",
+            comparable=True,
+            insurers=[
+                extract_minor_exclusion_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        minor_exclusion_slot.diff_summary = _generate_slot_diff_summary(minor_exclusion_slot)
+        slots.append(minor_exclusion_slot)
+
+    # U-4.18: 수술 분류(종수) 쿼리인 경우 추가 슬롯 추출
+    if any(kw in query_lower for kw in ["종수", "1종", "5종", "8종", "분류"]):
+        # 8. surgery_grade_rule (수술 분류)
+        surgery_grade_slot = ComparisonSlot(
+            slot_key="surgery_grade_rule",
+            label="수술 분류(1~5종/1~8종/시술포함)",
+            comparable=True,
+            insurers=[
+                extract_surgery_grade_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        surgery_grade_slot.diff_summary = _generate_slot_diff_summary(surgery_grade_slot)
+        slots.append(surgery_grade_slot)
+
     return slots
 
 
@@ -1150,7 +1197,7 @@ def _extract_surgery_benefit_slots(
 # U-4.16: 다빈치/로봇 수술 슬롯 추출
 # =============================================================================
 
-# 다빈치/로봇 수술 키워드
+# U-4.16/U-4.18: 다빈치/로봇/내시경 수술 키워드
 SURGERY_METHOD_KEYWORDS = [
     "다빈치",
     "da vinci",
@@ -1159,17 +1206,50 @@ SURGERY_METHOD_KEYWORDS = [
     "로봇 수술",
     "robot",
     "복강경",
+    "내시경",
+    "endoscopic",
+]
+
+# U-4.18: 병원급 키워드 (우선순위 순)
+HOSPITAL_TIER_KEYWORDS = [
+    ("상급종합병원", "상급종합병원"),
+    ("상급종합", "상급종합병원"),
+    ("종합병원", "종합병원"),
+    ("병원급", "병원급"),
+    ("의원급", "의원급"),
+    ("의원", "의원급"),
+]
+
+# U-4.18: 경증 제외 키워드
+MINOR_EXCLUSION_KEYWORDS = [
+    "경증상해",
+    "경증질병",
+    "경증",
+    "백내장",
+    "대장양성종양",
+    "치질",
+    "탈장",
+    "맹장",
+    "치핵",
+]
+
+# U-4.18: 수술 분류(종수) 패턴
+SURGERY_GRADE_PATTERNS = [
+    r"(\d+)\s*[~-]\s*(\d+)\s*종",  # "1~5종", "1-8종"
+    r"(\d+)\s*종\s*수술",  # "5종 수술"
+    r"제?\s*(\d+)\s*종",  # "제1종", "1종"
 ]
 
 
 def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
     """
-    수술 방식 슬롯 추출 (U-4.16)
+    수술 방식 슬롯 추출 (U-4.16/U-4.18)
 
-    다빈치/로봇수술 키워드를 탐지하여 수술 방식 반환
-    값: 다빈치, 로봇수술, 로봇수술(다빈치 포함), 해당없음, Unknown
+    다빈치/로봇수술/내시경 키워드를 탐지하여 수술 방식 반환
+    값: DAVINCI, ROBOT, ENDOSCOPIC, NONE, Unknown
     """
-    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1}
+    # U-4.18: 약관 우선 (doc_type_priority)
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
     trace = LLMTrace.rule_only(reason="not_needed")
 
     best_method = None
@@ -1178,9 +1258,10 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
     best_refs = []
     found_davinci = False
     found_robot = False
+    found_endoscopic = False
 
     for ev in evidence_list:
-        # A2 정책: 약관 제외 안함 (정의 확인 필요)
+        # A2 정책: 약관도 포함 (정의 확인 필요)
         doc_priority = doc_type_priority.get(ev.doc_type, 0)
         page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
 
@@ -1202,7 +1283,7 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
         if any(kw in preview_lower for kw in ["다빈치", "da vinci", "davinci"]):
             found_davinci = True
             if _is_better(doc_priority, page_start):
-                best_method = "다빈치"
+                best_method = "DAVINCI"
                 best_doc_priority = doc_priority
                 best_page_start = page_start
                 best_refs = [SlotEvidenceRef(
@@ -1215,7 +1296,20 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
         elif any(kw in preview_lower for kw in ["로봇수술", "로봇 수술", "robot"]):
             found_robot = True
             if _is_better(doc_priority, page_start) and not found_davinci:
-                best_method = "로봇수술"
+                best_method = "ROBOT"
+                best_doc_priority = doc_priority
+                best_page_start = page_start
+                best_refs = [SlotEvidenceRef(
+                    document_id=ev.document_id,
+                    page_start=ev.page_start,
+                    chunk_id=getattr(ev, 'chunk_id', None),
+                )]
+
+        # U-4.18: 내시경 키워드 탐지
+        elif any(kw in preview_lower for kw in ["내시경", "endoscopic"]):
+            found_endoscopic = True
+            if _is_better(doc_priority, page_start) and not found_davinci and not found_robot:
+                best_method = "ENDOSCOPIC"
                 best_doc_priority = doc_priority
                 best_page_start = page_start
                 best_refs = [SlotEvidenceRef(
@@ -1228,8 +1322,9 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
     if found_davinci and found_robot:
         return SlotInsurerValue(
             insurer_code=insurer_code,
-            value="로봇수술(다빈치 포함)",
+            value="ROBOT",  # U-4.18: 표준화된 값으로 변경
             confidence="high",
+            reason="다빈치 포함",
             evidence_refs=best_refs,
             trace=trace,
         )
@@ -1242,22 +1337,22 @@ def extract_surgery_method_slot(evidence_list: list, insurer_code: str, query: s
             trace=trace,
         )
 
-    # 쿼리에 다빈치/로봇이 있는데 못 찾은 경우
+    # 쿼리에 다빈치/로봇/내시경이 있는데 못 찾은 경우
     query_lower = query.lower()
-    if any(kw in query_lower for kw in ["다빈치", "로봇"]):
+    if any(kw in query_lower for kw in ["다빈치", "로봇", "내시경"]):
         return SlotInsurerValue(
             insurer_code=insurer_code,
             value="Unknown",
             confidence="not_found",
-            reason="해당 보험사 문서에서 다빈치/로봇수술 관련 정보 미확인",
+            reason="해당 보험사 문서에서 수술 방식 관련 정보 미확인",
             trace=trace,
         )
 
     return SlotInsurerValue(
         insurer_code=insurer_code,
-        value="해당없음",
+        value="NONE",
         confidence="low",
-        reason="다빈치/로봇수술 관련 정보 미확인",
+        reason="수술 방식 제한 없음",
         trace=trace,
     )
 
@@ -1649,6 +1744,248 @@ def extract_partial_payment_slot(evidence_list: list, insurer_code: str, query: 
         value="해당없음",
         confidence="medium",
         reason="감액 규정 미확인 (전액 지급 추정)",
+        trace=trace,
+    )
+
+
+# =============================================================================
+# U-4.18: 병원급/경증/종수 슬롯 추출
+# =============================================================================
+
+def extract_hospital_tier_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    병원급 조건 슬롯 추출 (U-4.18)
+
+    상급종합병원/종합병원/병원급/의원급 조건 추출
+    값: 상급종합병원, 종합병원, 병원급, 의원급, Unknown
+    """
+    # U-4.18: 약관 우선
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_tier = None
+    best_doc_priority = 0
+    best_page_start = float('inf')
+    best_refs = []
+    found_tier = False
+
+    for ev in evidence_list:
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
+
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        # 병원급 키워드 탐지 (우선순위 순)
+        for keyword, normalized in HOSPITAL_TIER_KEYWORDS:
+            if keyword in preview:
+                found_tier = True
+                # tie-breaker: doc_priority > page_start
+                if doc_priority > best_doc_priority or (doc_priority == best_doc_priority and page_start < best_page_start):
+                    best_tier = normalized
+                    best_doc_priority = doc_priority
+                    best_page_start = page_start
+                    best_refs = [SlotEvidenceRef(
+                        document_id=ev.document_id,
+                        page_start=ev.page_start,
+                        chunk_id=getattr(ev, 'chunk_id', None),
+                    )]
+                break  # 첫 번째 매칭 사용 (우선순위 순)
+
+    if best_tier:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_tier,
+            confidence="high" if best_doc_priority >= 3 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # 쿼리에 병원급이 있는데 못 찾은 경우
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in ["상급종합", "종합병원", "병원급", "의원"]):
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="not_found",
+            reason="해당 보험사 문서에서 병원급 조건 미확인",
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="해당없음",
+        confidence="medium",
+        reason="병원급 조건 없음 (제한 없음)",
+        trace=trace,
+    )
+
+
+def extract_minor_exclusion_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    경증 제외/제한 조건 슬롯 추출 (U-4.18)
+
+    경증상해/질병 제외 조건 추출
+    값: 경증상해 제외, 경증질병 제외, 백내장/대장양성종양 제외, 해당없음, Unknown
+    """
+    # U-4.18: 약관 우선
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_exclusion = None
+    best_doc_priority = 0
+    best_page_start = float('inf')
+    best_refs = []
+    found_exclusion = False
+    exclusions_found = []
+
+    for ev in evidence_list:
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
+
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        preview_lower = preview.lower()
+
+        # 경증 키워드 탐지
+        for keyword in MINOR_EXCLUSION_KEYWORDS:
+            if keyword in preview_lower:
+                # 제외/면책 문맥 확인
+                idx = preview_lower.find(keyword)
+                context_start = max(0, idx - 50)
+                context_end = min(len(preview), idx + len(keyword) + 50)
+                context = preview[context_start:context_end].lower()
+
+                if any(excl in context for excl in ["제외", "면책", "지급하지", "보장하지"]):
+                    found_exclusion = True
+                    exclusions_found.append(keyword)
+
+                    # tie-breaker: doc_priority > page_start
+                    if doc_priority > best_doc_priority or (doc_priority == best_doc_priority and page_start < best_page_start):
+                        best_exclusion = f"{keyword} 제외"
+                        best_doc_priority = doc_priority
+                        best_page_start = page_start
+                        best_refs = [SlotEvidenceRef(
+                            document_id=ev.document_id,
+                            page_start=ev.page_start,
+                            chunk_id=getattr(ev, 'chunk_id', None),
+                        )]
+
+    if best_exclusion:
+        # 여러 개 발견 시 합쳐서 표시
+        if len(exclusions_found) > 1:
+            unique_exclusions = list(dict.fromkeys(exclusions_found))[:3]  # 중복 제거, 최대 3개
+            best_exclusion = "/".join(unique_exclusions) + " 제외"
+
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_exclusion,
+            confidence="high" if best_doc_priority >= 3 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # 쿼리에 경증이 있는데 못 찾은 경우
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in ["경증", "백내장", "치질", "탈장"]):
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="not_found",
+            reason="해당 보험사 문서에서 경증 제외 조건 미확인",
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="해당없음",
+        confidence="medium",
+        reason="경증 제외 조건 없음",
+        trace=trace,
+    )
+
+
+def extract_surgery_grade_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    수술 분류(종수) 슬롯 추출 (U-4.18)
+
+    1~5종, 1~8종 등 수술 분류 추출
+    값: 1~5종, 1~8종(시술포함), Unknown
+    """
+    # U-4.18: 약관 우선
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_grade = None
+    best_doc_priority = 0
+    best_page_start = float('inf')
+    best_refs = []
+    found_grade = False
+
+    for ev in evidence_list:
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
+
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        # 종수 패턴 탐지
+        for pattern in SURGERY_GRADE_PATTERNS:
+            match = re.search(pattern, preview)
+            if match:
+                found_grade = True
+
+                # 매칭된 텍스트 추출
+                grade_text = match.group(0).strip()
+
+                # 시술 포함 여부 확인
+                idx = match.end()
+                context_end = min(len(preview), idx + 30)
+                context_after = preview[idx:context_end]
+                if "시술" in context_after:
+                    grade_text += "(시술포함)"
+
+                # tie-breaker: doc_priority > page_start
+                if doc_priority > best_doc_priority or (doc_priority == best_doc_priority and page_start < best_page_start):
+                    best_grade = grade_text
+                    best_doc_priority = doc_priority
+                    best_page_start = page_start
+                    best_refs = [SlotEvidenceRef(
+                        document_id=ev.document_id,
+                        page_start=ev.page_start,
+                        chunk_id=getattr(ev, 'chunk_id', None),
+                    )]
+                break  # 첫 번째 매칭 사용
+
+    if best_grade:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_grade,
+            confidence="high" if best_doc_priority >= 3 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # 쿼리에 종수가 있는데 못 찾은 경우
+    query_lower = query.lower()
+    if any(kw in query_lower for kw in ["종수", "1종", "5종", "8종"]):
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="not_found",
+            reason="해당 보험사 문서에서 수술 분류 정보 미확인",
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="Unknown",
+        confidence="low",
+        reason="수술 분류 정보 미확인",
         trace=trace,
     )
 

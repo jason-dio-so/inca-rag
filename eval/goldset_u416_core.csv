@@ -1,8 +1,8 @@
 query,insurer,coverage_code,slot_key,expected_value,expected_doc_type
 다빈치 수술비 비교,SAMSUNG,A9630_1,existence_status,있음,
 다빈치 수술비 비교,HYUNDAI,A9630_1,existence_status,있음,
-다빈치 수술비 비교,SAMSUNG,A9630_1,surgery_method,다빈치,
-다빈치 수술비 비교,HYUNDAI,A9630_1,surgery_method,다빈치,
+다빈치 수술비 비교,SAMSUNG,A9630_1,surgery_method,DAVINCI,
+다빈치 수술비 비교,HYUNDAI,A9630_1,surgery_method,DAVINCI,
 경계성 종양 및 제자리암 비교,HANWHA,A4200_1,existence_status,있음,
 경계성 종양 및 제자리암 비교,HEUNGKUK,A4200_1,existence_status,있음,
 경계성 종양 및 제자리암 비교,HEUNGKUK,A4200_1,subtype_in_situ_covered,Y,

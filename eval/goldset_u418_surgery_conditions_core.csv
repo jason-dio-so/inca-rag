@@ -1,0 +1,13 @@
+query,insurer,coverage_code,slot_key,expected_value,expected_doc_type
+다빈치 수술비 비교,SAMSUNG,A9630_1,existence_status,있음,
+다빈치 수술비 비교,HYUNDAI,A9630_1,existence_status,있음,
+다빈치 수술비 비교,SAMSUNG,A9630_1,surgery_method,DAVINCI,
+다빈치 수술비 비교,HYUNDAI,A9630_1,surgery_method,DAVINCI,
+다빈치 로봇 수술비 비교,SAMSUNG,A9630_1,existence_status,있음,
+다빈치 로봇 수술비 비교,HYUNDAI,A9630_1,existence_status,있음,
+다빈치 로봇 수술비 비교,SAMSUNG,A9630_1,surgery_method,DAVINCI,
+다빈치 로봇 수술비 비교,HYUNDAI,A9630_1,surgery_method,DAVINCI,
+다빈치 로봇암수술비 비교,SAMSUNG,A9630_1,existence_status,있음,
+다빈치 로봇암수술비 비교,HYUNDAI,A9630_1,existence_status,있음,
+다빈치 로봇암수술비 비교,SAMSUNG,A9630_1,surgery_method,DAVINCI,
+다빈치 로봇암수술비 비교,HYUNDAI,A9630_1,surgery_method,DAVINCI,
