@@ -1,0 +1,7 @@
+query,insurer,coverage_code,slot_key,expected_value,expected_doc_type
+제자리암 경계성종양 보장 비교,SAMSUNG,A4200_1,existence_status,있음,
+제자리암 경계성종양 보장 비교,HANWHA,A4200_1,existence_status,있음,
+제자리암 경계성종양 보장 비교,SAMSUNG,A4200_1,subtype_in_situ_covered,Y,
+제자리암 경계성종양 보장 비교,SAMSUNG,A4200_1,subtype_borderline_covered,Y,
+유사암 보장 조건 비교,SAMSUNG,A4210,existence_status,있음,
+유사암 보장 조건 비교,HANWHA,A4210,existence_status,있음,

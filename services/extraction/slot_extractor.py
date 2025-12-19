@@ -997,6 +997,19 @@ def _extract_cancer_diagnosis_slots(
         )
         slots.append(definition_slot)
 
+        # 10. partial_payment_rule (U-4.17: 감액/지급률 규정)
+        partial_slot = ComparisonSlot(
+            slot_key="partial_payment_rule",
+            label="감액/지급률 규정",
+            comparable=True,
+            insurers=[
+                extract_partial_payment_slot(all_evidence_by_insurer.get(ic, []), ic, query)
+                for ic in insurers
+            ],
+        )
+        partial_slot.diff_summary = _generate_slot_diff_summary(partial_slot)
+        slots.append(partial_slot)
+
     return slots
 
 
@@ -1366,7 +1379,8 @@ def extract_subtype_coverage_slot(
 
     제자리암/경계성종양/유사암의 보장 여부를 Y/N/Unknown으로 반환
     """
-    doc_type_priority = {"상품요약서": 3, "사업방법서": 2, "가입설계서": 1, "약관": 1}
+    # U-4.17: 약관 우선 (subtype 정의/조건은 약관이 원천)
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
     trace = LLMTrace.rule_only(reason="not_needed")
 
     subtype_keywords = CANCER_SUBTYPE_KEYWORDS.get(subtype, [])
@@ -1473,11 +1487,12 @@ def extract_subtype_coverage_slot(
 
 def extract_subtype_definition_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
     """
-    암 유형 정의/조건 발췌 슬롯 추출 (U-4.16)
+    암 유형 정의/조건 발췌 슬롯 추출 (U-4.16/U-4.17)
 
     제자리암/경계성종양/유사암 관련 정의나 조건 문구 추출
     """
-    doc_type_priority = {"약관": 3, "상품요약서": 2, "사업방법서": 2, "가입설계서": 1}
+    # U-4.17: 약관 우선 (subtype 정의/조건은 약관이 원천)
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
     trace = LLMTrace.rule_only(reason="not_needed")
 
     all_subtype_keywords = []
@@ -1538,6 +1553,102 @@ def extract_subtype_definition_slot(evidence_list: list, insurer_code: str, quer
         value=None,
         confidence="not_found",
         reason="암 유형 정의/조건 정보 미확인",
+        trace=trace,
+    )
+
+
+# =============================================================================
+# U-4.17: 감액/지급률 슬롯 추출
+# =============================================================================
+
+# 감액/부분지급 패턴 (정규식)
+PARTIAL_PAYMENT_PATTERNS = [
+    r"(\d+)\s*[일년개월]\s*(이내|미만|이전).*?(\d+)\s*%",  # "90일 이내 50%"
+    r"(\d+)\s*%\s*(감액|지급|보장)",  # "50% 감액"
+    r"가입\s*후\s*(\d+)\s*[일년개월].*?(\d+)\s*%",  # "가입 후 1년 50%"
+    r"(\d+)\s*[일년개월]\s*[경과미].*?(\d+)\s*%",  # "1년 경과 전 50%"
+    r"지급률\s*(\d+)\s*%",  # "지급률 50%"
+]
+
+
+def extract_partial_payment_slot(evidence_list: list, insurer_code: str, query: str = "") -> SlotInsurerValue:
+    """
+    감액/지급률 규정 슬롯 추출 (U-4.17)
+
+    암 진단비의 감액 기간/비율 추출
+    값 예시: "1년 50%", "90일 이내 50%", "해당없음", Unknown
+    """
+    # U-4.17: 약관 우선 (감액 규정은 약관이 원천)
+    doc_type_priority = {"약관": 4, "사업방법서": 3, "상품요약서": 2, "가입설계서": 1}
+    trace = LLMTrace.rule_only(reason="not_needed")
+
+    best_rule = None
+    best_doc_priority = 0
+    best_page_start = float('inf')
+    best_refs = []
+    found_partial = False
+
+    for ev in evidence_list:
+        preview = getattr(ev, 'preview', '') or ''
+        if not preview:
+            continue
+
+        doc_priority = doc_type_priority.get(ev.doc_type, 0)
+        page_start = getattr(ev, 'page_start', float('inf')) or float('inf')
+
+        # 감액 관련 키워드 확인
+        preview_lower = preview.lower()
+        if not any(kw in preview_lower for kw in ["감액", "지급률", "%", "백분"]):
+            continue
+
+        # 패턴 매칭
+        for pattern in PARTIAL_PAYMENT_PATTERNS:
+            match = re.search(pattern, preview)
+            if match:
+                found_partial = True
+
+                # 매칭된 텍스트 주변 추출 (컨텍스트 포함)
+                start = max(0, match.start() - 30)
+                end = min(len(preview), match.end() + 30)
+                context = preview[start:end].strip()
+
+                # tie-breaker: doc_priority > page_start
+                if doc_priority > best_doc_priority or (doc_priority == best_doc_priority and page_start < best_page_start):
+                    best_rule = context
+                    best_doc_priority = doc_priority
+                    best_page_start = page_start
+                    best_refs = [SlotEvidenceRef(
+                        document_id=ev.document_id,
+                        page_start=ev.page_start,
+                        chunk_id=getattr(ev, 'chunk_id', None),
+                    )]
+                break  # 첫 매칭 사용
+
+    if best_rule:
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value=best_rule[:100],  # 최대 100자
+            confidence="high" if best_doc_priority >= 3 else "medium",
+            evidence_refs=best_refs,
+            trace=trace,
+        )
+
+    # 감액 패턴을 못 찾은 경우
+    if found_partial:
+        # 키워드는 있지만 패턴 매칭 실패
+        return SlotInsurerValue(
+            insurer_code=insurer_code,
+            value="Unknown",
+            confidence="low",
+            reason="감액 관련 문구 존재하나 명확한 규정 미확인",
+            trace=trace,
+        )
+
+    return SlotInsurerValue(
+        insurer_code=insurer_code,
+        value="해당없음",
+        confidence="medium",
+        reason="감액 규정 미확인 (전액 지급 추정)",
         trace=trace,
     )
 

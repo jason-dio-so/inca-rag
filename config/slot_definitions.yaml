@@ -4,7 +4,7 @@
 # 이 파일은 코드에 하드코딩된 슬롯 정의를 외부화하여 관리합니다.
 # slot_extractor.py의 load_slot_definitions()가 이 파일을 로드합니다.
 
-version: "0.3"  # U-4.16: 다빈치 수술비 + 경계성종양/제자리암 슬롯 추가
+version: "0.4"  # U-4.17: partial_payment_rule + 약관 우선순위
 
 # =============================================================================
 # Coverage Type -> Slot Definitions Mapping
@@ -52,30 +52,38 @@ coverage_types:
         source_doc_types: ["약관"]
         extractor: policy_snippet
 
-      # U-4.16: 암 subtype 보장 여부 슬롯 (경계성종양/제자리암 비교용)
+      # U-4.16/U-4.17: 암 subtype 보장 여부 슬롯 (약관 우선)
       - slot_key: subtype_in_situ_covered
         label: "제자리암 보장 여부"
         comparable: true
-        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        source_doc_types: ["약관", "사업방법서", "상품요약서"]
         extractor: subtype_coverage
 
       - slot_key: subtype_borderline_covered
         label: "경계성종양 보장 여부"
         comparable: true
-        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        source_doc_types: ["약관", "사업방법서", "상품요약서"]
         extractor: subtype_coverage
 
       - slot_key: subtype_similar_cancer_covered
         label: "유사암 보장 여부"
         comparable: true
-        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        source_doc_types: ["약관", "사업방법서", "상품요약서"]
         extractor: subtype_coverage
 
       - slot_key: subtype_definition_excerpt
         label: "암 유형 정의/조건 발췌"
         comparable: false
-        source_doc_types: ["상품요약서", "사업방법서", "약관"]
+        source_doc_types: ["약관", "사업방법서", "상품요약서"]
         extractor: subtype_definition
+
+      # U-4.17: 감액/지급률/기간 슬롯
+      - slot_key: partial_payment_rule
+        label: "감액/지급률 규정"
+        comparable: true
+        source_doc_types: ["약관", "사업방법서", "상품요약서"]
+        extractor: partial_payment
+        # 값 예시: "1년 50%", "90일 이내 50%", "해당없음", Unknown
 
   # -------------------------------------------------------------------------
   # 뇌/심혈관 진단비 (U-4.14 수정: 신정원 표준코드 반영)
@@ -249,6 +257,12 @@ extractors:
     type: rule_based
     description: "암 유형 정의/조건 발췌"
     function: extract_subtype_definition
+
+  # U-4.17: 감액/지급률 추출기
+  partial_payment:
+    type: rule_based
+    description: "감액/지급률 규정 추출 (1년 50%, 90일 이내 등)"
+    function: extract_partial_payment
 
 # =============================================================================
 # Search Keywords Registry (2-pass retrieval용)
