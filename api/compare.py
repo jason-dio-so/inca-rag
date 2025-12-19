@@ -29,6 +29,12 @@ from api.config_loader import (
     get_compare_trigger_keywords,
     get_lookup_force_keywords,
     get_ui_events_no_intent_change,
+    # STEP 3.7: Coverage Resolution
+    get_similarity_thresholds,
+    get_resolution_status_codes,
+    get_failure_messages,
+    get_domain_representative_coverages,
+    get_max_recommendations,
 )
 
 router = APIRouter(tags=["compare"])
@@ -185,6 +191,34 @@ class DiffSummaryItemResponse(BaseModel):
 
 
 # =============================================================================
+# STEP 3.7: Coverage Resolution Response Models
+# =============================================================================
+
+class SuggestedCoverageResponse(BaseModel):
+    """추천 담보 항목"""
+    coverage_code: str
+    coverage_name: str | None
+    similarity: float
+    insurer_code: str | None = None
+
+
+class CoverageResolutionResponse(BaseModel):
+    """
+    STEP 3.7: Coverage Resolution 결과
+
+    status:
+    - resolved: 확정된 coverage_code 존재
+    - suggest: 유사 담보 존재하지만 확정 불가 (유저 선택 필요)
+    - failed: 매핑 불가 (재입력 필요)
+    - clarify: 도메인만 추정 가능 (구체화 필요)
+    """
+    status: Literal["resolved", "suggest", "failed", "clarify"]
+    message: str | None = None
+    suggested_coverages: list[SuggestedCoverageResponse] = []
+    detected_domain: str | None = None
+
+
+# =============================================================================
 # U-4.8: Comparison Slots
 # =============================================================================
 
@@ -241,6 +275,8 @@ class CompareResponseModel(BaseModel):
     anchor: QueryAnchor | None = None
     # STEP 3.5: Insurer Auto-Recovery 메시지
     recovery_message: str | None = None
+    # STEP 3.7: Coverage Resolution 결과
+    coverage_resolution: CoverageResolutionResponse | None = None
     debug: dict[str, Any]
 
 
@@ -492,6 +528,167 @@ def _detect_intent_from_query(query: str) -> tuple[Literal["lookup", "compare"],
     # 기본값: lookup
     debug_info["intent_reason"] = "default_lookup"
     return "lookup", debug_info
+
+
+# =============================================================================
+# STEP 3.7: Coverage Resolution Failure Handling
+# =============================================================================
+
+def _evaluate_coverage_resolution(
+    query: str,
+    resolved_coverage_codes: list[str] | None,
+    coverage_recommendations: list[dict[str, Any]] | None,
+) -> tuple[CoverageResolutionResponse, dict[str, Any]]:
+    """
+    STEP 3.7: Coverage Resolution 상태 평가
+
+    핵심 원칙:
+    - coverage_name → coverage_code 매핑 실패는 정상 응답이 아님
+    - 실패 시 "관련 담보 전체 조회" 확장 금지
+    - 실패 시 허용되는 응답 유형: 명시적 실패, 추천, 재질문
+
+    Args:
+        query: 사용자 질의
+        resolved_coverage_codes: 자동 추론된 coverage_code 목록
+        coverage_recommendations: 추천 결과 (similarity 포함)
+
+    Returns:
+        (CoverageResolutionResponse, debug_info)
+    """
+    thresholds = get_similarity_thresholds()
+    status_codes = get_resolution_status_codes()
+    failure_messages = get_failure_messages()
+    max_recommendations = get_max_recommendations()
+
+    debug_info: dict[str, Any] = {
+        "thresholds": thresholds,
+        "resolved_codes_count": len(resolved_coverage_codes) if resolved_coverage_codes else 0,
+        "recommendations_count": len(coverage_recommendations) if coverage_recommendations else 0,
+    }
+
+    # Case 1: coverage_codes가 비어있으면 실패
+    if not resolved_coverage_codes:
+        # 도메인 추정 시도
+        detected_domain = _detect_query_domain(query)
+        debug_info["detected_domain"] = detected_domain
+
+        if detected_domain:
+            # 도메인은 추정됨 → clarify (재질문)
+            domain_coverages = get_domain_representative_coverages()
+            domain_info = domain_coverages.get(detected_domain, {})
+            domain_display = domain_info.get("display_name", detected_domain)
+
+            suggested = [
+                SuggestedCoverageResponse(
+                    coverage_code=cov["code"],
+                    coverage_name=cov["name"],
+                    similarity=0.0,
+                )
+                for cov in domain_info.get("coverages", [])[:max_recommendations]
+            ]
+
+            message = failure_messages.get("clarify_domain", "").format(domain=domain_display)
+
+            debug_info["status"] = "clarify"
+            debug_info["reason"] = "domain_detected_no_codes"
+
+            return CoverageResolutionResponse(
+                status="clarify",
+                message=message,
+                suggested_coverages=suggested,
+                detected_domain=detected_domain,
+            ), debug_info
+        else:
+            # 도메인도 추정 불가 → 완전 실패
+            message = failure_messages.get("clarify_general", "담보명을 좀 더 구체적으로 입력해 주세요.")
+
+            debug_info["status"] = "failed"
+            debug_info["reason"] = "no_codes_no_domain"
+
+            return CoverageResolutionResponse(
+                status="failed",
+                message=message,
+                suggested_coverages=[],
+                detected_domain=None,
+            ), debug_info
+
+    # Case 2: coverage_codes가 있으면 similarity 체크
+    if coverage_recommendations:
+        # 최고 similarity 확인
+        best_similarity = max(
+            (r.get("similarity", 0.0) for r in coverage_recommendations),
+            default=0.0,
+        )
+        debug_info["best_similarity"] = best_similarity
+
+        if best_similarity >= thresholds.get("confident", 0.5):
+            # resolved: 확정
+            debug_info["status"] = "resolved"
+            debug_info["reason"] = "confidence_threshold_met"
+
+            return CoverageResolutionResponse(
+                status="resolved",
+                message=None,
+                suggested_coverages=[],
+                detected_domain=None,
+            ), debug_info
+        elif best_similarity >= thresholds.get("suggest", 0.2):
+            # suggest: 추천 (유저 선택 필요)
+            display_names = get_display_names()
+            coverage_names_map = display_names.get("coverage_names", {})
+
+            suggested = []
+            seen_codes = set()
+            for r in sorted(coverage_recommendations, key=lambda x: x.get("similarity", 0), reverse=True):
+                code = r.get("coverage_code")
+                if code and code not in seen_codes:
+                    suggested.append(
+                        SuggestedCoverageResponse(
+                            coverage_code=code,
+                            coverage_name=coverage_names_map.get(code, r.get("coverage_name")),
+                            similarity=r.get("similarity", 0.0),
+                            insurer_code=r.get("insurer_code"),
+                        )
+                    )
+                    seen_codes.add(code)
+                    if len(suggested) >= max_recommendations:
+                        break
+
+            message = failure_messages.get("suggest_intro", "")
+
+            debug_info["status"] = "suggest"
+            debug_info["reason"] = "suggest_threshold_met"
+
+            return CoverageResolutionResponse(
+                status="suggest",
+                message=message,
+                suggested_coverages=suggested,
+                detected_domain=None,
+            ), debug_info
+        else:
+            # 완전 실패 (similarity 너무 낮음)
+            message = failure_messages.get("no_match", "").format(query=query)
+
+            debug_info["status"] = "failed"
+            debug_info["reason"] = "similarity_too_low"
+
+            return CoverageResolutionResponse(
+                status="failed",
+                message=message,
+                suggested_coverages=[],
+                detected_domain=None,
+            ), debug_info
+    else:
+        # recommendations가 없지만 codes가 있음 (explicit coverage_codes 전달됨)
+        debug_info["status"] = "resolved"
+        debug_info["reason"] = "explicit_codes_provided"
+
+        return CoverageResolutionResponse(
+            status="resolved",
+            message=None,
+            suggested_coverages=[],
+            detected_domain=None,
+        ), debug_info
 
 
 def _resolve_intent(
@@ -992,6 +1189,9 @@ def _convert_response(
     # STEP 3.6: Intent Locking
     resolved_intent: Literal["lookup", "compare"] = "lookup",
     intent_debug: dict[str, Any] | None = None,
+    # STEP 3.7: Coverage Resolution
+    coverage_resolution: CoverageResolutionResponse | None = None,
+    resolution_debug: dict[str, Any] | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -1025,16 +1225,33 @@ def _convert_response(
     if intent_debug:
         merged_debug["intent"] = intent_debug
 
-    # STEP 2.9 + 3.6: 새 anchor 생성 (intent 포함)
+    # STEP 3.7: resolution debug 정보 추가
+    if resolution_debug:
+        merged_debug["coverage_resolution"] = resolution_debug
+
+    # STEP 2.9 + 3.6 + 3.7: 새 anchor 생성 (intent 포함)
     # 기존 anchor 유지 조건:
     # 1. insurer_only 후속 질의인 경우
     # 2. UI 이벤트로 인해 intent가 locked된 경우 (STEP 3.6)
+    # Anchor 생성 차단 조건 (STEP 3.7):
+    # - coverage_resolution.status != "resolved"
     new_anchor: QueryAnchor | None = None
     should_preserve_anchor = (
         (anchor_debug and anchor_debug.get("query_type") == "insurer_only") or
         (intent_debug and intent_debug.get("intent_locked") and intent_debug.get("ui_event_blocked_change"))
     )
-    if should_preserve_anchor and input_anchor:
+
+    # STEP 3.7: Resolution 상태 확인
+    resolution_status = coverage_resolution.status if coverage_resolution else "resolved"
+    anchor_blocked_by_resolution = resolution_status != "resolved"
+
+    if anchor_blocked_by_resolution:
+        # STEP 3.7: coverage 미확정 시 anchor 생성 금지
+        # 기존 anchor도 유지하지 않음 (새 질의로 처리)
+        new_anchor = None
+        merged_debug["anchor_blocked"] = True
+        merged_debug["anchor_blocked_reason"] = f"resolution_status={resolution_status}"
+    elif should_preserve_anchor and input_anchor:
         # 기존 anchor 유지 (intent도 유지)
         new_anchor = input_anchor
     elif primary_code:
@@ -1116,6 +1333,8 @@ def _convert_response(
         anchor=new_anchor,
         # STEP 3.5: Insurer Auto-Recovery 메시지
         recovery_message=recovery_message,
+        # STEP 3.7: Coverage Resolution
+        coverage_resolution=coverage_resolution,
         debug=merged_debug,
     )
 
@@ -1202,6 +1421,22 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             age=request.age,
             gender=request.gender,
         )
+
+        # STEP 3.7: Coverage Resolution 평가
+        # insurer-only 후속 질의이거나 explicit coverage_codes가 제공된 경우 평가 스킵
+        coverage_resolution: CoverageResolutionResponse | None = None
+        resolution_debug: dict[str, Any] | None = None
+
+        if query_type != "insurer_only" and not request.coverage_codes:
+            # 자동 추론된 경우에만 resolution 평가
+            coverage_recommendations = result.debug.get("recommended_coverage_details", [])
+
+            coverage_resolution, resolution_debug = _evaluate_coverage_resolution(
+                query=request.query,
+                resolved_coverage_codes=result.resolved_coverage_codes,
+                coverage_recommendations=coverage_recommendations,
+            )
+
         return _convert_response(
             result,
             final_insurers,
@@ -1213,6 +1448,9 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             # STEP 3.6: Intent 전달
             resolved_intent=resolved_intent,
             intent_debug=intent_debug,
+            # STEP 3.7: Coverage Resolution
+            coverage_resolution=coverage_resolution,
+            resolution_debug=resolution_debug,
         )
     except HTTPException:
         raise

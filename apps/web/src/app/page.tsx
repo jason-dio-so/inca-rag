@@ -112,8 +112,28 @@ export default function Home() {
         summaryText = `ℹ️ ${response.recovery_message}\n\n`;
       }
 
-      // user_summary가 있으면 그대로 사용
-      if (response.user_summary) {
+      // STEP 3.7: Coverage Resolution 실패 처리
+      const resolution = response.coverage_resolution;
+      if (resolution && resolution.status !== "resolved") {
+        // 실패/추천/재질문 응답 처리
+        if (resolution.message) {
+          summaryText += `⚠️ ${resolution.message}`;
+        }
+
+        // suggested_coverages가 있으면 버튼 형태로 표시할 수 있도록 안내
+        if (resolution.suggested_coverages && resolution.suggested_coverages.length > 0) {
+          const suggestions = resolution.suggested_coverages
+            .map((s) => `• ${s.coverage_name || s.coverage_code}`)
+            .join("\n");
+          summaryText += `\n\n${suggestions}`;
+        }
+
+        // 도메인이 감지된 경우 추가 안내
+        if (resolution.detected_domain) {
+          summaryText += `\n\n위 담보 중 하나를 선택하거나, 좀 더 구체적인 담보명을 입력해 주세요.`;
+        }
+      } else if (response.user_summary) {
+        // user_summary가 있으면 그대로 사용
         summaryText += response.user_summary;
       } else {
         // Fallback: 기본 정보만 표시
@@ -122,7 +142,7 @@ export default function Home() {
           (sum, item) => sum + (item.evidence?.length || 0),
           0
         );
-        summaryText = `검색 완료: ${totalEvidence}건의 근거를 찾았습니다.\n\n자세한 비교표/근거는 오른쪽 패널을 확인해주세요.`;
+        summaryText += `검색 완료: ${totalEvidence}건의 근거를 찾았습니다.\n\n자세한 비교표/근거는 오른쪽 패널을 확인해주세요.`;
       }
 
       // Update assistant message

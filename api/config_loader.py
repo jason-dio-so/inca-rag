@@ -332,3 +332,62 @@ def get_compare_multi_insurer_patterns() -> list[str]:
     """복수 보험사 비교 패턴 리스트 반환"""
     config = get_intent_keywords_config()
     return config.get("compare_multi_insurer_patterns", [])
+
+
+# =============================================================================
+# STEP 3.7: Coverage Resolution 설정 로더
+# =============================================================================
+
+def get_coverage_resolution_config() -> dict:
+    """
+    Coverage Resolution 설정 전체 반환
+
+    Returns:
+        {
+            "similarity_thresholds": {...},
+            "resolution_status": {...},
+            "failure_messages": {...},
+            "domain_representative_coverages": {...},
+            "max_recommendations": 5
+        }
+    """
+    return _load_yaml("rules/coverage_resolution.yaml")
+
+
+def get_similarity_thresholds() -> dict[str, float]:
+    """유사도 임계값 반환"""
+    config = get_coverage_resolution_config()
+    return config.get("similarity_thresholds", {
+        "confident": 0.5,
+        "suggest": 0.2,
+        "minimum": 0.1
+    })
+
+
+def get_resolution_status_codes() -> dict[str, str]:
+    """Resolution 상태 코드 반환"""
+    config = get_coverage_resolution_config()
+    return config.get("resolution_status", {
+        "resolved": "resolved",
+        "suggest": "suggest",
+        "failed": "failed",
+        "clarify": "clarify"
+    })
+
+
+def get_failure_messages() -> dict[str, str]:
+    """실패 메시지 템플릿 반환"""
+    config = get_coverage_resolution_config()
+    return config.get("failure_messages", {})
+
+
+def get_domain_representative_coverages() -> dict:
+    """도메인별 대표 담보 반환"""
+    config = get_coverage_resolution_config()
+    return config.get("domain_representative_coverages", {})
+
+
+def get_max_recommendations() -> int:
+    """추천 최대 개수 반환"""
+    config = get_coverage_resolution_config()
+    return config.get("max_recommendations", 5)

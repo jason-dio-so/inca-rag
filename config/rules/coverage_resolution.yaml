@@ -1,0 +1,67 @@
+# Coverage Resolution Configuration
+# STEP 3.7: Coverage Resolution Failure Handling
+#
+# 핵심 원칙:
+# - 담보 해석 실패는 정상 응답이 아니다
+# - 실패 시 "관련 담보 전체 조회" 확장 금지
+# - coverage_code 미확정 시 Anchor 생성 금지
+
+# 유사도 임계값 설정
+similarity_thresholds:
+  # 확정 임계값 (이 이상이면 resolved)
+  confident: 0.5
+  # 추천 임계값 (이 이상이면 suggest, 미만이면 fail)
+  suggest: 0.2
+  # 최소 임계값 (검색 최소 조건)
+  minimum: 0.1
+
+# Resolution 상태 정의
+resolution_status:
+  # 성공: 확정된 coverage_code 존재
+  resolved: "resolved"
+  # 추천: 유사 담보 존재하지만 확정 불가
+  suggest: "suggest"
+  # 실패: 매핑 불가
+  failed: "failed"
+  # 재질문: 도메인만 추정 가능
+  clarify: "clarify"
+
+# 실패 메시지 템플릿
+failure_messages:
+  # 완전 실패 (유사 담보 없음)
+  no_match: "입력하신 담보명 '{query}'을(를) 찾지 못했습니다."
+  # 추천 모드 안내
+  suggest_intro: "입력하신 담보명과 정확히 일치하는 항목이 없습니다. 아래 담보 중 하나를 선택해 주세요:"
+  # 재질문 모드 안내
+  clarify_domain: "{domain} 관련 담보로 보입니다. 어떤 담보를 원하시나요?"
+  # 도메인 추정 불가
+  clarify_general: "담보명을 좀 더 구체적으로 입력해 주세요."
+
+# 도메인별 대표 담보 (재질문 시 안내용)
+domain_representative_coverages:
+  CANCER:
+    display_name: "암"
+    coverages:
+      - code: "A4200_1"
+        name: "암진단비"
+      - code: "A4210"
+        name: "유사암진단비"
+      - code: "A4209"
+        name: "재진단암진단비"
+  CARDIO:
+    display_name: "뇌/심혈관"
+    coverages:
+      - code: "A4103"
+        name: "뇌졸중진단비"
+      - code: "A4104"
+        name: "급성심근경색증진단비"
+  SURGERY:
+    display_name: "수술비"
+    coverages:
+      - code: "A5100"
+        name: "질병수술비"
+      - code: "A5200"
+        name: "상해수술비"
+
+# 추천 최대 개수
+max_recommendations: 5

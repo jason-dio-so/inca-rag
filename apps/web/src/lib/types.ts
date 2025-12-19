@@ -84,6 +84,31 @@ export interface ComparisonSlot {
   diff_summary?: string | null;
 }
 
+// =============================================================================
+// STEP 3.7: Coverage Resolution Types
+// =============================================================================
+
+export interface SuggestedCoverage {
+  coverage_code: string;
+  coverage_name: string | null;
+  similarity: number;
+  insurer_code?: string | null;
+}
+
+export interface CoverageResolution {
+  /**
+   * status:
+   * - resolved: 확정된 coverage_code 존재
+   * - suggest: 유사 담보 존재하지만 확정 불가 (유저 선택 필요)
+   * - failed: 매핑 불가 (재입력 필요)
+   * - clarify: 도메인만 추정 가능 (구체화 필요)
+   */
+  status: "resolved" | "suggest" | "failed" | "clarify";
+  message?: string | null;
+  suggested_coverages: SuggestedCoverage[];
+  detected_domain?: string | null;
+}
+
 // Extend CompareResponse to include slots and STEP 2.5 fields
 // (Until types.generated.ts is regenerated)
 export type CompareResponseWithSlots = CompareResponse & {
@@ -97,6 +122,8 @@ export type CompareResponseWithSlots = CompareResponse & {
   recovery_message?: string | null;
   // STEP 2.9 + 3.6: Query Anchor with Intent
   anchor?: QueryAnchor | null;
+  // STEP 3.7: Coverage Resolution
+  coverage_resolution?: CoverageResolution | null;
 };
 
 // STEP 3.6: Extended CompareRequest with ui_event_type
