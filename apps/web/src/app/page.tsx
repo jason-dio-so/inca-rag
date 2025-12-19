@@ -218,14 +218,9 @@ function HomeContent() {
 
       if (!canAddToChat) {
         // (A) UNRESOLVED / INVALID: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-        // STEP 3.7-δ-γ4/γ5: 후보 소스 우선순위
-        // 1. coverage_resolution.suggested_coverages (PRIMARY)
-        // 2. coverage_candidates (SECONDARY, if present)
-        // 3. empty array
+        // STEP 3.7-δ-γ6: 전체 후보 렌더링 (slice/filter 없음)
         const candidates =
-          response.coverage_resolution?.suggested_coverages ||
-          (response as Record<string, unknown>).coverage_candidates as SuggestedCoverage[] ||
-          [];
+          response.coverage_resolution?.suggested_coverages ?? [];
 
         const guide = createCoverageGuideState({
           resolutionState: resolvedState,
