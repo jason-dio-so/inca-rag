@@ -28,7 +28,6 @@ import { EvidencePanel } from "./EvidencePanel";
 import { SlotsTable } from "./SlotsTable";
 import { CompareResponseWithSlots, CoverageCompareItem } from "@/lib/types";
 import { ChevronDown, ChevronUp, Info, AlertCircle } from "lucide-react";
-import { getResolutionMessage } from "@/lib/ui-gating.config";
 
 interface ResultsPanelProps {
   response: CompareResponseWithSlots | null;
@@ -93,17 +92,25 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
   // ===========================================================================
   const resolutionState = response.resolution_state;
 
+  // ===========================================================================
+  // STEP 3.7-δ-γ3: resolution_state 직접 사용 (UNRESOLVED 우선)
+  // - coverage_resolution에서 재파생 금지
+  // - UNRESOLVED → "담보 선택 필요"
+  // - INVALID → "담보 미확정"
+  // ===========================================================================
   if (resolutionState !== "RESOLVED") {
-    const message = getResolutionMessage(response.coverage_resolution);
+    const isUnresolved = resolutionState === "UNRESOLVED";
+    const title = isUnresolved ? "담보 선택 필요" : "담보 미확정";
+    const message = isUnresolved
+      ? "담보를 선택해 주세요. 선택 후 비교 결과가 표시됩니다."
+      : "담보가 확정되면 비교 결과가 표시됩니다.";
+
     return (
       <div className="h-full flex items-center justify-center text-muted-foreground">
         <div className="text-center max-w-md">
           <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-          <p className="text-lg font-medium mb-2">
-            {resolutionState === "UNRESOLVED" ? "담보 선택 필요" : "담보 미확정"}
-          </p>
+          <p className="text-lg font-medium mb-2">{title}</p>
           <p className="text-sm">{message}</p>
-          {/* STEP 3.7-δ-β: resolution_state !== RESOLVED → 결과 표시 완전 차단 */}
         </div>
       </div>
     );
