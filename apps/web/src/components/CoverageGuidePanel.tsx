@@ -83,7 +83,8 @@ export function CoverageGuidePanel({
                   className="text-xs bg-white hover:bg-amber-100 border-amber-300"
                   onClick={() => onSelectCoverage?.(coverage)}
                 >
-                  <span>{coverage.coverage_name || coverage.coverage_code}</span>
+                  {/* STEP 3.7-δ-γ4: 라벨 우선순위 coverage_name → coverage_name_ko → coverage_code */}
+                  <span>{coverage.coverage_name || (coverage as unknown as Record<string, string>).coverage_name_ko || coverage.coverage_code}</span>
                   <ChevronRight className="h-3 w-3 ml-1" />
                 </Button>
               ))}
