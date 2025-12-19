@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (U-4.16)
+> 최종 업데이트: 2025-12-19 (STEP 2.8)
 
 ---
 
@@ -55,6 +55,9 @@
 | **Step U-4.14** | **대규모 보험사 온보딩 + 안정성 검증** | **기능/검증** | ✅ 완료 |
 | **Step U-4.15** | **Cerebro 금액 추출 정밀도 향상** | **기능** | ✅ 완료 |
 | **Step U-4.16** | **고난도 핵심 질의 대응 (다빈치수술비/경계성종양)** | **기능** | ✅ 완료 |
+| **Step U-4.17** | **암 Subtype 비교 확장 (partial_payment + 약관 우선)** | **기능** | ✅ 완료 |
+| **Step U-4.18** | **수술 조건(방식/병원급) 비교 확장** | **기능** | ✅ 완료 |
+| **STEP 2.8** | **하드코딩 비즈니스 규칙 YAML 외부화** | **리팩토링** | ✅ 완료 |
 
 ---
 
@@ -851,8 +854,231 @@ Query                     Insurer    Slot                 Expected        Actual
 | `services/retrieval/compare_service.py` | retrieval 키워드 추가, A9630_1 coverage 코드 추가 |
 | `eval/goldset_u416_core.csv` | 10개 평가 케이스 |
 
-### 검증 상태
+### 검증 결과
 
-- 단위 테스트: 47 passed ✅
-- 통합 테스트: Docker DB 필요 (별도 실행)
-- Goldset: `eval/goldset_u416_core.csv` 생성 완료
+```
+✅ pytest tests/test_extraction.py: 47 passed
+✅ eval/goldset_u416_core.csv: 100% (14/14)
+  - Coverage resolve rate: 100%
+  - Slot fill rate: 100%
+  - Value correctness: 100%
+```
+
+---
+
+## Step U-4.17: 암 Subtype 비교 확장 (partial_payment + 약관 우선) (2025-12-19)
+
+### 목표
+- 암 subtype(제자리암/경계성종양/유사암) 비교 강화
+- 감액 지급률 규정(partial_payment_rule) 슬롯 추가
+- 약관 문서 우선 retrieval로 evidence 정확도 향상
+
+### 구현 내용
+
+**1. partial_payment_rule 슬롯 추가**
+- 감액/지급률 규정 추출 (예: "1년 50%", "90일 이내 50%")
+- 패턴 기반 추출: `(\d+)\s*[일년개월]\s*(이내|미만).*?(\d+)\s*%`
+
+**2. 약관 우선 retrieval**
+- `source_doc_types` 우선순위 변경: `["약관", "사업방법서", "상품요약서"]`
+- `doc_type_priority` 적용: 약관(4) > 사업방법서(3) > 상품요약서(2) > 가입설계서(1)
+
+**3. Subtype 슬롯 구현**
+- `subtype_in_situ_covered`: 제자리암 보장 여부 (Y/N/Unknown)
+- `subtype_borderline_covered`: 경계성종양 보장 여부 (Y/N/Unknown)
+- `subtype_similar_cancer_covered`: 유사암 보장 여부 (Y/N/Unknown)
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/slot_definitions.yaml` | partial_payment_rule 슬롯, 약관 우선순위 (v0.4) |
+| `services/extraction/slot_extractor.py` | extract_partial_payment_slot(), doc_type_priority 적용 |
+| `eval/goldset_u417_subtype_core.csv` | 6개 평가 케이스 |
+
+### 검증 결과
+
+```
+================================================================================
+INCA-RAG EVAL RUNNER (goldset_u417_subtype_core.csv)
+================================================================================
+
+Query                           Insurer    Slot                     Expected   Actual     Match
+--------------------------------------------------------------------------------
+제자리암 경계성종양 보장 비교         SAMSUNG    existence_status         있음        있음        Y
+제자리암 경계성종양 보장 비교         HANWHA     existence_status         있음        있음        Y
+제자리암 경계성종양 보장 비교         SAMSUNG    subtype_in_situ_covered  Y          Y          Y
+제자리암 경계성종양 보장 비교         SAMSUNG    subtype_borderline_covered Y         Y          Y
+유사암 보장 조건 비교               SAMSUNG    existence_status         있음        있음        Y
+유사암 보장 조건 비교               HANWHA     existence_status         있음        있음        Y
+
+================================================================================
+[Eval Summary]
+================================================================================
+- Total cases: 6
+- Coverage resolve rate: 100.0% (6/6)
+- Slot fill rate: 100.0% (6/6)
+- Value correctness: 100.0% (6/6)
+================================================================================
+```
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| subtype 슬롯 추출 | ✅ 3개 슬롯 구현 |
+| partial_payment_rule 슬롯 | ✅ 추가 완료 |
+| 약관 우선 retrieval | ✅ doc_type_priority 적용 |
+| eval 100% | ✅ 6/6 (100%) |
+| 단위 테스트 | ✅ 47 passed |
+
+---
+
+## Step U-4.18: 수술 조건(방식/병원급) 비교 확장 (2025-12-19)
+
+### 목표
+- 수술비 비교 질의에서 수술 방식/병원급/경증제외/종수 조건을 슬롯으로 분리
+- 다빈치/로봇/내시경 등 수술 방식 비교 지원
+- 상급종합병원/종합병원 등 병원급 조건 비교 지원
+
+### 구현 내용
+
+**1. surgery_method 슬롯 강화**
+- 표준값: DAVINCI, ROBOT, ENDOSCOPIC, NONE, Unknown
+- 내시경(ENDOSCOPIC) 키워드 추가
+- 약관 우선 doc_type_priority 적용
+
+**2. hospital_tier_condition 슬롯 (신규)**
+- 병원급 조건 추출: 상급종합병원/종합병원/병원급/의원급
+- 키워드 우선순위 기반 매칭
+
+**3. minor_exclusion_rule 슬롯 (신규)**
+- 경증 제외 조건 추출: 경증상해/질병 제외, 백내장/대장양성종양 제외
+- 제외/면책 문맥 확인 후 추출
+
+**4. surgery_grade_rule 슬롯 (신규)**
+- 수술 분류 추출: 1~5종, 1~8종(시술포함)
+- 정규식 패턴 기반 매칭
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/slot_definitions.yaml` | U-4.18 슬롯 정의 추가 (v0.5) |
+| `services/extraction/slot_extractor.py` | 4개 신규 추출 함수 (+380 lines) |
+| `eval/goldset_u418_surgery_conditions_core.csv` | 12개 평가 케이스 |
+| `eval/goldset_u416_core.csv` | surgery_method 값 표준화 (다빈치→DAVINCI) |
+
+### 검증 결과
+
+```
+================================================================================
+INCA-RAG EVAL RUNNER (goldset_u418_surgery_conditions_core.csv)
+================================================================================
+
+Query                           Insurer    Slot                 Expected   Actual     Match
+--------------------------------------------------------------------------------
+다빈치 수술비 비교                   SAMSUNG    existence_status     있음        있음        Y
+다빈치 수술비 비교                   HYUNDAI    existence_status     있음        있음        Y
+다빈치 수술비 비교                   SAMSUNG    surgery_method       DAVINCI    DAVINCI    Y
+다빈치 수술비 비교                   HYUNDAI    surgery_method       DAVINCI    DAVINCI    Y
+다빈치 로봇 수술비 비교                SAMSUNG    existence_status     있음        있음        Y
+다빈치 로봇 수술비 비교                HYUNDAI    existence_status     있음        있음        Y
+다빈치 로봇 수술비 비교                SAMSUNG    surgery_method       DAVINCI    DAVINCI    Y
+다빈치 로봇 수술비 비교                HYUNDAI    surgery_method       DAVINCI    DAVINCI    Y
+다빈치 로봇암수술비 비교               SAMSUNG    existence_status     있음        있음        Y
+다빈치 로봇암수술비 비교               HYUNDAI    existence_status     있음        있음        Y
+다빈치 로봇암수술비 비교               SAMSUNG    surgery_method       DAVINCI    DAVINCI    Y
+다빈치 로봇암수술비 비교               HYUNDAI    surgery_method       DAVINCI    DAVINCI    Y
+
+================================================================================
+[Eval Summary]
+================================================================================
+- Total cases: 12
+- Coverage resolve rate: 100.0% (12/12)
+- Slot fill rate: 100.0% (12/12)
+- Value correctness: 100.0% (12/12)
+================================================================================
+```
+
+### 회귀 테스트 결과
+
+| Goldset | 결과 |
+|---------|------|
+| U-4.18 | 12/12 (100%) |
+| U-4.16 | 14/14 (100%) |
+| U-4.17 | 6/6 (100%) |
+| Unit tests | 47 passed |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| surgery_method ENDOSCOPIC 추가 | ✅ 구현 완료 |
+| hospital_tier_condition 슬롯 | ✅ 구현 완료 |
+| minor_exclusion_rule 슬롯 | ✅ 구현 완료 |
+| surgery_grade_rule 슬롯 | ✅ 구현 완료 |
+| 약관 우선 doc_type_priority | ✅ 통일 적용 |
+| U-4.18 eval ≥ 95% | ✅ 100% (12/12) |
+| U-4.16, U-4.17 회귀 없음 | ✅ 100% 유지 |
+| 단위 테스트 | ✅ 47 passed |
+
+---
+
+## STEP 2.8: 하드코딩 비즈니스 규칙 YAML 외부화 (2025-12-19)
+
+### 목표
+- codebase 내 하드코딩된 비즈니스 규칙을 YAML 설정 파일로 외부화
+- 코드 수정 없이 설정 파일만으로 규칙 변경 가능
+- P0/P1/P2 분류 기반 체계적 외부화
+
+### 분류 기준
+
+| 등급 | 정의 | 조치 |
+|------|------|------|
+| **P0** | 비즈니스 규칙 / 도메인 지식 | 즉시 YAML 외부화 |
+| **P1** | 품질 영향 키워드/패턴 | 권장 외부화 (향후) |
+| **P2** | 알고리즘/정규식 | 코드 유지 |
+
+### 외부화 완료 항목 (P0)
+
+| 항목 | 원본 위치 | 대상 파일 |
+|------|----------|----------|
+| INSURER_ALIASES | api/compare.py | config/mappings/insurer_alias.yaml |
+| COMPARE_PATTERNS | api/compare.py | config/rules/compare_patterns.yaml |
+| POLICY_KEYWORD_PATTERNS | compare_service.py | config/mappings/policy_keyword_patterns.yaml |
+| DOC_TYPE_PRIORITY | compare_service.py | config/rules/doc_type_priority.yaml |
+| SLOT_SEARCH_KEYWORDS | compare_service.py | config/mappings/slot_search_keywords.yaml |
+| COVERAGE_CODE_GROUPS | compare_service.py | config/mappings/coverage_code_groups.yaml |
+| COVERAGE_CODE_TO_TYPE | slot_extractor.py | config/mappings/coverage_code_to_type.yaml |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/config_loader.py` | P0 로더 함수 7개 추가 |
+| `api/compare.py` | INSURER_ALIASES, COMPARE_PATTERNS → config loader |
+| `services/retrieval/compare_service.py` | POLICY_KEYWORD_PATTERNS 등 → config loader |
+| `services/extraction/slot_extractor.py` | _determine_coverage_type → config loader |
+| `config/mappings/*.yaml` | 신규 5개 파일 |
+| `config/rules/*.yaml` | 신규 2개 파일 |
+| `docs/hardcode_audit.md` | 전수 조사 + 분류 문서 |
+
+### 검증 결과
+
+```
+✅ pytest tests/test_extraction.py: 47 passed
+✅ Docker API rebuild & smoke test: healthy
+✅ /compare API 정상 응답 확인
+```
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| P0 전수 조사 | ✅ 7개 항목 분류 |
+| YAML 외부화 | ✅ 7개 파일 생성 |
+| config_loader 확장 | ✅ 7개 함수 추가 |
+| 기존 코드 import 교체 | ✅ 3개 파일 수정 |
+| 테스트 통과 | ✅ 47 passed |
+| 기능 회귀 없음 | ✅ API 정상 동작 |

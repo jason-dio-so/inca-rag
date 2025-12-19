@@ -37,9 +37,25 @@ from services.retrieval.plan_selector import (
     get_plan_ids_for_retrieval,
     SelectedPlan,
 )
+from api.config_loader import (
+    get_policy_keyword_patterns,
+    get_default_policy_keywords,
+    get_doc_type_priority,
+    get_slot_search_keywords,
+    get_coverage_code_groups,
+)
 
 
-# policy_keywords 자동 추출을 위한 키워드 매핑
+# =============================================================================
+# STEP 2.8: P0 하드코딩 외부화
+# 아래 상수들은 config 파일로 이전됨:
+# - POLICY_KEYWORD_PATTERNS → config/mappings/policy_keyword_patterns.yaml
+# - DOC_TYPE_PRIORITY → config/rules/doc_type_priority.yaml
+# - SLOT_SEARCH_KEYWORDS → config/mappings/slot_search_keywords.yaml
+# - CANCER/CEREBRO/SURGERY_COVERAGE_CODES → config/mappings/coverage_code_groups.yaml
+# =============================================================================
+
+# LEGACY: policy_keywords 자동 추출을 위한 키워드 매핑 (하위 호환성)
 # 정규화: 다양한 표현 → 검색용 키워드
 POLICY_KEYWORD_PATTERNS: dict[str, str] = {
     # 암진단비 관련
@@ -238,9 +254,12 @@ def extract_policy_keywords(query: str, coverage_type: str | None = None) -> lis
     """
     found_keywords: set[str] = set()
 
+    # STEP 2.8: config에서 패턴 로드
+    policy_keyword_patterns = get_policy_keyword_patterns()
+
     # 긴 패턴부터 매칭 (경계성종양 → 경계성)
     for pattern, normalized in sorted(
-        POLICY_KEYWORD_PATTERNS.items(),
+        policy_keyword_patterns.items(),
         key=lambda x: len(x[0]),
         reverse=True,
     ):
@@ -248,12 +267,13 @@ def extract_policy_keywords(query: str, coverage_type: str | None = None) -> lis
             found_keywords.add(normalized)
 
     if not found_keywords:
-        # U-4.13: Coverage type별 기본 키워드
+        # U-4.13: Coverage type별 기본 키워드 (STEP 2.8: config에서 로드)
+        slot_keywords = get_slot_search_keywords()
         if coverage_type == "cerebro_cardiovascular_diagnosis":
-            return CEREBRO_CARDIOVASCULAR_KEYWORDS.copy()
+            return list(slot_keywords.get("cerebro_cardiovascular_default", CEREBRO_CARDIOVASCULAR_KEYWORDS))
         elif coverage_type == "surgery_benefit":
-            return SURGERY_BENEFIT_KEYWORDS.copy()
-        return DEFAULT_POLICY_KEYWORDS.copy()
+            return list(slot_keywords.get("surgery_benefit_default", SURGERY_BENEFIT_KEYWORDS))
+        return get_default_policy_keywords()
 
     return list(found_keywords)
 
@@ -569,6 +589,8 @@ LUMP_SUM_SEARCH_KEYWORDS = (
 )
 
 # U-4.15: coverage_codes → slot_type 매핑 (2-pass retrieval용)
+# STEP 2.8: config로 외부화됨 → config/mappings/coverage_code_groups.yaml
+# 하위 호환성을 위해 legacy 상수 유지
 CANCER_COVERAGE_CODES = {"A4200_1", "A4210", "A4209", "A4299_1"}
 CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
 SURGERY_COVERAGE_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300", "A9630_1"}
@@ -586,11 +608,17 @@ def determine_slot_type_from_codes(coverage_codes: list[str] | None) -> str:
 
     code_set = set(coverage_codes)
 
-    if code_set & CEREBRO_CARDIOVASCULAR_CODES:
+    # STEP 2.8: config에서 coverage code 그룹 로드
+    code_groups = get_coverage_code_groups()
+    cerebro_codes = set(code_groups.get("cerebro_cardiovascular", []))
+    cancer_codes = set(code_groups.get("cancer", []))
+    surgery_codes = set(code_groups.get("surgery", []))
+
+    if code_set & cerebro_codes:
         return "cerebro_cardiovascular"
-    if code_set & CANCER_COVERAGE_CODES:
+    if code_set & cancer_codes:
         return "cancer_diagnosis"
-    if code_set & SURGERY_COVERAGE_CODES:
+    if code_set & surgery_codes:
         return "surgery_benefit"
 
     return "diagnosis_lump_sum"
@@ -631,9 +659,10 @@ def get_amount_bearing_evidence(
 
     preview_len = RETRIEVAL_CONFIG["preview_len"]
 
-    # slot_type에 따른 키워드 선택
-    search_keywords = SLOT_SEARCH_KEYWORDS.get(slot_type, [])
-    lump_sum_keywords = SLOT_SEARCH_KEYWORDS.get("diagnosis_lump_sum", [])
+    # STEP 2.8: slot_type에 따른 키워드 선택 (config에서 로드)
+    slot_search_keywords = get_slot_search_keywords()
+    search_keywords = slot_search_keywords.get(slot_type, [])
+    lump_sum_keywords = slot_search_keywords.get("diagnosis_lump_sum", [])
 
     # U-4.15: cerebro_cardiovascular는 복합 키워드만 사용 (이미 "진단비" 포함)
     # "뇌졸중진단비", "급성심근경색증진단비" 등 구체적 키워드로 정밀 검색
@@ -1788,8 +1817,9 @@ def compare(
                 # 예: "뇌졸중진단비" 쿼리 → "뇌졸중진단비" 키워드 포함 청크 우선
                 target_kw = None
                 if slot_type_for_retrieval == "cerebro_cardiovascular":
-                    # query에서 진단비 패턴 추출 (예: "뇌졸중진단비", "급성심근경색증진단비")
-                    for kw in SLOT_SEARCH_KEYWORDS.get("cerebro_cardiovascular", []):
+                    # STEP 2.8: query에서 진단비 패턴 추출 (config에서 로드)
+                    cerebro_kws = get_slot_search_keywords().get("cerebro_cardiovascular", [])
+                    for kw in cerebro_kws:
                         if kw in query:
                             target_kw = kw
                             break

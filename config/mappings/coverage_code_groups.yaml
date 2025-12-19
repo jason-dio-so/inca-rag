@@ -1,0 +1,27 @@
+# coverage_code 그룹 정의
+# STEP 2.8: services/retrieval/compare_service.py에서 외부화
+
+# 암진단비 관련 coverage_codes
+cancer:
+  - A4200_1   # 암진단비(유사암제외) - 표준코드
+  - A4210     # 유사암진단비
+  - A4209     # 암진단비
+  - A4299_1   # 암진단비(유사암제외) - 삼성화재 variant
+
+# 뇌/심혈관 진단비 관련 coverage_codes
+cerebro_cardiovascular:
+  - A4101     # 뇌혈관질환진단비
+  - A4102     # 뇌출혈진단비
+  - A4103     # 뇌졸중진단비
+  - A4104_1   # 심장질환진단비
+  - A4105     # 허혈성심장질환진단비
+
+# 수술비 관련 coverage_codes
+surgery:
+  - A5100     # 질병수술비
+  - A5104_1   # 뇌혈관질환수술비
+  - A5107_1   # 허혈성심장질환수술비
+  - A5200     # 암수술비(유사암제외)
+  - A5298_001 # 유사암수술비
+  - A5300     # 상해수술비
+  - A9630_1   # 다빈치로봇암수술비

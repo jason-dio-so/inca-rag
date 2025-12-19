@@ -1,0 +1,51 @@
+# 보험사 alias 사전: 한글명/약칭 -> insurer code
+# STEP 2.8: api/compare.py에서 외부화
+
+# SAMSUNG
+삼성: SAMSUNG
+삼성화재: SAMSUNG
+삼성생명: SAMSUNG
+samsung: SAMSUNG
+
+# MERITZ
+메리츠: MERITZ
+메리츠화재: MERITZ
+메리츠손해보험: MERITZ
+meritz: MERITZ
+
+# HYUNDAI
+현대: HYUNDAI
+현대해상: HYUNDAI
+현대손해보험: HYUNDAI
+hyundai: HYUNDAI
+
+# HANWHA
+한화: HANWHA
+한화손해보험: HANWHA
+한화손보: HANWHA
+hanwha: HANWHA
+
+# DB
+db: DB
+DB손해보험: DB
+DB손보: DB
+디비: DB
+디비손보: DB
+
+# KB
+kb: KB
+KB손해보험: KB
+KB손보: KB
+케이비: KB
+
+# LOTTE
+롯데: LOTTE
+롯데손해보험: LOTTE
+롯데손보: LOTTE
+lotte: LOTTE
+
+# HEUNGKUK
+흥국: HEUNGKUK
+흥국화재: HEUNGKUK
+흥국손해보험: HEUNGKUK
+heungkuk: HEUNGKUK

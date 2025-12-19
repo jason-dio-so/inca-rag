@@ -1,0 +1,7 @@
+# source_doc_type 우선순위 가중치
+# STEP 2.8: services/retrieval/compare_service.py에서 외부화
+# 높을수록 우선순위 높음
+
+가입설계서: 3
+상품요약서: 2
+사업방법서: 1

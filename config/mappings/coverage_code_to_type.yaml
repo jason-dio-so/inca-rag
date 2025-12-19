@@ -1,0 +1,24 @@
+# coverage_code -> coverage_type 매핑
+# STEP 2.8: services/extraction/slot_extractor.py에서 외부화
+# coverage_standard 기준 정확한 매핑
+
+# 암진단비
+A4200_1: cancer_diagnosis
+A4210: cancer_diagnosis
+A4209: cancer_diagnosis
+A4299_1: cancer_diagnosis
+
+# 뇌/심혈관 진단비
+A4101: cerebro_cardiovascular_diagnosis  # 뇌혈관질환진단비
+A4102: cerebro_cardiovascular_diagnosis  # 뇌출혈진단비
+A4103: cerebro_cardiovascular_diagnosis  # 뇌졸중진단비
+A4104_1: cerebro_cardiovascular_diagnosis  # 심장질환진단비
+A4105: cerebro_cardiovascular_diagnosis  # 허혈성심장질환진단비
+
+# 수술비
+A5100: surgery_benefit    # 질병수술비
+A5104_1: surgery_benefit  # 뇌혈관질환수술비
+A5107_1: surgery_benefit  # 허혈성심장질환수술비
+A5200: surgery_benefit    # 암수술비(유사암제외)
+A5298_001: surgery_benefit  # 유사암수술비
+A5300: surgery_benefit    # 상해수술비

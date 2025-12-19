@@ -18,6 +18,7 @@ import yaml
 from pathlib import Path
 
 from .llm_trace import LLMTrace
+from api.config_loader import get_coverage_code_to_type, get_coverage_code_groups
 from .amount_extractor import (
     extract_amount,
     extract_diagnosis_lump_sum,
@@ -797,22 +798,29 @@ def extract_waiting_period(policy_evidence: list, insurer_code: str) -> SlotInsu
 # =============================================================================
 
 # Coverage type별 coverage_codes 매핑 (U-4.14 수정: 신정원 표준코드 반영)
+# STEP 2.8: config로 외부화됨 → config/mappings/coverage_code_groups.yaml
 CEREBRO_CARDIOVASCULAR_CODES = {"A4101", "A4102", "A4103", "A4104_1", "A4105"}
 SURGERY_BENEFIT_CODES = {"A5100", "A5104_1", "A5107_1", "A5200", "A5298_001", "A5300", "A9630_1"}
 
 
 def _determine_coverage_type(coverage_codes: list[str] | None) -> str | None:
-    """coverage_codes에서 coverage_type 결정"""
+    """coverage_codes에서 coverage_type 결정 (STEP 2.8: config에서 로드)"""
     if not coverage_codes:
         return None
 
     code_set = set(coverage_codes)
 
-    if code_set & CANCER_COVERAGE_CODES:
+    # STEP 2.8: config에서 coverage code 그룹 로드
+    code_groups = get_coverage_code_groups()
+    cancer_codes = set(code_groups.get("cancer", []))
+    cerebro_codes = set(code_groups.get("cerebro_cardiovascular", []))
+    surgery_codes = set(code_groups.get("surgery", []))
+
+    if code_set & cancer_codes:
         return "cancer_diagnosis"
-    if code_set & CEREBRO_CARDIOVASCULAR_CODES:
+    if code_set & cerebro_codes:
         return "cerebro_cardiovascular_diagnosis"
-    if code_set & SURGERY_BENEFIT_CODES:
+    if code_set & surgery_codes:
         return "surgery_benefit"
 
     return None
