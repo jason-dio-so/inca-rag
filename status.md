@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ5)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ6)
 
 ---
 
@@ -71,6 +71,7 @@
 | **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1148,3 +1149,32 @@ handleSendMessage({
 | UNRESOLVED > INVALID 우선순위 | ✅ 구현 완료 |
 | 문서화 주석 추가 | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ 111bd6c |
+
+## STEP 3.7-δ-γ6: UNRESOLVED 후보 전체 렌더링 (2025-12-20)
+
+### 목표
+- 후보 배열 제한 코드 제거 (slice/filter/find/[0])
+- 전체 후보를 map()으로 렌더링
+
+### 구현 내용
+
+**단순화된 후보 할당:**
+```typescript
+const candidates =
+  response.coverage_resolution?.suggested_coverages ?? [];
+```
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 | 3개 후보 | ✅ PASS |
+| 2 | 배열 제한 코드 | 없음 (grep 확인) | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| slice/filter 제거 | ✅ 구현 완료 |
+| 전체 후보 map() 렌더링 | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ 45f4a3a |
