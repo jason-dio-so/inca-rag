@@ -138,6 +138,16 @@ function HomeContent() {
   const [coverageGuide, setCoverageGuide] = useState<CoverageGuideState | null>(null);
 
   // ===========================================================================
+  // STEP 3.7-δ-γ10: Lifted Insurer Selection State
+  // - UI 체크박스 선택값이 유일한 Source of Truth
+  // - 담보 선택 시에도 insurers 변경 금지
+  // ===========================================================================
+  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
+    "SAMSUNG",
+    "MERITZ",
+  ]);
+
+  // ===========================================================================
   // Query State 변경 함수 (유일한 Query State 변경 경로)
   // STEP 3.8: send_message 이벤트만 Query State 변경 허용
   // STEP 3.7-γ: EXACT 상태에서만 Chat 로그에 응답 추가
@@ -288,21 +298,22 @@ function HomeContent() {
   // ===========================================================================
   // STEP 3.7-δ-γ2: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
   // coverage_code를 직접 전달하여 즉시 RESOLVED 상태로 전환
+  // STEP 3.7-δ-γ10: UI 선택된 insurers 유지 (하드코딩 금지)
   // ===========================================================================
   const handleSelectCoverage = useCallback((coverage: SuggestedCoverage) => {
     const coverageCode = coverage.coverage_code;
     const coverageName = coverage.coverage_name || coverageCode;
     if (coverageCode) {
       setCoverageGuide(null);
-      // STEP 3.7-δ-γ2: coverage_codes 명시 전달 → 즉시 RESOLVED
+      // STEP 3.7-δ-γ10: UI 선택된 insurers 사용 (기본값 하드코딩 금지)
       handleSendMessage({
         query: coverageName,
-        insurers: ["SAMSUNG", "MERITZ"], // 기본값
+        insurers: selectedInsurers, // UI 선택값 사용
         coverage_codes: [coverageCode],
         top_k_per_insurer: 5,
       });
     }
-  }, [handleSendMessage]);
+  }, [handleSendMessage, selectedInsurers]);
 
   // ===========================================================================
   // Memoized Response (STEP 3.8: 불필요한 re-render 방지)
@@ -345,6 +356,8 @@ function HomeContent() {
             isLoading={isLoading}
             coverageGuide={coverageGuide}
             onSelectCoverage={handleSelectCoverage}
+            selectedInsurers={selectedInsurers}
+            onInsurersChange={setSelectedInsurers}
           />
         </div>
       </div>

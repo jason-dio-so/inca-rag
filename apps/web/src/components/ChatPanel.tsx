@@ -54,6 +54,9 @@ interface ChatPanelProps {
   coverageGuide?: CoverageGuideState | null;
   /** STEP 3.7-γ: 담보 선택 핸들러 */
   onSelectCoverage?: (coverage: SuggestedCoverage) => void;
+  /** STEP 3.7-δ-γ10: Lifted insurer selection state */
+  selectedInsurers: string[];
+  onInsurersChange: (insurers: string[]) => void;
 }
 
 export function ChatPanel({
@@ -62,12 +65,11 @@ export function ChatPanel({
   isLoading,
   coverageGuide,
   onSelectCoverage,
+  selectedInsurers,
+  onInsurersChange,
 }: ChatPanelProps) {
   const [query, setQuery] = useState("");
-  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
-    "SAMSUNG",
-    "MERITZ",
-  ]);
+  // STEP 3.7-δ-γ10: selectedInsurers lifted to parent (page.tsx)
   const [age, setAge] = useState<string>("");
   const [gender, setGender] = useState<"M" | "F" | "">("");
   const [topK, setTopK] = useState<number>(5);
@@ -89,12 +91,12 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  // STEP 3.7-δ-γ10: Use lifted state callback
   const toggleInsurer = (insurer: string) => {
-    setSelectedInsurers((prev) =>
-      prev.includes(insurer)
-        ? prev.filter((i) => i !== insurer)
-        : [...prev, insurer]
-    );
+    const newInsurers = selectedInsurers.includes(insurer)
+      ? selectedInsurers.filter((i) => i !== insurer)
+      : [...selectedInsurers, insurer];
+    onInsurersChange(newInsurers);
   };
 
   const handleSend = () => {
