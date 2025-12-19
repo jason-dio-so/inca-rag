@@ -1,9 +1,22 @@
 "use client";
 
-import { useState } from "react";
+/**
+ * STEP 3.7-β: Results Panel with UI Gating
+ *
+ * Coverage Resolution 상태에 따른 렌더링 제어:
+ * - EXACT (resolved): Results Panel 전체 활성화
+ * - AMBIGUOUS (suggest/clarify): Results Panel 렌더링 차단
+ * - NOT_FOUND (failed): Results Panel 렌더링 차단
+ *
+ * 원칙: 대표 담보 미확정 상태에서 우측 패널은 비어 있어야 함
+ */
+
+import { useState, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -13,8 +26,13 @@ import { CompareTable } from "./CompareTable";
 import { DiffSummary } from "./DiffSummary";
 import { EvidencePanel } from "./EvidencePanel";
 import { SlotsTable } from "./SlotsTable";
-import { CompareResponseWithSlots } from "@/lib/types";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { CompareResponseWithSlots, CoverageCompareItem } from "@/lib/types";
+import { ChevronDown, ChevronUp, Info, AlertCircle } from "lucide-react";
+import {
+  canRenderResultsPanel,
+  getResolutionMessage,
+  getUIResolutionState,
+} from "@/lib/ui-gating.config";
 
 interface ResultsPanelProps {
   response: CompareResponseWithSlots | null;
@@ -22,6 +40,45 @@ interface ResultsPanelProps {
 
 export function ResultsPanel({ response }: ResultsPanelProps) {
   const [debugOpen, setDebugOpen] = useState(false);
+  const [relatedOpen, setRelatedOpen] = useState(false);
+
+  // STEP 2.5: 대표 담보와 연관 담보 분리
+  const { primaryCoverageData, relatedCoverageData } = useMemo(() => {
+    if (!response) {
+      return { primaryCoverageData: [], relatedCoverageData: [] };
+    }
+
+    const primaryCode = response.primary_coverage_code;
+    const relatedCodes = response.related_coverage_codes || [];
+    const allData = response.coverage_compare_result || [];
+
+    // __amount_fallback__ 제외
+    const filteredData = allData.filter(
+      (item) => item.coverage_code !== "__amount_fallback__"
+    );
+
+    if (!primaryCode) {
+      // 대표 담보가 없으면 첫 번째를 대표로
+      return {
+        primaryCoverageData: filteredData.slice(0, 1),
+        relatedCoverageData: filteredData.slice(1),
+      };
+    }
+
+    const primary = filteredData.filter(
+      (item) => item.coverage_code === primaryCode
+    );
+    const related = filteredData.filter(
+      (item) =>
+        item.coverage_code !== primaryCode &&
+        (relatedCodes.length === 0 || relatedCodes.includes(item.coverage_code))
+    );
+
+    return {
+      primaryCoverageData: primary,
+      relatedCoverageData: related,
+    };
+  }, [response]);
 
   if (!response) {
     return (
@@ -34,8 +91,48 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
     );
   }
 
+  // ===========================================================================
+  // STEP 3.7-β: UI Gating - Coverage Resolution 상태 확인
+  // ===========================================================================
+  const resolutionState = getUIResolutionState(response.coverage_resolution);
+  const canRender = canRenderResultsPanel(response.coverage_resolution);
+
+  // 대표 담보 미확정 상태 (AMBIGUOUS / NOT_FOUND) → Results Panel 렌더링 차단
+  if (!canRender) {
+    const message = getResolutionMessage(response.coverage_resolution);
+    return (
+      <div className="h-full flex items-center justify-center text-muted-foreground">
+        <div className="text-center max-w-md">
+          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+          <p className="text-lg font-medium mb-2">
+            {resolutionState === "AMBIGUOUS" ? "담보 선택 필요" : "담보 미확정"}
+          </p>
+          <p className="text-sm">{message}</p>
+          {/* STEP 3.7-β: 연관 담보 / 문서 / 결과 표시 완전 차단 */}
+        </div>
+      </div>
+    );
+  }
+
+  const hasPrimaryCoverage = response.primary_coverage_code && response.primary_coverage_name;
+  const hasRelatedCoverages = relatedCoverageData.length > 0;
+
   return (
     <div className="h-full flex flex-col">
+      {/* STEP 2.5: 대표 담보 헤더 */}
+      {hasPrimaryCoverage && (
+        <div className="px-4 py-3 border-b bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Badge variant="default" className="text-sm">
+              {response.primary_coverage_name}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              ({response.primary_coverage_code})
+            </span>
+          </div>
+        </div>
+      )}
+
       <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col">
         <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
           {/* U-4.8: Slots tab (first if available) */}
@@ -81,8 +178,42 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
             </TabsContent>
           )}
 
-          <TabsContent value="compare" className="m-0 p-4">
-            <CompareTable data={response.coverage_compare_result} />
+          <TabsContent value="compare" className="m-0 p-4 space-y-4">
+            {/* STEP 2.5: 대표 담보 비교표 */}
+            {primaryCoverageData.length > 0 && (
+              <CompareTable data={primaryCoverageData} />
+            )}
+
+            {/* STEP 2.5: 연관 담보 (접힘 섹션) */}
+            {hasRelatedCoverages && (
+              <Collapsible open={relatedOpen} onOpenChange={setRelatedOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Info className="h-4 w-4" />
+                      연관 담보 보기 ({relatedCoverageData.length})
+                    </span>
+                    {relatedOpen ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-4">
+                  <CompareTable data={relatedCoverageData} />
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+
+            {/* 데이터가 없는 경우 */}
+            {primaryCoverageData.length === 0 && !hasRelatedCoverages && (
+              <CompareTable data={response.coverage_compare_result} />
+            )}
           </TabsContent>
 
           <TabsContent value="diff" className="m-0 p-4">
