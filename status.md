@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ2)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ)
 
 ---
 
@@ -68,6 +68,7 @@
 | **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1051,3 +1052,27 @@ handleSendMessage({
 | 후보 클릭 → RESOLVED 전환 | ✅ 구현 완료 |
 | Results Panel 결과 표시 | ✅ 구현 완료 |
 | git 커밋 완료 | ✅ fbc36b1 |
+
+## STEP 3.7-δ: Resolution Lock & UNRESOLVED UI (Final) (2025-12-20)
+
+### 목표
+- Resolution Lock 및 UNRESOLVED 상태 UI 최종 정리
+- 다빈치 수술비: UNRESOLVED → 3 candidates → selection required; no results before selection
+
+### 검증 결과
+
+| # | 시나리오 | 예상 | 결과 |
+|---|----------|------|------|
+| 1 | "다빈치 수술비" 질의 (SAMSUNG+HYUNDAI) | resolution_state=UNRESOLVED | ✅ PASS |
+| 2 | 좌측 패널 | 3개 후보 버튼 (다빈치로봇암수술비, 유사암수술비, 암수술비) | ✅ PASS |
+| 3 | 우측 패널 | "담보 선택 필요" | ✅ PASS |
+| 4 | "담보 미확정" 텍스트 | 화면에 없음 | ✅ PASS |
+| 5 | 선택 전 결과 탭 | 렌더링 안됨 | ✅ PASS |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| UNRESOLVED 우선 렌더링 | ✅ 구현 완료 |
+| ResultsPanel resolution_state 직접 사용 | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ 2fc5770 |
