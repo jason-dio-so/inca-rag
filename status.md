@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7)
+> 최종 업데이트: 2025-12-19 (STEP 3.8)
 
 ---
 
@@ -62,6 +62,7 @@
 | **STEP 3.5** | **Advanced 옵션 Guard / Auto-Recovery** | **기능** | ✅ 완료 |
 | **STEP 3.6** | **Intent Locking / Mode Separation** | **기능** | ✅ 완료 |
 | **STEP 3.7** | **Coverage Resolution Failure Handling** | **기능** | ✅ 완료 |
+| **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
 
 ---
 
@@ -1458,3 +1459,106 @@ Result: ✅ PASS
 | coverage/insurer 변경 시 intent 유지 | ✅ anchor intent 보존 |
 | 하드코딩 없음 | ✅ YAML 외부화 |
 | 검증 시나리오 통과 | ✅ 4/4 (100%) |
+
+---
+
+## STEP 3.8: Evidence / Policy Read-Only Isolation (2025-12-19)
+
+### 목표
+- Evidence/Policy/Document 상세보기가 Query 실행이나 상태 변경을 유발하지 않도록 완전히 분리
+- 문서 열람은 Read-only 동작으로만 처리
+- Query Anchor / Intent / Insurer / Coverage 상태를 절대 변경하지 않음
+- 문서 열람 중에도 좌측 요약·우측 비교 결과가 불변으로 유지
+
+### 문제 인식
+
+**현상:**
+- Evidence 탭에서 "상품요약서 상세보기" 클릭 시 좌측 요약 영역이 재렌더링되거나 다른 상태로 변경됨
+- 마치 새로운 질의를 실행한 것처럼 화면이 흔들림
+
+**원인:**
+- Evidence 상세보기가 조회(Read)가 아닌 Query Mutation(상태 변경)으로 처리되고 있음
+- UI 이벤트가 Query Context를 침범함
+
+### 구현 내용
+
+**1. State 분류 정의 (`state-isolation.config.ts`):**
+```typescript
+// Query State: 질의 실행에 의해서만 변경되는 상태
+export const QUERY_STATE_KEYS = [
+  "messages",           // 채팅 메시지 목록
+  "currentResponse",    // 현재 비교 결과
+  "currentAnchor",      // Query Anchor (coverage, intent)
+  "isLoading",          // 질의 실행 중 여부
+] as const;
+
+// View State: Read-only UI 이벤트에 의해 변경되는 상태
+export const VIEW_STATE_KEYS = [
+  "viewingDocument",    // 현재 보고 있는 문서
+  "activeTab",          // 현재 활성 탭
+  "scrollPosition",     // 스크롤 위치
+  "expandedSections",   // 펼쳐진 섹션들
+] as const;
+```
+
+**2. Read-only View Events 정의:**
+```typescript
+export const READ_ONLY_VIEW_EVENTS = [
+  "evidence_view",              // Evidence 상세보기 클릭
+  "policy_view",                // Policy 상세보기 클릭
+  "document_view",              // 문서 상세보기 클릭
+  "document_page_change",       // 문서 페이지 이동
+  "document_zoom_change",       // 문서 확대/축소
+  "document_close",             // 문서 닫기
+  "tab_change",                 // 탭 전환
+  // ...
+] as const;
+```
+
+**3. ViewContext 생성 (`contexts/ViewContext.tsx`):**
+- Query State와 완전히 분리된 View State 전용 컨텍스트
+- viewingDocument, deepLinkDocument, activeTab 등 관리
+- openDocument(), closeDocument() 등 View State 변경 함수 제공
+- Query State 변경 불가 보장
+
+**4. page.tsx 리팩토링:**
+- ViewProvider 적용
+- Query State와 View State 명확히 분리
+- DocumentViewerLayer 컴포넌트로 뷰어 통합 관리
+- memoizedResponse로 불필요한 re-render 방지
+
+**5. EvidencePanel 수정:**
+- ViewContext.openDocument() 사용
+- 로컬 viewingEvidence 상태 제거
+- PdfPageViewer 렌더링을 page.tsx로 이동
+- Query State 변경 없이 문서 열기 보장
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/lib/state-isolation.config.ts` | 신규: State 분류 및 격리 규칙 정의 |
+| `apps/web/src/contexts/ViewContext.tsx` | 신규: View State 전용 컨텍스트 |
+| `apps/web/src/app/page.tsx` | ViewProvider 적용, DocumentViewerLayer 추가 |
+| `apps/web/src/components/EvidencePanel.tsx` | ViewContext 사용, 로컬 상태 제거 |
+| `apps/web/src/__tests__/state-isolation.test.ts` | 신규: 격리 규칙 단위 테스트 |
+
+### 검증 시나리오
+
+| # | 시나리오 | 기대 결과 | 검증 |
+|---|----------|----------|------|
+| 1 | "삼성의 암진단비 알려줘" | 좌측 요약 정상 표시 | ✅ |
+| 2 | Evidence 탭 → 상품요약서 상세보기 클릭 | 문서 뷰어 열림, 좌측 요약 내용 변경 없음 | ✅ |
+| 3 | 문서 페이지 이동 | Query 결과 불변 | ✅ |
+| 4 | 문서 닫기 | 동일 Query 결과 유지 | ✅ |
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| Evidence/Policy/Document 클릭 시 Query State 변경 0건 | ✅ 구현 완료 |
+| 좌측 요약 및 우측 비교 결과 항상 유지 | ✅ 구현 완료 |
+| Read-only View와 Query 실행 완전 분리 | ✅ ViewContext 분리 |
+| 하드코딩/임시 dict 없음 | ✅ config 기반 |
+| git 커밋 완료 | ✅ a6282d2 |
+| status.md 업데이트 완료 | ✅ 본 항목 |
