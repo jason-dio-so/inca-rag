@@ -31,6 +31,14 @@ import {
   canAddToChatLog,
   createCoverageGuideState,
 } from "@/lib/conversation-hygiene.config";
+import {
+  detectResetCondition,
+  resolveAnchorUpdate,
+  resolveResolutionState,
+  isResolutionLocked,
+  logTransition,
+} from "@/lib/resolution-lock.config";
+import { getUIResolutionState } from "@/lib/ui-gating.config";
 
 // =============================================================================
 // Deep-link Handler (View State만 변경, Query State 변경 없음)
@@ -130,12 +138,16 @@ function HomeContent() {
   // Query State 변경 함수 (유일한 Query State 변경 경로)
   // STEP 3.8: send_message 이벤트만 Query State 변경 허용
   // STEP 3.7-γ: EXACT 상태에서만 Chat 로그에 응답 추가
+  // STEP 3.7-δ: Resolution Lock - EXACT 상태 퇴행 방지
   // ===========================================================================
   const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
-    // STEP 3.6: 이전 anchor가 있으면 요청에 포함
+    // STEP 3.7-δ: 리셋 조건 감지 (새 담보 키워드 질의 등)
+    const resetCondition = detectResetCondition(request.query, currentAnchor);
+
+    // STEP 3.6: 이전 anchor가 있으면 요청에 포함 (리셋 조건이 아닐 때만)
     const requestWithAnchor: CompareRequestWithIntent = {
       ...request,
-      anchor: currentAnchor ?? undefined,
+      anchor: resetCondition ? undefined : (currentAnchor ?? undefined),
     };
 
     // STEP 3.7-γ: 새 질의 시 기존 가이드 제거 (교체 준비)
@@ -156,17 +168,48 @@ function HomeContent() {
 
     try {
       const response = await compare(requestWithAnchor);
-      setCurrentResponse(response);
 
-      // STEP 3.6: 응답에서 anchor 저장 (다음 질의에 전달)
-      if (response.anchor) {
-        setCurrentAnchor(response.anchor);
+      // =======================================================================
+      // STEP 3.7-δ: Resolution Lock 적용
+      // - Lock 위반 시 기존 anchor 유지, 새 resolution 무시
+      // =======================================================================
+      const currentState = currentAnchor ? "EXACT" : null; // anchor가 있으면 EXACT
+      const newState = getUIResolutionState(response.coverage_resolution);
+
+      // Resolution Lock: anchor 업데이트 결정
+      const resolvedAnchor = resolveAnchorUpdate(
+        currentAnchor,
+        response.anchor,
+        response.coverage_resolution,
+        resetCondition
+      );
+
+      // Resolution Lock: 상태 결정 (Lock 위반 시 EXACT 유지)
+      const resolvedState = resolveResolutionState(
+        currentAnchor,
+        response.coverage_resolution,
+        resetCondition
+      );
+
+      // 디버그 로그
+      logTransition(currentState, newState, resolvedState === newState, resetCondition ?? undefined);
+
+      // STEP 3.7-δ: Lock 위반 시 기존 anchor + 기존 response 유지
+      const isLockViolated = resolvedState !== newState;
+      setCurrentAnchor(resolvedAnchor);
+
+      // Lock 위반이 아닌 경우에만 response 업데이트
+      if (!isLockViolated) {
+        setCurrentResponse(response);
+      } else {
+        console.log("[Resolution Lock] Lock violation - keeping previous response");
       }
 
       // =======================================================================
       // STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
+      // STEP 3.7-δ: resolvedState 기반으로 판단 (Lock 적용 후)
       // =======================================================================
-      const canAddToChat = canAddToChatLog(response.coverage_resolution);
+      const canAddToChat = resolvedState === "EXACT";
 
       if (!canAddToChat) {
         // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
