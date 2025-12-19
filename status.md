@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ Final)
+> 최종 업데이트: 2025-12-20 (STEP 3.7-δ-γ10)
 
 ---
 
@@ -72,6 +72,7 @@
 | **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
 
 ---
 
@@ -1217,3 +1218,33 @@ const candidates =
 - **프론트엔드 버그 없음** (insurers payload = UI selection)
 - **백엔드 버그 없음** (쿼리에 따라 정상 응답)
 - **STEP 3.7-δ 전체 완료**
+
+## STEP 3.7-δ-γ10: Insurer Anchor Lock (2025-12-20)
+
+### 목표
+- 담보 후보 선택 시 UI에서 선택한 insurers가 유지되도록 수정
+- `handleSelectCoverage`에서 하드코딩된 `["SAMSUNG", "MERITZ"]` 제거
+
+### 문제점
+- 후보 버튼 클릭 시 `/compare` 재호출에서 insurers가 `["SAMSUNG", "MERITZ"]`로 고정됨
+- UI에서 SAMSUNG+HYUNDAI 선택해도 Compare 결과가 SAMSUNG+MERITZ로 표시
+
+### 해결책
+1. `selectedInsurers` 상태를 ChatPanel에서 page.tsx(HomeContent)로 lift up
+2. `handleSelectCoverage`에서 `selectedInsurers` 사용
+3. ChatPanel에 `selectedInsurers`와 `onInsurersChange` props 추가
+
+### 변경 파일
+- `apps/web/src/app/page.tsx`: selectedInsurers 상태 추가, handleSelectCoverage 수정
+- `apps/web/src/components/ChatPanel.tsx`: props로 insurers 상태 받도록 변경
+
+### 검증 결과
+- SAMSUNG+HYUNDAI 선택 후 후보 클릭해도 Compare insurers 유지 확인
+
+### 완료 조건 충족 여부
+
+| 조건 | 결과 |
+|------|------|
+| 후보 선택 후 insurers = UI 선택값 | ✅ 구현 완료 |
+| 하드코딩 insurers 제거 | ✅ 구현 완료 |
+| git 커밋 완료 | ✅ af33cbe |
