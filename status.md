@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.6)
+> 최종 업데이트: 2025-12-19 (STEP 3.7)
 
 ---
 
@@ -61,6 +61,7 @@
 | **STEP 2.9** | **Query Anchor / Context Locking** | **기능** | ✅ 완료 |
 | **STEP 3.5** | **Advanced 옵션 Guard / Auto-Recovery** | **기능** | ✅ 완료 |
 | **STEP 3.6** | **Intent Locking / Mode Separation** | **기능** | ✅ 완료 |
+| **STEP 3.7** | **Coverage Resolution Failure Handling** | **기능** | ✅ 완료 |
 
 ---
 
