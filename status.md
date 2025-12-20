@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.5: locked_coverage_codes 확장 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.5-β: 복수 담보 선택 UI 완료)
 
 ---
 
@@ -81,12 +81,48 @@
 | **STEP 4.3** | **API/Container Code Sync Audit** | **DevOps/검증** | ✅ 완료 |
 | **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
 | **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.5-β: 복수 담보 선택 UI (2025-12-20)
+
+### 목적
+멀티 subtype 비교를 위해 복수 담보를 체크박스로 선택하고 한 번에 비교 실행
+
+### 구현
+
+**1. CoverageGuidePanel 개선**
+- 단일 클릭 버튼 → 체크박스 목록으로 변경
+- similarity 퍼센트 표시
+- "N개 담보로 비교" 적용 버튼 추가
+- `onSelectCoverages` 콜백 (복수 선택)
+
+**2. page.tsx**
+- `handleSelectCoverages`: 복수 담보 선택 핸들러
+- `lockedCoverages` 배열로 복수 담보 저장
+
+**3. Checkbox 컴포넌트**
+- `@radix-ui/react-checkbox` 설치
+- `ui/checkbox.tsx` 생성
+
+### 검증 시나리오
+
+| 시나리오 | 입력 | 결과 |
+|----------|------|------|
+| 단일 선택 | `locked_coverage_codes: ["A4200_1"]` | `debug.anchor.coverage_locked: true` ✅ |
+| 복수 선택 | `locked_coverage_codes: ["A4200_1", "A4210"]` | `debug.anchor.coverage_locked: true` ✅ |
+
+**주의**: `coverage_locked` 정보는 `debug.anchor` 필드에 포함됨 (최상위가 아님)
+
+### 관련 커밋
+- `e90a928`: feat: STEP 4.5-β multi-select coverage UI with checkboxes
+
+---
 
 ## STEP 4.5: locked_coverage_codes 확장 (2025-12-20)
 
