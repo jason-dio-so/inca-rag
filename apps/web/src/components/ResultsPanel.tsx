@@ -318,11 +318,14 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
                     </div>
                     {(() => {
                       const debug = response.debug as Record<string, unknown> | undefined;
+                      // STEP 4.5: locked_coverage_codes 우선, fallback으로 locked_coverage_code
+                      const lockedCodes = (debug as { locked_coverage_codes?: string[] })?.locked_coverage_codes;
                       const lockedCode = (debug as { locked_coverage_code?: string })?.locked_coverage_code;
-                      return lockedCode ? (
+                      const displayCodes = lockedCodes ?? (lockedCode ? [lockedCode] : null);
+                      return displayCodes && displayCodes.length > 0 ? (
                         <div>
-                          <span className="font-medium">locked_coverage_code:</span>{" "}
-                          <span className="text-green-700">{lockedCode}</span>
+                          <span className="font-medium">locked_coverage_codes:</span>{" "}
+                          <span className="text-green-700">{displayCodes.join(", ")}</span>
                         </div>
                       ) : null;
                     })()}

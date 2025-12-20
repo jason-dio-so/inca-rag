@@ -104,7 +104,12 @@ class CompareRequest(BaseModel):
     # STEP 3.9: Anchor Persistence - 담보 고정 요청
     locked_coverage_code: str | None = Field(
         None,
-        description="고정할 담보 코드 (제공 시 coverage resolver 스킵)"
+        description="고정할 담보 코드 (제공 시 coverage resolver 스킵) - deprecated, use locked_coverage_codes"
+    )
+    # STEP 4.5: Multi-subtype 지원 - 복수 담보 고정
+    locked_coverage_codes: list[str] | None = Field(
+        None,
+        description="고정할 담보 코드 목록 (복수 subtype 비교 시 사용)"
     )
 
     model_config = {
@@ -1556,15 +1561,22 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         )
         anchor_debug["query_type"] = query_type
 
-        # STEP 3.9: locked_coverage_code 우선 적용
-        # locked_coverage_code가 있으면 coverage resolver를 완전히 스킵
+        # STEP 3.9 + 4.5: locked_coverage_code(s) 우선 적용
+        # locked_coverage_codes 또는 locked_coverage_code가 있으면 coverage resolver를 완전히 스킵
         coverage_codes_to_use = request.coverage_codes
         is_coverage_locked = False
 
-        if request.locked_coverage_code:
-            # STEP 3.9: 담보 고정 - resolver 스킵
-            coverage_codes_to_use = [request.locked_coverage_code]
-            anchor_debug["locked_coverage_code"] = request.locked_coverage_code
+        # STEP 4.5: locked_coverage_codes (복수) 우선, 없으면 locked_coverage_code (단일) 사용
+        effective_locked_codes: list[str] | None = None
+        if request.locked_coverage_codes and len(request.locked_coverage_codes) > 0:
+            effective_locked_codes = request.locked_coverage_codes
+        elif request.locked_coverage_code:
+            effective_locked_codes = [request.locked_coverage_code]
+
+        if effective_locked_codes:
+            # STEP 4.5: 담보 고정 - resolver 스킵
+            coverage_codes_to_use = effective_locked_codes
+            anchor_debug["locked_coverage_codes"] = effective_locked_codes
             anchor_debug["coverage_locked"] = True
             is_coverage_locked = True
         elif query_type == "insurer_only" and request.anchor:

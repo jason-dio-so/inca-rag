@@ -148,14 +148,18 @@ function HomeContent() {
   ]);
 
   // ===========================================================================
-  // STEP 3.9: Explicit Coverage Lock State
+  // STEP 3.9 + 4.5: Explicit Coverage Lock State
   // - 사용자가 명시적으로 담보를 선택하면 lock
   // - UNLOCK 버튼을 누르기 전까지 유지
+  // - STEP 4.5: 복수 담보 지원 (멀티 subtype)
   // ===========================================================================
-  const [lockedCoverage, setLockedCoverage] = useState<{
+  const [lockedCoverages, setLockedCoverages] = useState<Array<{
     code: string;
     name: string;
-  } | null>(null);
+  }>>([]);
+
+  // 하위 호환성: 첫 번째 locked coverage 반환
+  const lockedCoverage = lockedCoverages.length > 0 ? lockedCoverages[0] : null;
 
   // ===========================================================================
   // Query State 변경 함수 (유일한 Query State 변경 경로)
@@ -164,27 +168,29 @@ function HomeContent() {
   // STEP 3.7-δ: Resolution Lock - EXACT 상태 퇴행 방지
   // ===========================================================================
   const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
-    // STEP 3.9: 명시적 coverage lock이 있으면 항상 사용 (리셋 조건 무시)
-    // lockedCoverage는 사용자가 UNLOCK 버튼을 누르기 전까지 유지
-    const effectiveLockedCode = lockedCoverage?.code ?? undefined;
+    // STEP 3.9 + 4.5: 명시적 coverage lock이 있으면 항상 사용 (리셋 조건 무시)
+    // lockedCoverages는 사용자가 UNLOCK 버튼을 누르기 전까지 유지
+    const effectiveLockedCodes = lockedCoverages.length > 0
+      ? lockedCoverages.map(c => c.code)
+      : undefined;
 
     // STEP 3.7-δ: 리셋 조건 감지 (새 담보 키워드 질의 등) - lock이 없을 때만 적용
-    const resetCondition = lockedCoverage ? null : detectResetCondition(request.query, currentAnchor);
+    const resetCondition = lockedCoverages.length > 0 ? null : detectResetCondition(request.query, currentAnchor);
 
-    console.log("[STEP 3.9] Anchor Persistence:", {
+    console.log("[STEP 4.5] Anchor Persistence:", {
       query: request.query,
-      lockedCoverage,
-      effectiveLockedCode,
+      lockedCoverages,
+      effectiveLockedCodes,
       resetCondition,
       currentAnchor: currentAnchor?.coverage_code,
     });
 
     // STEP 3.6: 이전 anchor가 있으면 요청에 포함 (리셋 조건이 아닐 때만)
-    // STEP 3.9: locked_coverage_code 추가 (명시적 lock 우선)
+    // STEP 4.5: locked_coverage_codes 사용 (복수 담보 지원)
     const requestWithAnchor: CompareRequestWithIntent = {
       ...request,
       anchor: resetCondition ? undefined : (currentAnchor ?? undefined),
-      locked_coverage_code: effectiveLockedCode,
+      locked_coverage_codes: effectiveLockedCodes,
     };
 
     // STEP 3.7-γ: 새 질의 시 기존 가이드 제거 (교체 준비)
@@ -317,23 +323,23 @@ function HomeContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentAnchor, lockedCoverage]);
+  }, [currentAnchor, lockedCoverages]);
 
   // ===========================================================================
-  // STEP 3.7-δ-γ2: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // STEP 3.7-δ-γ2 + 4.5: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
   // coverage_code를 직접 전달하여 즉시 RESOLVED 상태로 전환
   // STEP 3.7-δ-γ10: UI 선택된 insurers 유지 (하드코딩 금지)
-  // STEP 3.9: 명시적 coverage lock 설정
+  // STEP 4.5: 복수 담보 선택 지원 (멀티 subtype)
   // ===========================================================================
   const handleSelectCoverage = useCallback((coverage: SuggestedCoverage) => {
     const coverageCode = coverage.coverage_code;
     const coverageName = coverage.coverage_name || coverageCode;
     if (coverageCode) {
-      // STEP 3.9: 사용자가 담보를 선택하면 명시적으로 lock
-      setLockedCoverage({ code: coverageCode, name: coverageName });
+      // STEP 4.5: 사용자가 담보를 선택하면 명시적으로 lock (현재는 단일 선택, 추후 복수 지원)
+      setLockedCoverages([{ code: coverageCode, name: coverageName }]);
       setCoverageGuide(null);
 
-      console.log("[STEP 3.9] Coverage locked by user:", { code: coverageCode, name: coverageName });
+      console.log("[STEP 4.5] Coverage locked by user:", { code: coverageCode, name: coverageName });
 
       // STEP 3.7-δ-γ10: UI 선택된 insurers 사용 (기본값 하드코딩 금지)
       handleSendMessage({
@@ -346,13 +352,13 @@ function HomeContent() {
   }, [handleSendMessage, selectedInsurers]);
 
   // ===========================================================================
-  // STEP 3.9: UNLOCK 핸들러 (담보 변경 버튼)
+  // STEP 3.9 + 4.5: UNLOCK 핸들러 (담보 변경 버튼)
   // - 명시적 lock 해제
   // - 다음 질의에서 다시 UNRESOLVED 플로우로 진입
   // ===========================================================================
   const handleUnlockCoverage = useCallback(() => {
-    console.log("[STEP 3.9] Coverage unlocked by user");
-    setLockedCoverage(null);
+    console.log("[STEP 4.5] Coverage unlocked by user");
+    setLockedCoverages([]);
     setCurrentAnchor(null);
     setCoverageGuide(null);
     setCurrentResponse(null);
