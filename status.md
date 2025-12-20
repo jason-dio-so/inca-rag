@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.7-β: 단일 회사 특정 담보 조회 결과 생성 보장)
+> 최종 업데이트: 2025-12-20 (STEP 4.7-γ: Single-Insurer Locked Coverage E2E 검증 완료)
 
 ---
 
@@ -85,12 +85,41 @@
 | **STEP 4.6** | **멀티 Subtype 비교 UX 고도화 (소비 규약 고정)** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 4.7** | **Subtype Description Quality 강화 (4요소 규약)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.7-β** | **단일 회사 특정 담보 조회 결과 생성 보장** | **기능** | ✅ 완료 |
+| **STEP 4.7-γ** | **Single-Insurer Locked Coverage E2E 검증** | **검증** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.7-γ: Single-Insurer Locked Coverage E2E 검증 (2025-12-20)
+
+### 목적
+STEP 4.7-β 변경사항이 Docker 컨테이너(E2E)에서 정상 동작하는지 확인
+
+### 검증 결과
+
+**PASS**: 모든 검증 조건 충족
+
+| 기준 | 결과 | 상태 |
+|------|------|------|
+| `debug.anchor.coverage_locked == true` | true | ✅ |
+| `debug.anchor.locked_coverage_codes` | ["A4200_1"] | ✅ |
+| `coverage_compare_result[*].coverage_code` | ["A4200_1"] | ✅ |
+| `coverage_code != "__amount_fallback__"` | A4200_1 | ✅ |
+| `debug.retrieval.fallback_used` | true | ✅ |
+| `debug.retrieval.fallback_reason` | no_tagged_chunks_for_locked_code | ✅ |
+| `debug.retrieval.effective_locked_code` | A4200_1 | ✅ |
+
+### 이슈 및 해결
+- **초기 FAIL**: Docker 컨테이너에 최신 코드가 반영되지 않음
+- **해결**: `docker compose -f docker-compose.demo.yml build api --no-cache` 후 재테스트 PASS
+
+### 산출물
+- Audit 문서: `docs/audit/step_4_7_single_insurer_locked_audit_20251220.md`
+
+---
 
 ## STEP 4.7-β: 단일 회사 특정 담보 조회 결과 생성 보장 (2025-12-20)
 
