@@ -107,11 +107,33 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
       : "담보가 확정되면 비교 결과가 표시됩니다.";
 
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        <div className="text-center max-w-md">
-          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-          <p className="text-lg font-medium mb-2">{title}</p>
-          <p className="text-sm">{message}</p>
+      <div className="h-full flex flex-col">
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="text-center max-w-md">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+            <p className="text-lg font-medium mb-2">{title}</p>
+            <p className="text-sm">{message}</p>
+          </div>
+        </div>
+        {/* STEP 4.4: Contract Debug View (UNRESOLVED/INVALID 상태에서도 표시) */}
+        <div className="border-t p-3 bg-purple-50">
+          <h4 className="text-xs font-medium text-purple-800 mb-2">Contract Debug (STEP 4.4):</h4>
+          <div className="text-xs text-purple-700 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">resolution_state:</span>
+              <Badge variant="destructive" className="text-xs">
+                {resolutionState}
+              </Badge>
+            </div>
+            <div>
+              <span className="font-medium">coverage_resolution.status:</span>{" "}
+              {response.coverage_resolution?.status ?? "(null)"}
+            </div>
+            <div>
+              <span className="font-medium">suggested_coverages.length:</span>{" "}
+              {response.coverage_resolution?.suggested_coverages?.length ?? 0}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -276,6 +298,36 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           <CollapsibleContent>
             <ScrollArea className="h-[300px]">
               <div className="p-4 space-y-4">
+                {/* STEP 4.4: Contract Debug View */}
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-purple-800 mb-2">Contract Debug (STEP 4.4):</h4>
+                  <div className="text-xs text-purple-700 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">resolution_state:</span>
+                      <Badge variant={resolutionState === "RESOLVED" ? "default" : "destructive"} className="text-xs">
+                        {resolutionState}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="font-medium">coverage_resolution.status:</span>{" "}
+                      {response.coverage_resolution?.status ?? "(null)"}
+                    </div>
+                    <div>
+                      <span className="font-medium">suggested_coverages.length:</span>{" "}
+                      {response.coverage_resolution?.suggested_coverages?.length ?? 0}
+                    </div>
+                    {(() => {
+                      const debug = response.debug as Record<string, unknown> | undefined;
+                      const lockedCode = (debug as { locked_coverage_code?: string })?.locked_coverage_code;
+                      return lockedCode ? (
+                        <div>
+                          <span className="font-medium">locked_coverage_code:</span>{" "}
+                          <span className="text-green-700">{lockedCode}</span>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
                 {/* Evidence Count by Insurer */}
                 {(() => {
                   const compareAxis = response.compare_axis || [];
