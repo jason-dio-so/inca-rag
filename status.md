@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.3: API/Container Sync Audit 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.4: UI Contract Debug View 완료)
 
 ---
 
@@ -79,12 +79,41 @@
 | **STEP 4.1** | **다중 Subtype 비교 (경계성 종양/제자리암)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.2** | **DB 복구 안정화 (schema.sql 현행화 + Option A+)** | **DevOps/DB** | ✅ 완료 |
 | **STEP 4.3** | **API/Container Code Sync Audit** | **DevOps/검증** | ✅ 완료 |
+| **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+
+## STEP 4.4: UI Contract Debug View (2025-12-20)
+
+### 목적
+UI가 `coverage_resolution.suggested_coverages` 경로만 사용하는지 확인 및 개발용 디버그 뷰 추가
+
+### 확인 결과
+
+1. **UI Contract 검증**: 이미 올바르게 구현됨
+   - `types.ts`: `suggested_coverages`는 `CoverageResolution` 내부에만 존재
+   - `page.tsx:256-257`: `response.coverage_resolution?.suggested_coverages ?? []`
+   - `ResultsPanel.tsx:102-118`: `resolution_state !== "RESOLVED"`일 때 렌더링 차단
+
+2. **Contract Debug View 추가**: ResultsPanel에 보라색 테마의 디버그 패널
+   - 표시 항목: `resolution_state`, `coverage_resolution.status`, `suggested_coverages.length`, `locked_coverage_code`
+   - RESOLVED/UNRESOLVED/INVALID 모든 상태에서 표시
+
+3. **검증 시나리오 결과**: 3개 모두 PASS
+   | 시나리오 | 질의 | 결과 |
+   |----------|------|------|
+   | A | "다빈치 수술비 비교" | UNRESOLVED + 3개 후보 ✅ |
+   | B | "경계성 종양 보장 비교" | UNRESOLVED + 2개 후보 ✅ |
+   | C | "피자 추천" | INVALID + 0개 후보 ✅ |
+
+### 관련 커밋
+- `4cd249d`: feat: STEP 4.4 Contract Debug View for UI suggested_coverages
+
+---
 
 ## STEP 4.3: API/Container Code Sync Audit (2025-12-20)
 
