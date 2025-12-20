@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (BUGFIX+REFACTOR: normalize_query_for_coverage 헌법 준수)
+> 최종 업데이트: 2025-12-20 (STEP 3.9: Anchor Persistence A/B/C/D verified)
 
 ---
 
@@ -73,7 +73,7 @@
 | **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
-| **STEP 3.9** | **Anchor Persistence / locked_coverage_code** | **기능** | ✅ 완료 |
+| **STEP 3.9** | **Anchor Persistence / explicit coverage lock** | **기능/UI** | ✅ 완료 (A/B/C/D verified) |
 | **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
 | **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
 
@@ -169,52 +169,60 @@
 
 ---
 
-## STEP 3.9: Anchor Persistence / locked_coverage_code (2025-12-20)
+## STEP 3.9: Anchor Persistence / Explicit Coverage Lock (2025-12-20)
 
 ### 목표
-- 담보가 RESOLVED된 후, 후속 질의에서 불필요한 coverage re-resolution 방지
-- `locked_coverage_code` 필드를 통해 backend에서 resolver 스킵
-- 담보 언급 유무에 따른 intelligent anchor persistence
+- 대표 담보가 한 번 확정되면 모든 재질의에서 anchor 고정
+- 사용자가 명시적으로 "담보 변경" 버튼을 누르기 전까지 lock 유지
+- insurers와 coverage가 절대 흔들리지 않도록 보장
 
-### 시나리오
+### 검증 시나리오 (A/B/C/D 모두 PASS)
 
-| 시나리오 | 설명 | 동작 |
-|----------|------|------|
-| A | 후속 질의에 담보 언급 없음 | locked_coverage_code 전달 → RESOLVED 유지 |
-| B | 후속 질의에 동일 담보 언급 | locked_coverage_code 전달 → RESOLVED 유지 |
-| C | 후속 질의에 다른 담보 언급 | anchor 리셋 → 재분석 |
-| D | 새 담보 질의 | anchor 리셋 → 신규 분석 |
+| 시나리오 | 입력 | 기대 결과 | 상태 |
+|----------|------|----------|------|
+| A | `다빈치 수술비` → 후보 선택 | 🔒 lock UI 표시, locked_coverage_code=A9630_1 | ✅ |
+| B | `삼성과 현대의 다빈치로봇암 수술비 비교` | lock 유지, RESOLVED | ✅ |
+| C | `현대랑 삼성 다빈치 수술비 알려줘` | anchor 유지 | ✅ |
+| D | Evidence/Diff/Slots 탭 전환 | anchor/insurers 불변 | ✅ |
+
+### Backend 검증
+
+```bash
+curl -s http://localhost:8000/compare -H "Content-Type: application/json" \
+  -d '{"query":"삼성과 현대의 다빈치로봇암 수술비 비교","insurers":["SAMSUNG","HYUNDAI"],"locked_coverage_code":"A9630_1"}'
+
+# 결과:
+resolution_state: RESOLVED
+primary_coverage_code: A9630_1
+recommended (debug): []  # 재추천 없음
+anchor: coverage_code=A9630_1 유지
+```
 
 ### 구현
 
-**Backend (api/compare.py)**:
-- `locked_coverage_code` 필드를 CompareRequest에 추가
-- `locked_coverage_code`가 있으면 coverage resolver 스킵
-- resolution 평가도 스킵 (항상 RESOLVED)
+**Frontend (page.tsx)**:
+- `lockedCoverage` state 추가 (code, name)
+- `handleSelectCoverage`에서 lock 설정
+- `handleUnlockCoverage`로 명시적 unlock
+- `handleSendMessage`에서 lockedCoverage 있으면 항상 locked_coverage_code 전달
 
-**Frontend**:
-- `shouldLockCoverage()` 함수로 lock 여부 결정
-- `hasCoverageKeyword()`, `mentionsCurrentCoverage()` 헬퍼 함수 추가
-- request에 `locked_coverage_code` 자동 포함
+**Frontend (ChatPanel.tsx)**:
+- 🔒 lock UI 표시 (amber 배경 + "담보 변경" 버튼)
+- props: lockedCoverage, onUnlockCoverage 추가
+
+**Backend**:
+- `locked_coverage_code`가 있으면 coverage resolver 완전 스킵
+- resolution_state 항상 RESOLVED
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `api/compare.py` | CompareRequest에 locked_coverage_code 추가, resolver 스킵 로직 |
-| `apps/web/src/lib/types.ts` | CompareRequestWithIntent에 locked_coverage_code 추가 |
-| `apps/web/src/lib/resolution-lock.config.ts` | shouldLockCoverage, hasCoverageKeyword, mentionsCurrentCoverage 추가 |
-| `apps/web/src/lib/api.ts` | locked_coverage_code 전송 로직 추가 |
-| `apps/web/src/app/page.tsx` | handleSendMessage에 anchor persistence 로직 추가 |
+| `apps/web/src/app/page.tsx` | lockedCoverage state, handleUnlockCoverage 추가 |
+| `apps/web/src/components/ChatPanel.tsx` | 🔒 lock UI + UNLOCK 버튼 |
 
-### 테스트 결과
-
-```
-Scenario A (no coverage mention + lock): RESOLVED ✅
-Scenario B (same coverage mention + lock): RESOLVED ✅
-Scenario C (different coverage, no lock): UNRESOLVED ✅
-Scenario D (new coverage, no lock): UNRESOLVED ✅
-```
+### 커밋
+- `7a4ee05`: feat: STEP 3.9 Anchor Persistence with explicit coverage lock
 
 ---
 
