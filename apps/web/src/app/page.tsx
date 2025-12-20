@@ -28,8 +28,9 @@ import Image from "next/image";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
+import { SingleCoverageDetailView, determineUIMode } from "@/components/SingleCoverageDetailView";
 import { compare } from "@/lib/api";
-import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor, SuggestedCoverage } from "@/lib/types";
+import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, CompareResponseWithSubtype, QueryAnchor, SuggestedCoverage } from "@/lib/types";
 import { ViewProvider, useViewContext } from "@/contexts/ViewContext";
 import {
   CoverageGuideState,
@@ -395,6 +396,33 @@ function HomeContent() {
   // ===========================================================================
   const memoizedResponse = useMemo(() => currentResponse, [currentResponse]);
 
+  // ===========================================================================
+  // STEP 4.9: UI Mode 결정 (SINGLE_DETAIL / COMPARE / GUIDE)
+  // 정답 경로: debug.anchor.coverage_locked, debug.anchor.locked_coverage_codes
+  // ===========================================================================
+  const uiMode = useMemo(
+    () => determineUIMode(selectedInsurers, memoizedResponse as CompareResponseWithSubtype | null),
+    [selectedInsurers, memoizedResponse]
+  );
+
+  // STEP 4.9: 단일 상세 뷰에서 필요한 정보 추출
+  const singleDetailInfo = useMemo(() => {
+    if (uiMode !== "SINGLE_DETAIL" || !memoizedResponse) return null;
+
+    const debug = memoizedResponse.debug as Record<string, unknown> | undefined;
+    const anchor = debug?.anchor as {
+      locked_coverage_codes?: string[];
+    } | undefined;
+    const lockedCode = anchor?.locked_coverage_codes?.[0] || lockedCoverages[0]?.code;
+    const lockedName = lockedCoverages[0]?.name;
+
+    return {
+      insurerCode: selectedInsurers[0],
+      coverageCode: lockedCode,
+      coverageName: lockedName,
+    };
+  }, [uiMode, memoizedResponse, selectedInsurers, lockedCoverages]);
+
   return (
     <div className="flex h-screen bg-background">
       {/* Deep-link URL 파라미터 처리 (STEP 3.8: View State만 변경) */}
@@ -441,12 +469,25 @@ function HomeContent() {
       </div>
 
       {/* Right: Results Panel (Query State 표시, View State 격리) */}
+      {/* STEP 4.9: UI Mode에 따라 다른 뷰 렌더링 */}
       <div className="w-1/2 flex flex-col">
         <header className="p-4 border-b">
-          <h2 className="text-lg font-semibold">비교 결과</h2>
+          <h2 className="text-lg font-semibold">
+            {uiMode === "SINGLE_DETAIL" ? "담보 상세" : "비교 결과"}
+          </h2>
         </header>
         <div className="flex-1 overflow-hidden">
-          <ResultsPanel response={memoizedResponse} />
+          {uiMode === "SINGLE_DETAIL" && singleDetailInfo && memoizedResponse ? (
+            <SingleCoverageDetailView
+              response={memoizedResponse as CompareResponseWithSubtype}
+              insurerCode={singleDetailInfo.insurerCode}
+              coverageCode={singleDetailInfo.coverageCode || ""}
+              coverageName={singleDetailInfo.coverageName}
+              onUnlock={handleUnlockCoverage}
+            />
+          ) : (
+            <ResultsPanel response={memoizedResponse} />
+          )}
         </div>
       </div>
     </div>

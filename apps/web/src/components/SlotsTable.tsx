@@ -51,6 +51,8 @@ interface ComparisonSlot {
 
 interface SlotsTableProps {
   slots: ComparisonSlot[];
+  /** STEP 4.9: 단일 보험사만 표시할 때 해당 insurer_code 전달 */
+  singleInsurer?: string;
 }
 
 const INSURER_NAMES: Record<string, string> = {
@@ -179,7 +181,7 @@ function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
   );
 }
 
-export function SlotsTable({ slots }: SlotsTableProps) {
+export function SlotsTable({ slots, singleInsurer }: SlotsTableProps) {
   if (!slots || slots.length === 0) {
     return (
       <div className="text-center text-muted-foreground py-8">
@@ -189,11 +191,19 @@ export function SlotsTable({ slots }: SlotsTableProps) {
   }
 
   // Get unique insurers from slots
-  const insurers = slots[0]?.insurers.map((iv) => iv.insurer_code) || [];
+  // STEP 4.9: singleInsurer가 지정되면 해당 insurer만 표시
+  const allInsurers = slots[0]?.insurers.map((iv) => iv.insurer_code) || [];
+  const insurers = singleInsurer
+    ? allInsurers.filter((ic) => ic === singleInsurer)
+    : allInsurers;
 
   // Separate comparable and non-comparable slots
   const comparableSlots = slots.filter((s) => s.comparable);
   const definitionSlots = slots.filter((s) => !s.comparable);
+
+  // STEP 4.9: singleInsurer일 때 slot.insurers 필터링 헬퍼
+  const filterInsurers = (ivList: SlotInsurerValue[]) =>
+    singleInsurer ? ivList.filter((iv) => iv.insurer_code === singleInsurer) : ivList;
 
   return (
     <div className="space-y-6">
@@ -218,21 +228,27 @@ export function SlotsTable({ slots }: SlotsTableProps) {
                       {INSURER_NAMES[ic] || ic}
                     </TableHead>
                   ))}
-                  <TableHead className="w-[200px]">차이 요약</TableHead>
+                  {/* STEP 4.9: 단일 보험사에서는 diff_summary 열 불필요 */}
+                  {!singleInsurer && (
+                    <TableHead className="w-[200px]">차이 요약</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {comparableSlots.map((slot) => (
                   <TableRow key={slot.slot_key}>
                     <TableCell className="font-medium">{slot.label}</TableCell>
-                    {slot.insurers.map((iv) => (
+                    {filterInsurers(slot.insurers).map((iv) => (
                       <TableCell key={iv.insurer_code} className="text-center">
                         <SlotValueCell iv={iv} />
                       </TableCell>
                     ))}
-                    <TableCell className="text-xs text-muted-foreground">
-                      {slot.diff_summary || "-"}
-                    </TableCell>
+                    {/* STEP 4.9: 단일 보험사에서는 diff_summary 불필요 */}
+                    {!singleInsurer && (
+                      <TableCell className="text-xs text-muted-foreground">
+                        {slot.diff_summary || "-"}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -261,7 +277,7 @@ export function SlotsTable({ slots }: SlotsTableProps) {
                     {slot.label}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {slot.insurers.map((iv) => (
+                    {filterInsurers(slot.insurers).map((iv) => (
                       <div
                         key={iv.insurer_code}
                         className="p-3 bg-muted/50 rounded-lg"

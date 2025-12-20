@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.7-γ: Single-Insurer Locked Coverage E2E 검증 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.9: Single-Insurer Locked Coverage Detail View)
 
 ---
 
@@ -86,12 +86,52 @@
 | **STEP 4.7** | **Subtype Description Quality 강화 (4요소 규약)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.7-β** | **단일 회사 특정 담보 조회 결과 생성 보장** | **기능** | ✅ 완료 |
 | **STEP 4.7-γ** | **Single-Insurer Locked Coverage E2E 검증** | **검증** | ✅ 완료 |
+| **STEP 4.9** | **Single-Insurer Locked Coverage Detail View** | **UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.9: Single-Insurer Locked Coverage Detail View (2025-12-20)
+
+### 목적
+단일 보험사 + 특정 담보 고정(locked_coverage_codes) 시 전용 상세 뷰로 전환
+
+### 전환 조건 (Contract)
+```
+selectedInsurers.length == 1
+AND debug.anchor.coverage_locked == true
+AND debug.anchor.locked_coverage_codes.length >= 1
+```
+
+### 검증 결과
+
+| 시나리오 | 조건 | 기대 UI Mode | 결과 |
+|---------|------|--------------|------|
+| A | 단일 insurer, UNRESOLVED | GUIDE | ✅ PASS |
+| B | 단일 insurer + locked | SINGLE_DETAIL | ✅ PASS |
+| C | 2개 insurer + locked | COMPARE | ✅ PASS |
+
+### 구현 내용
+1. **SingleCoverageDetailView 컴포넌트**: 단일 보험사 전용 상세 화면
+2. **determineUIMode 함수**: UI 모드 결정 (SINGLE_DETAIL / COMPARE / GUIDE)
+3. **금액 표시**: best_evidence 기반만 사용 (resolved_amount 생성 금지)
+4. **SlotsTable**: singleInsurer prop 추가로 단일 보험사 필터링
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/components/SingleCoverageDetailView.tsx` | 신규 - 상세 뷰 컴포넌트 |
+| `apps/web/src/components/SlotsTable.tsx` | singleInsurer prop 추가 |
+| `apps/web/src/app/page.tsx` | UI Mode 분기 로직 |
+
+### 산출물
+- Audit 문서: `docs/audit/step_4_9_single_insurer_ui_detail_view_20251220.md`
+
+---
 
 ## STEP 4.7-γ: Single-Insurer Locked Coverage E2E 검증 (2025-12-20)
 
