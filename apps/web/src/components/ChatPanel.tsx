@@ -52,8 +52,10 @@ interface ChatPanelProps {
   isLoading: boolean;
   /** STEP 3.7-γ: Coverage Guide State (UI State) */
   coverageGuide?: CoverageGuideState | null;
-  /** STEP 3.7-γ: 담보 선택 핸들러 */
+  /** STEP 3.7-γ: 담보 선택 핸들러 (단일) */
   onSelectCoverage?: (coverage: SuggestedCoverage) => void;
+  /** STEP 4.5-β: 담보 선택 핸들러 (복수) */
+  onSelectCoverages?: (coverages: SuggestedCoverage[]) => void;
   /** STEP 3.7-δ-γ10: Lifted insurer selection state */
   selectedInsurers: string[];
   onInsurersChange: (insurers: string[]) => void;
@@ -69,6 +71,7 @@ export function ChatPanel({
   isLoading,
   coverageGuide,
   onSelectCoverage,
+  onSelectCoverages,
   selectedInsurers,
   onInsurersChange,
   lockedCoverage,
@@ -196,11 +199,12 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* STEP 3.7-γ: Coverage Guide Panel (UI State, NOT Chat State) */}
-            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재 */}
+            {/* STEP 3.7-γ + 4.5-β: Coverage Guide Panel (UI State, NOT Chat State) */}
+            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재, 복수 선택 가능 */}
             <CoverageGuidePanel
               guide={coverageGuide ?? null}
               onSelectCoverage={onSelectCoverage}
+              onSelectCoverages={onSelectCoverages}
             />
           </div>
         </ScrollArea>

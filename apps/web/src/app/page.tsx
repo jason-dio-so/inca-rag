@@ -335,7 +335,7 @@ function HomeContent() {
     const coverageCode = coverage.coverage_code;
     const coverageName = coverage.coverage_name || coverageCode;
     if (coverageCode) {
-      // STEP 4.5: 사용자가 담보를 선택하면 명시적으로 lock (현재는 단일 선택, 추후 복수 지원)
+      // STEP 4.5: 사용자가 담보를 선택하면 명시적으로 lock
       setLockedCoverages([{ code: coverageCode, name: coverageName }]);
       setCoverageGuide(null);
 
@@ -349,6 +349,32 @@ function HomeContent() {
         top_k_per_insurer: 5,
       });
     }
+  }, [handleSendMessage, selectedInsurers]);
+
+  // ===========================================================================
+  // STEP 4.5-β: 복수 담보 선택 핸들러 (멀티 subtype 비교)
+  // ===========================================================================
+  const handleSelectCoverages = useCallback((coverages: SuggestedCoverage[]) => {
+    if (coverages.length === 0) return;
+
+    const lockedItems = coverages.map(c => ({
+      code: c.coverage_code,
+      name: c.coverage_name || c.coverage_code,
+    }));
+    const codes = coverages.map(c => c.coverage_code);
+    const names = coverages.map(c => c.coverage_name || c.coverage_code).join(", ");
+
+    setLockedCoverages(lockedItems);
+    setCoverageGuide(null);
+
+    console.log("[STEP 4.5-β] Multiple coverages locked by user:", lockedItems);
+
+    handleSendMessage({
+      query: names,
+      insurers: selectedInsurers,
+      coverage_codes: codes,
+      top_k_per_insurer: 5,
+    });
   }, [handleSendMessage, selectedInsurers]);
 
   // ===========================================================================
@@ -405,6 +431,7 @@ function HomeContent() {
             isLoading={isLoading}
             coverageGuide={coverageGuide}
             onSelectCoverage={handleSelectCoverage}
+            onSelectCoverages={handleSelectCoverages}
             selectedInsurers={selectedInsurers}
             onInsurersChange={setSelectedInsurers}
             lockedCoverage={lockedCoverage}
