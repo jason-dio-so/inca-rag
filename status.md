@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (BUGFIX: normalize_query_for_coverage)
+> 최종 업데이트: 2025-12-20 (BUGFIX+REFACTOR: normalize_query_for_coverage 헌법 준수)
 
 ---
 
@@ -75,7 +75,7 @@
 | **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
 | **STEP 3.9** | **Anchor Persistence / locked_coverage_code** | **기능** | ✅ 완료 |
 | **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
-| **BUGFIX** | **normalize_query_for_coverage 보험사명/의도표현 제거** | **버그수정** | ✅ 완료 |
+| **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
 
 ---
 
@@ -126,19 +126,28 @@
 
 ---
 
-## BUGFIX: normalize_query_for_coverage 보험사명/의도표현 제거 (2025-12-20)
+## BUGFIX + REFACTOR: normalize_query_for_coverage 헌법 준수 리팩터링 (2025-12-20)
 
 ### 문제
 - 질의: "삼성과 현대 다빈치 수술비를 비교해줘"
 - 증상: `resolution_state: INVALID`, `recommended_coverage_codes: []`
 - 원인: `normalize_query_for_coverage()`가 보험사명을 제거하지 않아 pg_trgm similarity가 낮음
 
-### 해결
-`services/retrieval/compare_service.py`의 `normalize_query_for_coverage()` 수정:
-1. `config/mappings/insurer_alias.yaml`에서 보험사 alias 로드 (긴 것부터)
-2. 보험사명 제거: "삼성과 현대 다빈치 수술비를 비교해줘" → "다빈치 수술비를 비교해줘"
-3. 의도 표현 제거: "비교해줘", "알려줘", "찾아줘" 등
-4. 끝 조사 제거: "를", "을", "의", "에"
+### 1차 수정 (c98ef9c)
+- 보험사명 제거 기능 추가
+- 의도 표현/조사 제거 기능 추가
+- **문제**: 하드코딩 fallback 리스트 존재 (헌법 위반)
+
+### 2차 리팩터링 (헌법 준수)
+`services/retrieval/compare_service.py` 재수정:
+1. **하드코딩 fallback 제거**: `_load_insurer_aliases()`에서 하드코딩 리스트 제거
+2. **설정 파일 외부화**: `config/rules/query_normalization.yaml` 신규 생성
+   - `intent_suffixes`: 의도 표현 suffix 목록
+   - `trailing_particles_pattern`: 끝 조사 정규식
+   - `intermediate_particles`: 중간 조사 정규식
+   - `punctuation_pattern`: 특수문자 정규식
+3. **SSOT 유지**: 보험사 alias는 `config/mappings/insurer_alias.yaml`만 사용
+4. **회귀 테스트 추가**: `tests/test_query_normalization.py` (9개 테스트)
 
 ### 결과
 | 질의 | Before | After |
@@ -147,8 +156,16 @@
 | "삼성 암진단비" | "삼성 암진단비" | "암진단비" |
 | "메리츠 뇌졸중진단비 알려줘" | "메리츠 뇌졸중진단비 알려줘" | "뇌졸중진단비" |
 
+### 파일 변경
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | 하드코딩 제거, YAML 로드 방식으로 변경 |
+| `config/rules/query_normalization.yaml` | 신규 - 정규화 규칙 설정 파일 |
+| `tests/test_query_normalization.py` | 신규 - 9개 회귀 테스트 |
+
 ### 커밋
 - `c98ef9c`: fix: normalize_query_for_coverage strips insurer names and intent suffixes
+- `941ab2a`: refactor: move query normalization rules to config and remove hardcoding
 
 ---
 
