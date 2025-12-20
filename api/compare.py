@@ -666,25 +666,55 @@ def _evaluate_coverage_resolution(
     # ==========================================================================
     confident_threshold = thresholds.get("confident", 0.5)
 
-    # similarity 정보 수집
-    best_similarity = 0.0
-    best_code = None
-    if coverage_recommendations:
-        for r in coverage_recommendations:
-            sim = r.get("similarity", 0.0)
-            if sim > best_similarity:
-                best_similarity = sim
-                best_code = r.get("coverage_code")
+    # similarity 정보 수집 (1위, 2위 - 서로 다른 coverage_code 기준)
+    sorted_recommendations = sorted(
+        coverage_recommendations or [],
+        key=lambda x: x.get("similarity", 0),
+        reverse=True
+    )
+
+    best_similarity = sorted_recommendations[0].get("similarity", 0.0) if sorted_recommendations else 0.0
+    best_code = sorted_recommendations[0].get("coverage_code") if sorted_recommendations else None
+
+    # 2위 찾기: 1위와 다른 coverage_code 중 가장 높은 similarity
+    second_similarity = 0.0
+    second_code = None
+    for r in sorted_recommendations[1:]:
+        if r.get("coverage_code") != best_code:
+            second_similarity = r.get("similarity", 0.0)
+            second_code = r.get("coverage_code")
+            break
+
+    similarity_gap = best_similarity - second_similarity
 
     debug_info["best_similarity"] = best_similarity
     debug_info["best_code"] = best_code
+    debug_info["second_similarity"] = second_similarity
+    debug_info["second_code"] = second_code
+    debug_info["similarity_gap"] = similarity_gap
 
-    # RESOLVED 조건: candidates == 1 && similarity >= confident
-    if num_candidates == 1 and best_similarity >= confident_threshold:
-        resolved_code = resolved_coverage_codes[0] if resolved_coverage_codes else None
+    # RESOLVED 조건 (완화):
+    # 1) candidates == 1 && similarity >= confident
+    # 2) best_similarity >= confident && gap >= 0.15 (1위가 압도적)
+    # 3) best_similarity >= 0.9 (완벽 매칭에 가까움)
+    gap_threshold = 0.15
+    perfect_match_threshold = 0.9
+    is_single_confident = num_candidates == 1 and best_similarity >= confident_threshold
+    is_gap_confident = best_similarity >= confident_threshold and similarity_gap >= gap_threshold
+    is_perfect_match = best_similarity >= perfect_match_threshold
+
+    if is_single_confident or is_gap_confident or is_perfect_match:
+        resolved_code = best_code
+
+        if is_single_confident:
+            reason = "single_candidate_confident"
+        elif is_perfect_match:
+            reason = "perfect_match"
+        else:
+            reason = "gap_confident"
 
         debug_info["status"] = "RESOLVED"
-        debug_info["reason"] = "single_candidate_confident"
+        debug_info["reason"] = reason
 
         return CoverageResolutionResponse(
             status="RESOLVED",
