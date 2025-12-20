@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.9: Anchor Persistence A/B/C/D verified)
+> 최종 업데이트: 2025-12-20 (STEP 4.1: 다중 Subtype 비교 완료)
 
 ---
 
@@ -76,12 +76,85 @@
 | **STEP 3.9** | **Anchor Persistence / explicit coverage lock** | **기능/UI** | ✅ 완료 (A/B/C/D verified) |
 | **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
 | **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
+| **STEP 4.1** | **다중 Subtype 비교 (경계성 종양/제자리암)** | **기능/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+
+## STEP 4.1: 다중 Subtype 비교 (경계성 종양/제자리암) (2025-12-20)
+
+### 목표
+- 경계성 종양, 제자리암 등 **질병 하위 개념(Subtype)**이 복수로 포함된 질의에 대해
+- **정의·포함 여부·조건 중심 비교** 제공 (금액 중심 비교가 아님)
+- 헌법 준수: 모든 Subtype 정의는 YAML 설정 파일에서 로드
+
+### 구현
+
+**1. 설정 파일**
+- `config/rules/subtype_slots.yaml`: Subtype 정의 SSOT
+  - BORDERLINE_TUMOR (경계성 종양)
+  - CIS_CARCINOMA (제자리암/상피내암)
+  - SIMILAR_CANCER (유사암)
+  - RECURRENT_CANCER (재진단암)
+  - STROKE (뇌졸중)
+  - CEREBROVASCULAR (뇌혈관질환)
+  - ISCHEMIC_HEART (허혈성심장질환)
+
+**2. Backend**
+- `services/extraction/subtype_extractor.py`: Subtype 추출 서비스
+  - `extract_subtypes_from_query()`: 질의에서 subtype 추출
+  - `is_multi_subtype_query()`: 복수 subtype 질의 판별
+  - `extract_subtype_comparison()`: 보험사별 비교 추출
+- `api/compare.py`: API 응답에 `subtype_comparison` 필드 추가
+
+**3. Frontend**
+- `apps/web/src/lib/types.ts`: SubtypeComparison 타입 추가
+- `apps/web/src/components/SubtypeComparePanel.tsx`: Subtype 비교 테이블 컴포넌트
+- `apps/web/src/components/ResultsPanel.tsx`: Subtype 탭 연동
+
+### API 응답 변경
+
+```typescript
+interface SubtypeComparison {
+  subtypes: string[];  // ["BORDERLINE_TUMOR", "CIS_CARCINOMA"]
+  comparison_items: SubtypeComparisonItem[];
+  is_multi_subtype: boolean;  // true
+}
+
+interface SubtypeComparisonItem {
+  subtype_code: string;
+  subtype_name: string;
+  info_type: string;  // definition, coverage, conditions
+  info_label: string;  // 정의, 보장 여부, 지급 조건
+  insurer_code: string;
+  value: string | null;
+  confidence: "high" | "medium" | "low" | "not_found";
+}
+```
+
+### 테스트
+- `tests/test_subtype_extractor.py`: 8개 유닛 테스트 (PASS)
+  - 단일/복수 subtype 추출
+  - Alias 매칭 (상피내암 → CIS_CARCINOMA)
+  - 도메인별 조회
+  - 설정 파일 로드 확인
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/subtype_slots.yaml` | 신규 - Subtype 정의 SSOT |
+| `services/extraction/subtype_extractor.py` | 신규 - Subtype 추출 서비스 |
+| `api/compare.py` | subtype_comparison 필드 추가 |
+| `apps/web/src/lib/types.ts` | SubtypeComparison 타입 추가 |
+| `apps/web/src/components/SubtypeComparePanel.tsx` | 신규 - 비교 테이블 컴포넌트 |
+| `apps/web/src/components/ResultsPanel.tsx` | Subtype 탭 연동 |
+| `tests/test_subtype_extractor.py` | 신규 - 8개 유닛 테스트 |
+
+---
 
 ## STEP 4.0: Diff Summary Text & Evidence Priority Ordering (2025-12-20)
 

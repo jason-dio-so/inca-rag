@@ -139,6 +139,35 @@ export interface CompareRequestWithIntent extends CompareRequest {
 }
 
 // =============================================================================
+// STEP 4.1: Subtype Comparison Types
+// =============================================================================
+
+export interface SubtypeComparisonItem {
+  subtype_code: string;
+  subtype_name: string;
+  info_type: string;  // definition, coverage, conditions
+  info_label: string;  // 정의, 보장 여부, 지급 조건
+  insurer_code: string;
+  value: string | null;
+  confidence: "high" | "medium" | "low" | "not_found";
+  evidence_ref?: {
+    document_id?: number | null;
+    page_start?: number | null;
+  } | null;
+}
+
+export interface SubtypeComparison {
+  subtypes: string[];
+  comparison_items: SubtypeComparisonItem[];
+  is_multi_subtype: boolean;
+}
+
+// Extend CompareResponseWithSlots to include subtype_comparison
+export type CompareResponseWithSubtype = CompareResponseWithSlots & {
+  subtype_comparison?: SubtypeComparison | null;
+};
+
+// =============================================================================
 // UI-Only Types (not from API)
 // =============================================================================
 

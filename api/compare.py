@@ -12,6 +12,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.retrieval.compare_service import compare, CompareResponse
+from services.extraction.subtype_extractor import (
+    extract_subtypes_from_query,
+    extract_subtype_comparison,
+    is_multi_subtype_query,
+    SubtypeComparisonResult,
+)
 from api.config_loader import (
     get_coverage_domains,
     get_domain_keywords,
@@ -261,6 +267,34 @@ class ComparisonSlotResponse(BaseModel):
     diff_summary: str | None = None  # 슬롯별 차이 요약
 
 
+# =============================================================================
+# STEP 4.1: Subtype Comparison Models
+# =============================================================================
+
+class SubtypeComparisonItemResponse(BaseModel):
+    """Subtype별 보험사 비교 항목"""
+    subtype_code: str
+    subtype_name: str
+    info_type: str  # definition, coverage, conditions
+    info_label: str  # 정의, 보장 여부, 지급 조건
+    insurer_code: str
+    value: str | None
+    confidence: Literal["high", "medium", "low", "not_found"] = "medium"
+    evidence_ref: dict | None = None
+
+
+class SubtypeComparisonResponse(BaseModel):
+    """
+    STEP 4.1: Subtype 비교 결과
+
+    경계성 종양, 제자리암 등 질병 하위 개념의
+    정의·포함 여부·조건 중심 비교 제공
+    """
+    subtypes: list[str] = []  # 추출된 subtype 코드 리스트
+    comparison_items: list[SubtypeComparisonItemResponse] = []
+    is_multi_subtype: bool = False  # 복수 subtype 비교 여부
+
+
 class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
     # STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
@@ -273,6 +307,8 @@ class CompareResponseModel(BaseModel):
     diff_summary: list[DiffSummaryItemResponse] | None = None
     # U-4.8: Comparison Slots
     slots: list[ComparisonSlotResponse] | None = None
+    # STEP 4.1: Subtype Comparison (경계성 종양, 제자리암 등)
+    subtype_comparison: SubtypeComparisonResponse | None = None
     # resolved_coverage_codes: 질의에서 자동 추론된 coverage_code 목록
     resolved_coverage_codes: list[str] | None = None
     # STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
@@ -1197,6 +1233,8 @@ def _convert_response(
     # STEP 3.7: Coverage Resolution
     coverage_resolution: CoverageResolutionResponse | None = None,
     resolution_debug: dict[str, Any] | None = None,
+    # STEP 4.1: Subtype Comparison
+    subtype_comparison: SubtypeComparisonResponse | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -1265,6 +1303,7 @@ def _convert_response(
             coverage_compare_result=None,
             diff_summary=None,
             slots=None,
+            subtype_comparison=None,  # STEP 4.1
             resolved_coverage_codes=result.resolved_coverage_codes,
             primary_coverage_code=None,
             primary_coverage_name=None,
@@ -1354,6 +1393,8 @@ def _convert_response(
         ],
         # U-4.8: Comparison Slots
         slots=converted_slots,
+        # STEP 4.1: Subtype Comparison
+        subtype_comparison=subtype_comparison,
         # resolved_coverage_codes: top-level 승격
         resolved_coverage_codes=result.resolved_coverage_codes,
         # STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
@@ -1481,6 +1522,44 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
                 coverage_recommendations=coverage_recommendations,
             )
 
+        # STEP 4.1: Subtype Comparison 추출 (다중 subtype 질의인 경우)
+        subtype_comparison_resp: SubtypeComparisonResponse | None = None
+        if is_multi_subtype_query(request.query):
+            # Evidence를 보험사별로 그룹화
+            evidence_by_insurer: dict[str, list] = {ic: [] for ic in final_insurers}
+            for item in result.compare_axis:
+                if item.insurer_code in evidence_by_insurer:
+                    evidence_by_insurer[item.insurer_code].extend(item.evidence)
+            for item in result.policy_axis:
+                if item.insurer_code in evidence_by_insurer:
+                    evidence_by_insurer[item.insurer_code].extend(item.evidence)
+
+            # Subtype 비교 추출
+            subtype_result = extract_subtype_comparison(
+                query=request.query,
+                evidence_by_insurer=evidence_by_insurer,
+                insurers=final_insurers,
+            )
+
+            # 결과를 API 응답 모델로 변환
+            subtype_comparison_resp = SubtypeComparisonResponse(
+                subtypes=subtype_result.subtypes,
+                comparison_items=[
+                    SubtypeComparisonItemResponse(
+                        subtype_code=item.subtype_code,
+                        subtype_name=item.subtype_name,
+                        info_type=item.info_type,
+                        info_label=item.info_label,
+                        insurer_code=item.insurer_code,
+                        value=item.value,
+                        confidence=item.confidence,
+                        evidence_ref=item.evidence_ref,
+                    )
+                    for item in subtype_result.comparison_items
+                ],
+                is_multi_subtype=subtype_result.is_multi_subtype,
+            )
+
         return _convert_response(
             result,
             final_insurers,
@@ -1495,6 +1574,8 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             # STEP 3.7: Coverage Resolution
             coverage_resolution=coverage_resolution,
             resolution_debug=resolution_debug,
+            # STEP 4.1: Subtype Comparison
+            subtype_comparison=subtype_comparison_resp,
         )
     except HTTPException:
         raise

@@ -26,11 +26,12 @@ import { CompareTable } from "./CompareTable";
 import { DiffSummary } from "./DiffSummary";
 import { EvidencePanel } from "./EvidencePanel";
 import { SlotsTable } from "./SlotsTable";
-import { CompareResponseWithSlots, CoverageCompareItem } from "@/lib/types";
+import { SubtypeComparePanel } from "./SubtypeComparePanel";
+import { CompareResponseWithSubtype, CoverageCompareItem } from "@/lib/types";
 import { ChevronDown, ChevronUp, Info, AlertCircle } from "lucide-react";
 
 interface ResultsPanelProps {
-  response: CompareResponseWithSlots | null;
+  response: CompareResponseWithSubtype | null;
 }
 
 export function ResultsPanel({ response }: ResultsPanelProps) {
@@ -170,6 +171,15 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           >
             Policy(약관)
           </TabsTrigger>
+          {/* STEP 4.1: Subtype Comparison Tab */}
+          {response.subtype_comparison?.is_multi_subtype && (
+            <TabsTrigger
+              value="subtype"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            >
+              Subtype
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <ScrollArea className="flex-1">
@@ -229,6 +239,20 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           <TabsContent value="policy" className="m-0 p-4">
             <EvidencePanel data={response.policy_axis} isPolicyMode={true} />
           </TabsContent>
+
+          {/* STEP 4.1: Subtype Comparison content */}
+          {response.subtype_comparison?.is_multi_subtype && (
+            <TabsContent value="subtype" className="m-0 p-4">
+              <SubtypeComparePanel
+                comparison={response.subtype_comparison}
+                insurers={
+                  response.compare_axis?.map((item) => item.insurer_code).filter(
+                    (v, i, a) => a.indexOf(v) === i
+                  ) || []
+                }
+              />
+            </TabsContent>
+          )}
         </ScrollArea>
       </Tabs>
 
