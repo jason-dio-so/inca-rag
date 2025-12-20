@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-γ)
+> 최종 업데이트: 2025-12-20 (STEP 4.5-β: 복수 담보 선택 UI 완료)
 
 ---
 
@@ -65,724 +65,442 @@
 | **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
 | **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
+| **STEP 3.9** | **Anchor Persistence / explicit coverage lock** | **기능/UI** | ✅ 완료 (A/B/C/D verified) |
+| **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
+| **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
+| **STEP 4.1** | **다중 Subtype 비교 (경계성 종양/제자리암)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.2** | **DB 복구 안정화 (schema.sql 현행화 + Option A+)** | **DevOps/DB** | ✅ 완료 |
+| **STEP 4.3** | **API/Container Code Sync Audit** | **DevOps/검증** | ✅ 완료 |
+| **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
+| **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
-> Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+> Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
 
-## STEP 2.8: 하드코딩 비즈니스 규칙 YAML 외부화 (2025-12-19)
+## STEP 4.5-β: 복수 담보 선택 UI (2025-12-20)
 
-### 목표
-- codebase 내 하드코딩된 비즈니스 규칙을 YAML 설정 파일로 외부화
-- 코드 수정 없이 설정 파일만으로 규칙 변경 가능
-- P0/P1/P2 분류 기반 체계적 외부화
+### 목적
+멀티 subtype 비교를 위해 복수 담보를 체크박스로 선택하고 한 번에 비교 실행
 
-### 분류 기준
+### 구현
 
-| 등급 | 정의 | 조치 |
-|------|------|------|
-| **P0** | 비즈니스 규칙 / 도메인 지식 | 즉시 YAML 외부화 |
-| **P1** | 품질 영향 키워드/패턴 | 권장 외부화 (향후) |
-| **P2** | 알고리즘/정규식 | 코드 유지 |
+**1. CoverageGuidePanel 개선**
+- 단일 클릭 버튼 → 체크박스 목록으로 변경
+- similarity 퍼센트 표시
+- "N개 담보로 비교" 적용 버튼 추가
+- `onSelectCoverages` 콜백 (복수 선택)
 
-### 외부화 완료 항목 (P0)
+**2. page.tsx**
+- `handleSelectCoverages`: 복수 담보 선택 핸들러
+- `lockedCoverages` 배열로 복수 담보 저장
 
-| 항목 | 원본 위치 | 대상 파일 |
-|------|----------|----------|
-| INSURER_ALIASES | api/compare.py | config/mappings/insurer_alias.yaml |
-| COMPARE_PATTERNS | api/compare.py | config/rules/compare_patterns.yaml |
-| POLICY_KEYWORD_PATTERNS | compare_service.py | config/mappings/policy_keyword_patterns.yaml |
-| DOC_TYPE_PRIORITY | compare_service.py | config/rules/doc_type_priority.yaml |
-| SLOT_SEARCH_KEYWORDS | compare_service.py | config/mappings/slot_search_keywords.yaml |
-| COVERAGE_CODE_GROUPS | compare_service.py | config/mappings/coverage_code_groups.yaml |
-| COVERAGE_CODE_TO_TYPE | slot_extractor.py | config/mappings/coverage_code_to_type.yaml |
+**3. Checkbox 컴포넌트**
+- `@radix-ui/react-checkbox` 설치
+- `ui/checkbox.tsx` 생성
 
-### 파일 변경
+### 검증 시나리오
 
-| 파일 | 변경 내용 |
-|------|----------|
-| `api/config_loader.py` | P0 로더 함수 7개 추가 |
-| `api/compare.py` | INSURER_ALIASES, COMPARE_PATTERNS → config loader |
-| `services/retrieval/compare_service.py` | POLICY_KEYWORD_PATTERNS 등 → config loader |
-| `services/extraction/slot_extractor.py` | _determine_coverage_type → config loader |
-| `config/mappings/*.yaml` | 신규 5개 파일 |
-| `config/rules/*.yaml` | 신규 2개 파일 |
-| `docs/hardcode_audit.md` | 전수 조사 + 분류 문서 |
+| 시나리오 | 입력 | 결과 |
+|----------|------|------|
+| 단일 선택 | `locked_coverage_codes: ["A4200_1"]` | `debug.anchor.coverage_locked: true` ✅ |
+| 복수 선택 | `locked_coverage_codes: ["A4200_1", "A4210"]` | `debug.anchor.coverage_locked: true` ✅ |
+
+**주의**: `coverage_locked` 정보는 `debug.anchor` 필드에 포함됨 (최상위가 아님)
+
+### 관련 커밋
+- `e90a928`: feat: STEP 4.5-β multi-select coverage UI with checkboxes
+
+---
+
+## STEP 4.5: locked_coverage_codes 확장 (2025-12-20)
+
+### 목적
+멀티 subtype 비교를 위해 `locked_coverage_code` (단일)을 `locked_coverage_codes` (복수)로 확장
+
+### 변경 사항
+
+**1. Backend (api/compare.py)**
+- `locked_coverage_codes: list[str] | None` 필드 추가
+- `locked_coverage_codes` 우선, `locked_coverage_code` fallback 처리
+- `anchor_debug.locked_coverage_codes` 배열로 표시
+
+**2. Frontend**
+- `types.ts`: `CompareRequestWithIntent.locked_coverage_codes` 추가
+- `page.tsx`: `lockedCoverage` → `lockedCoverages` (배열) 변경
+- `ResultsPanel.tsx`: Contract Debug에 `locked_coverage_codes` 표시
+
+### 하위 호환성
+- 기존 `locked_coverage_code` (단일)도 계속 지원
+- 복수 형태가 우선 적용됨
+
+### 관련 커밋
+- `d901d37`: feat: STEP 4.5 locked_coverage_codes for multi-subtype support
+
+---
+
+## STEP 4.4: UI Contract Debug View (2025-12-20)
+
+### 목적
+UI가 `coverage_resolution.suggested_coverages` 경로만 사용하는지 확인 및 개발용 디버그 뷰 추가
+
+### 확인 결과
+
+1. **UI Contract 검증**: 이미 올바르게 구현됨
+   - `types.ts`: `suggested_coverages`는 `CoverageResolution` 내부에만 존재
+   - `page.tsx:256-257`: `response.coverage_resolution?.suggested_coverages ?? []`
+   - `ResultsPanel.tsx:102-118`: `resolution_state !== "RESOLVED"`일 때 렌더링 차단
+
+2. **Contract Debug View 추가**: ResultsPanel에 보라색 테마의 디버그 패널
+   - 표시 항목: `resolution_state`, `coverage_resolution.status`, `suggested_coverages.length`, `locked_coverage_code`
+   - RESOLVED/UNRESOLVED/INVALID 모든 상태에서 표시
+
+3. **검증 시나리오 결과**: 3개 모두 PASS
+   | 시나리오 | 질의 | 결과 |
+   |----------|------|------|
+   | A | "다빈치 수술비 비교" | UNRESOLVED + 3개 후보 ✅ |
+   | B | "경계성 종양 보장 비교" | UNRESOLVED + 2개 후보 ✅ |
+   | C | "피자 추천" | INVALID + 0개 후보 ✅ |
+
+### 관련 커밋
+- `4cd249d`: feat: STEP 4.4 Contract Debug View for UI suggested_coverages
+
+---
+
+## STEP 4.3: API/Container Code Sync Audit (2025-12-20)
+
+### 목적
+STEP 4.2 DB 복구 후 API가 coverage 추천을 정상 반환하는지 검증
+
+### 확인 결과
+
+1. **컨테이너 코드 동기화**: 이미지 빌드 방식 (코드 마운트 없음)
+   - 컨테이너 내부 파일 = 로컬 파일 (2026 lines 일치)
+
+2. **표준 재빌드 명령**:
+   ```bash
+   docker compose -f docker-compose.demo.yml build api && \
+   docker compose -f docker-compose.demo.yml up -d api
+   ```
+
+3. **테스트 결과**: 4개 시나리오 모두 PASS
+   | 시나리오 | 질의 | 결과 |
+   |----------|------|------|
+   | A | "다빈치 수술비 비교" | UNRESOLVED + 3개 후보 ✅ |
+   | B | "삼성과 현대 다빈치 수술비를 비교해줘" | UNRESOLVED + 3개 후보 ✅ |
+   | C | "경계성 종양 보장 비교" | UNRESOLVED + 2개 후보 ✅ |
+   | D | "피자 추천" | INVALID ✅ |
+
+4. **초기 오진 원인**: 잘못된 필드 확인
+   - ❌ 최상위 `suggested_coverages` (존재하지 않음)
+   - ✅ `coverage_resolution.suggested_coverages` (정상 데이터 존재)
+
+### 결론
+- 코드 수정 불필요
+- API는 설계대로 정상 작동 중
+- 감사 리포트: `docs/audit/api_sync_report_20251220.md`
+
+### 관련 커밋
+- `b112f2a`: docs(audit): add api sync report verifying coverage suggestions work correctly
+
+---
+
+## STEP 4.2: DB 복구 안정화 (schema.sql 현행화 + Option A+) (2025-12-20)
+
+### 배경
+Docker crash 후 DB 재생성 시:
+- coverage_standard/coverage_alias가 수동 입력으로 잘못 적재됨
+- migrations 2건 (trgm 인덱스, comparison_slot_cache)이 미적용됨
+- 엑셀 기준 28개 표준코드 vs 6개 수동 입력 불일치
+
+### 수행 내용
+
+1. **schema.sql 현행화 (squash)**
+   - `idx_chunk_content_trgm`: chunk.content 전체 trigram 인덱스
+   - `idx_chunk_content_trgm_policy`: 약관 전용 부분 인덱스
+   - `idx_chunk_insurer_doctype`: 복합 검색 인덱스
+   - `comparison_slot_cache` 테이블 + 인덱스 + 트리거
+
+2. **Option A+ 스크립트 추가**
+   - 경로: `tools/reset_db_option_a_plus.sh`
+   - coverage_standard/coverage_alias TRUNCATE
+   - `담보명mapping자료.xlsx` 기반 적재 (28개 표준코드, 264개 alias)
+   - 누락 인덱스/테이블 자동 생성
+   - 검증: rowcount, extension, index, table
+
+3. **감사 리포트**
+   - `docs/audit/db_gap_report_20251220.md`
 
 ### 검증 결과
 
-```
-✅ pytest tests/test_extraction.py: 47 passed
-✅ Docker API rebuild & smoke test: healthy
-✅ /compare API 정상 응답 확인
-```
+| 항목 | 기대값 | 실제값 | 상태 |
+|------|--------|--------|------|
+| coverage_standard | 28 | 28 | ✅ |
+| coverage_alias | 264 | 264 | ✅ |
+| pg_trgm extension | 존재 | 존재 | ✅ |
+| trgm 인덱스 | 2+ | 2 | ✅ |
+| comparison_slot_cache | 존재 | 존재 | ✅ |
 
-### 완료 조건 충족 여부
+### 관련 커밋
+- `e31a53c`: chore(db): squash migrations into schema.sql
+- `637feec`: tools: add reset_db_option_a_plus for reproducible coverage reload
 
-| 조건 | 결과 |
-|------|------|
-| P0 전수 조사 | ✅ 7개 항목 분류 |
-| YAML 외부화 | ✅ 7개 파일 생성 |
-| config_loader 확장 | ✅ 7개 함수 추가 |
-| 기존 코드 import 교체 | ✅ 3개 파일 수정 |
-| 테스트 통과 | ✅ 47 passed |
-| 기능 회귀 없음 | ✅ API 정상 동작 |
+### 주의사항
+- API 컨테이너 재빌드 필요 시 `docker compose -f docker-compose.demo.yml build api`
+- 새 DB 생성 시 schema.sql만으로 전체 스키마 적용됨
+- coverage 데이터는 `tools/reset_db_option_a_plus.sh` 또는 `load_coverage_mapping.py`로 적재
 
 ---
 
-## STEP 2.9: Query Anchor / Context Locking (2025-12-19)
+## STEP 4.1: 다중 Subtype 비교 (경계성 종양/제자리암) (2025-12-20)
 
 ### 목표
-- 대화형 질의에서 기준 담보(coverage)와 질의 의도를 세션 단위로 고정
-- "메리츠는?", "그럼 삼성은?" 같은 후속 질의에서 이전 coverage context 유지
-- 모든 규칙을 YAML 설정 파일로 외부화
+- 경계성 종양, 제자리암 등 **질병 하위 개념(Subtype)**이 복수로 포함된 질의에 대해
+- **정의·포함 여부·조건 중심 비교** 제공 (금액 중심 비교가 아님)
+- 헌법 준수: 모든 Subtype 정의는 YAML 설정 파일에서 로드
+- **SUBTYPE_MULTI 상태 도입**: 멀티 Subtype 입력 시 Resolution Lock 금지
 
-### 핵심 개념
+### 핵심 규칙
 
-**Query Anchor:**
-```python
-class QueryAnchor(BaseModel):
-    coverage_code: str      # 대표 담보 코드 (예: A4200_1)
-    coverage_name: str | None  # 대표 담보 명칭 (예: 암진단비)
-    domain: str | None      # 담보 도메인 (CANCER, CARDIO 등)
-    original_query: str     # anchor 생성 시점의 원본 질의
-```
+1. **경계성 종양 / 제자리암은 단일 담보가 아니다**
+   - 두 개 모두 `암 subtype` 이며 하나의 coverage_code로 RESOLVED 하면 안 된다
 
-**후속 질의 유형:**
-| 유형 | 설명 | 처리 |
-|------|------|------|
-| `new` | 신규 질의 (anchor 없음 또는 coverage 키워드 포함) | 새 anchor 생성 |
-| `insurer_only` | insurer만 변경하는 후속 질의 | anchor.coverage_code 유지 |
+2. **멀티 subtype 입력 시 Resolution Lock 금지**
+   - `resolution_state = SUBTYPE_MULTI`
+   - `resolved_coverage_code = null`
+   - `locked_coverage_code = null`
+   - 담보 선택 UI 노출 금지
 
-### 구현 내용
+### 구현
 
-**1. 설정 파일 (`config/rules/query_anchor.yaml`):**
-```yaml
-# 후속 질의 판별용 coverage 키워드
-coverage_keywords:
-  - 암
-  - 암진단
-  - 뇌졸중
-  - 수술비
-  # ... 39개 키워드
+**1. 설정 파일**
+- `config/rules/subtype_slots.yaml`: Subtype 정의 SSOT
+  - BORDERLINE_TUMOR (경계성 종양)
+  - CIS_CARCINOMA (제자리암/상피내암)
+  - SIMILAR_CANCER (유사암)
+  - RECURRENT_CANCER (재진단암)
+  - STROKE (뇌졸중)
+  - CEREBROVASCULAR (뇌혈관질환)
+  - ISCHEMIC_HEART (허혈성심장질환)
 
-# insurer-only 후속 질의 패턴
-insurer_only_patterns:
-  - "은?"
-  - "는?"
-  - "그럼"
-  # ... 13개 패턴
+**2. Backend**
+- `services/extraction/subtype_extractor.py`: Subtype 추출 서비스
+  - `extract_subtypes_from_query()`: 질의에서 subtype 추출
+  - `is_multi_subtype_query()`: 복수 subtype 질의 판별
+  - `extract_subtype_comparison()`: 보험사별 비교 추출
+- `api/compare.py`:
+  - `resolution_state`에 `SUBTYPE_MULTI` 추가 (line 227, 304)
+  - 멀티 Subtype 감지 시 SUBTYPE_MULTI 상태 강제 (line 1552-1616)
+  - SUBTYPE_MULTI 상태 특별 처리 (line 1327-1371)
 
-# intent 확장 키워드 (anchor 유지 + intent만 확장)
-intent_extension_keywords:
-  comparison: [비교, 대비, vs, 차이]
-  condition: [조건, 지급조건, 면책, 대기기간]
-  # ... 추가 그룹
-```
+**3. Frontend**
+- `apps/web/src/lib/types.ts`: SubtypeComparison 타입 추가
+- `apps/web/src/components/SubtypeComparePanel.tsx`: Subtype 비교 테이블 컴포넌트
+- `apps/web/src/components/ResultsPanel.tsx`: Subtype 탭 연동
 
-**2. API 변경:**
+### API 응답 변경
 
-요청 (CompareRequest):
-```json
-{
-  "insurers": ["MERITZ"],
-  "query": "메리츠는?",
-  "anchor": {
-    "coverage_code": "A4200_1",
-    "coverage_name": "암진단비",
-    "domain": "CANCER",
-    "original_query": "삼성 암진단비 알려줘"
-  }
+```typescript
+interface SubtypeComparison {
+  subtypes: string[];  // ["BORDERLINE_TUMOR", "CIS_CARCINOMA"]
+  comparison_items: SubtypeComparisonItem[];
+  is_multi_subtype: boolean;  // true
+}
+
+interface SubtypeComparisonItem {
+  subtype_code: string;
+  subtype_name: string;
+  info_type: string;  // definition, coverage, conditions
+  info_label: string;  // 정의, 보장 여부, 지급 조건
+  insurer_code: string;
+  value: string | null;
+  confidence: "high" | "medium" | "low" | "not_found";
 }
 ```
 
-응답 (CompareResponse):
-```json
-{
-  "anchor": {
-    "coverage_code": "A4200_1",
-    "coverage_name": "암진단비",
-    "domain": "CANCER",
-    "original_query": "삼성 암진단비 알려줘"
-  },
-  "debug": {
-    "anchor": {
-      "query_type": "insurer_only",
-      "has_anchor": true,
-      "has_coverage_keyword": false,
-      "extracted_insurers": ["MERITZ"],
-      "restored_from_anchor": true,
-      "anchor_coverage_code": "A4200_1"
-    }
-  }
-}
-```
+### 검증 시나리오
 
-**3. 후속 질의 판별 로직:**
-```python
-def _detect_follow_up_query_type(query: str, anchor: QueryAnchor | None) -> tuple[str, dict]:
-    # 1. anchor 없으면 → "new"
-    # 2. coverage 키워드 있으면 → "new" (anchor 재설정)
-    # 3. insurer 키워드만 있으면 → "insurer_only"
-    # 4. 그 외 → "new" (안전한 기본값)
-```
+| 시나리오 | 입력 | 기대 결과 | 상태 |
+|---------|------|----------|------|
+| A | "경계성 종양과 제자리암을 삼성과 메리츠로 비교해줘" | `SUBTYPE_MULTI`, subtypes=2개 | ✅ PASS |
+| B | "제자리암, 경계성 종양 차이 알려줘" | `SUBTYPE_MULTI`, subtypes=2개 | ✅ PASS |
+| 단일 | "경계성 종양 보장 비교" | `RESOLVED` (A4210) | ✅ PASS |
+
+### 테스트
+- `tests/test_subtype_extractor.py`: 8개 유닛 테스트 (PASS)
+  - 단일/복수 subtype 추출
+  - Alias 매칭 (상피내암 → CIS_CARCINOMA)
+  - 도메인별 조회
+  - 설정 파일 로드 확인
+
+### 커밋
+- `e4bd059`: feat: STEP 4.1 multi-subtype comparison (borderline + in-situ)
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `config/rules/query_anchor.yaml` | 신규 생성 (coverage_keywords, insurer_only_patterns) |
-| `api/config_loader.py` | +29 lines: get_query_anchor_config, get_coverage_keywords 등 |
-| `api/compare.py` | +140 lines: QueryAnchor 모델, 후속 질의 판별, anchor 반환 |
-| `tests/test_query_anchor.py` | 신규 생성 (21개 테스트) |
-
-### 검증 시나리오
-
-| # | 질의 | anchor 상태 | query_type | 결과 |
-|---|------|-------------|------------|------|
-| 1 | "DB손해보험 암진단비 알려줘" | 없음 | new | anchor 생성 (암진단비) |
-| 2 | "메리츠는?" | 암진단비 | insurer_only | anchor 유지, MERITZ 검색 |
-| 3 | "그럼 삼성은?" | 암진단비 | insurer_only | anchor 유지, SAMSUNG 검색 |
-| 4 | "유사암은?" | 암진단비 | new | anchor 재설정 (유사암) |
-
-### 검증 결과
-
-```
-✅ pytest tests/test_query_anchor.py: 21 passed
-✅ pytest tests/test_compare_api.py: 57 passed
-✅ API 스모크 테스트: 정상 동작
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| QueryAnchor 모델 정의 | ✅ 완료 |
-| 후속 질의 판별 로직 | ✅ 완료 |
-| API anchor 파라미터 | ✅ request/response 추가 |
-| YAML 외부화 | ✅ query_anchor.yaml |
-| 테스트 작성 | ✅ 21개 테스트 |
-| 기능 회귀 없음 | ✅ 57개 기존 테스트 통과 |
+| `config/rules/subtype_slots.yaml` | 신규 - Subtype 정의 SSOT |
+| `services/extraction/subtype_extractor.py` | 신규 - Subtype 추출 서비스 |
+| `api/compare.py` | subtype_comparison 필드 추가 |
+| `apps/web/src/lib/types.ts` | SubtypeComparison 타입 추가 |
+| `apps/web/src/components/SubtypeComparePanel.tsx` | 신규 - 비교 테이블 컴포넌트 |
+| `apps/web/src/components/ResultsPanel.tsx` | Subtype 탭 연동 |
+| `tests/test_subtype_extractor.py` | 신규 - 8개 유닛 테스트 |
 
 ---
 
-## STEP 3.5: Advanced 옵션 Guard / Auto-Recovery (2025-12-19)
+## STEP 4.0: Diff Summary Text & Evidence Priority Ordering (2025-12-20)
 
 ### 목표
-- UI Advanced 옵션에서 insurer 0개 선택해도 시스템이 정상 동작
-- insurer auto-recovery 로직으로 질의에서 추출하거나 기본 정책 적용
-- 모든 규칙을 YAML 설정 파일로 외부화 (하드코딩 금지)
+- 비교 결과 가독성 향상: Diff 탭에 요약 문구 추가
+- Evidence 신뢰성 표시: P1/P2/P3 우선순위로 정렬 및 표시
+- 표현만 변경, 비교 로직/계산/해석 변경 금지
 
-### 핵심 원칙
-- **실행 차단 금지**: insurer 0개 상태에서도 쿼리 실행 허용
-- **Auto-Recovery 적용**:
-  1. 질의에서 insurer 추출 시도
-  2. 추출 실패 시 기본 정책 적용 (전체 보험사 비교)
-- **사용자 안내**: recovery 적용 시 안내 메시지 표시
+### 구현
 
-### 구현 내용
+**1. Diff Summary Text**
+- `config/rules/diff_summary_rules.yaml`: 요약 문구 템플릿 정의
+- `apps/web/src/lib/diff-summary.config.ts`: 프론트엔드 규칙 로더
+- Diff 탭 상단에 요약 섹션 추가
 
-**1. 설정 파일 (`config/rules/insurer_defaults.yaml`):**
-```yaml
-# 기본 보험사 리스트
-default_insurers:
-  - SAMSUNG
-  - MERITZ
-  - LOTTE
-  - KB
-  - DB
-  - HANWHA
-  - HYUNDAI
-  - HEUNGKUK
+**2. Evidence Priority**
+- `config/rules/evidence_priority_rules.yaml`: 우선순위 분류 규칙
+- `apps/web/src/lib/evidence-priority.config.ts`: P1/P2/P3 분류 로직
 
-# 기본 정책 모드
-default_policy_mode: "all"  # "all" | "representative"
-
-# 대표 보험사 (mode=representative 시 사용)
-representative_insurers:
-  - SAMSUNG
-  - MERITZ
-
-# 보정 메시지 템플릿
-recovery_messages:
-  no_insurer_default: "보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
-  no_insurer_extracted: "질의에서 {insurers}를 인식하여 비교를 수행했습니다."
-```
-
-**2. API 변경:**
-
-요청 (CompareRequest):
-```python
-# min_length=1 제거 → 빈 리스트 허용
-insurers: list[str] = Field(default=[], description="비교할 보험사 코드 리스트")
-```
-
-응답 (CompareResponse):
-```json
-{
-  "recovery_message": "보험사 선택이 없어 전체 보험사 비교를 수행했습니다.",
-  "debug": {
-    "insurer_scope_method": "auto_recovery_default",
-    "recovery_applied": true,
-    "recovery_reason": "no_insurer_selected"
-  }
-}
-```
-
-**3. Frontend 변경:**
-- ChatPanel: insurer 0개 체크 제거 (실행 허용)
-- page.tsx: recovery_message 채팅에 표시
+| 우선순위 | 이름 | 설명 | 표시 |
+|----------|------|------|------|
+| P1 | 결정 근거 | 금액/값이 직접 추출된 문장 | ⭐⭐⭐ (펼침) |
+| P2 | 해석 근거 | 정의/조건 설명 문장 | ⭐⭐ (접힘) |
+| P3 | 보조 근거 | 요약/설명성 문장 | ⭐ (접힘) |
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `config/rules/insurer_defaults.yaml` | 신규 생성 (기본 정책 설정) |
-| `api/config_loader.py` | +34 lines: get_insurer_defaults_config, get_default_insurers, get_recovery_messages |
-| `api/compare.py` | min_length 제거, recovery_message 필드 추가, auto-recovery 로직 |
-| `apps/web/src/lib/types.ts` | recovery_message 필드 추가 |
-| `apps/web/src/components/ChatPanel.tsx` | insurer 0개 체크 제거 |
-| `apps/web/src/app/page.tsx` | recovery_message 표시 로직 |
+| `config/rules/diff_summary_rules.yaml` | 신규 - Diff 요약 규칙 |
+| `config/rules/evidence_priority_rules.yaml` | 신규 - Evidence 우선순위 규칙 |
+| `apps/web/src/lib/diff-summary.config.ts` | 신규 - Diff 요약 config |
+| `apps/web/src/lib/evidence-priority.config.ts` | 신규 - Evidence 우선순위 config |
+| `apps/web/src/components/DiffSummary.tsx` | 요약 섹션 추가 |
+| `apps/web/src/components/EvidencePanel.tsx` | 우선순위 정렬 및 배지 표시 |
 
-### 검증 시나리오
-
-| # | 질의 | insurers | 결과 |
-|---|------|----------|------|
-| 1 | "암진단비 알려줘" | [] | auto_recovery_default, 전체 보험사 비교 |
-| 2 | "삼성 암진단비" | [] | query_single_explicit, SAMSUNG 추출 |
-| 3 | "다빈치 수술비 비교" | [] | auto_recovery_default, 전체 보험사 비교, 5 slots |
-
-### 검증 결과
-
-```
-✅ Scenario 1: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
-✅ Scenario 2: query_extracted_insurers=["SAMSUNG"], insurer_scope_method=query_single_explicit
-✅ Scenario 3: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다.", slots_count=5
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| insurer 0개 실행 허용 | ✅ Frontend/Backend 모두 허용 |
-| Auto-Recovery 로직 | ✅ 질의 추출 → 기본 정책 fallback |
-| YAML 외부화 | ✅ insurer_defaults.yaml |
-| recovery_message 표시 | ✅ 채팅창 안내 메시지 |
-| 검증 시나리오 통과 | ✅ 3/3 (100%) |
+### 금지 사항 준수
+- ✅ Diff 계산 로직 변경 없음
+- ✅ Evidence 내용 수정/요약 없음
+- ✅ 유리/불리/추천 표현 미사용
+- ✅ Resolution Lock 영향 없음
 
 ---
 
-## STEP 3.6: Intent Locking / Mode Separation (2025-12-19)
+## BUGFIX + REFACTOR: normalize_query_for_coverage 헌법 준수 리팩터링 (2025-12-20)
+
+### 문제
+- 질의: "삼성과 현대 다빈치 수술비를 비교해줘"
+- 증상: `resolution_state: INVALID`, `recommended_coverage_codes: []`
+- 원인: `normalize_query_for_coverage()`가 보험사명을 제거하지 않아 pg_trgm similarity가 낮음
+
+### 1차 수정 (c98ef9c)
+- 보험사명 제거 기능 추가
+- 의도 표현/조사 제거 기능 추가
+- **문제**: 하드코딩 fallback 리스트 존재 (헌법 위반)
+
+### 2차 리팩터링 (헌법 준수)
+`services/retrieval/compare_service.py` 재수정:
+1. **하드코딩 fallback 제거**: `_load_insurer_aliases()`에서 하드코딩 리스트 제거
+2. **설정 파일 외부화**: `config/rules/query_normalization.yaml` 신규 생성
+   - `intent_suffixes`: 의도 표현 suffix 목록
+   - `trailing_particles_pattern`: 끝 조사 정규식
+   - `intermediate_particles`: 중간 조사 정규식
+   - `punctuation_pattern`: 특수문자 정규식
+3. **SSOT 유지**: 보험사 alias는 `config/mappings/insurer_alias.yaml`만 사용
+4. **회귀 테스트 추가**: `tests/test_query_normalization.py` (9개 테스트)
+
+### 결과
+| 질의 | Before | After |
+|------|--------|-------|
+| "삼성과 현대 다빈치 수술비를 비교해줘" | INVALID | UNRESOLVED (A9630_1 다빈치로봇암수술비) |
+| "삼성 암진단비" | "삼성 암진단비" | "암진단비" |
+| "메리츠 뇌졸중진단비 알려줘" | "메리츠 뇌졸중진단비 알려줘" | "뇌졸중진단비" |
+
+### 파일 변경
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | 하드코딩 제거, YAML 로드 방식으로 변경 |
+| `config/rules/query_normalization.yaml` | 신규 - 정규화 규칙 설정 파일 |
+| `tests/test_query_normalization.py` | 신규 - 9개 회귀 테스트 |
+
+### 커밋
+- `c98ef9c`: fix: normalize_query_for_coverage strips insurer names and intent suffixes
+- `941ab2a`: refactor: move query normalization rules to config and remove hardcoding
+
+---
+
+## STEP 3.9: Anchor Persistence / Explicit Coverage Lock (2025-12-20)
 
 ### 목표
-- 질의 Intent(lookup/compare)를 명시적으로 고정하여 임의 전환 방지
-- UI 이벤트(버튼 클릭, 연관 담보 선택)로 인한 intent 변경 차단
-- Query Anchor의 coverage / insurer / intent 일관성 보장
+- 대표 담보가 한 번 확정되면 모든 재질의에서 anchor 고정
+- 사용자가 명시적으로 "담보 변경" 버튼을 누르기 전까지 lock 유지
+- insurers와 coverage가 절대 흔들리지 않도록 보장
 
-### 핵심 원칙
-- **기본 Intent는 lookup** (단일 보험사 정보 조회)
-- **명시적 비교 키워드**가 있을 때만 compare로 변경
-- **UI 이벤트는 intent를 변경할 수 없음**
-- **coverage/insurer 변경은 intent 변경 사유가 아님**
+### 검증 시나리오 (A/B/C/D 모두 PASS)
 
-### Intent 정의
+| 시나리오 | 입력 | 기대 결과 | 상태 |
+|----------|------|----------|------|
+| A | `다빈치 수술비` → 후보 선택 | 🔒 lock UI 표시, locked_coverage_code=A9630_1 | ✅ |
+| B | `삼성과 현대의 다빈치로봇암 수술비 비교` | lock 유지, RESOLVED | ✅ |
+| C | `현대랑 삼성 다빈치 수술비 알려줘` | anchor 유지 | ✅ |
+| D | Evidence/Diff/Slots 탭 전환 | anchor/insurers 불변 | ✅ |
 
-| Intent | 설명 | 트리거 |
-|--------|------|--------|
-| lookup | 단일 보험사 정보 조회 | 기본값, "알려줘", "보여줘" 등 |
-| compare | 복수 보험사 비교 | "비교", "차이", "vs" 등 명시적 키워드 |
+### Backend 검증
 
-### 구현 내용
+```bash
+curl -s http://localhost:8000/compare -H "Content-Type: application/json" \
+  -d '{"query":"삼성과 현대의 다빈치로봇암 수술비 비교","insurers":["SAMSUNG","HYUNDAI"],"locked_coverage_code":"A9630_1"}'
 
-**1. 설정 파일 (`config/rules/intent_keywords.yaml`):**
-```yaml
-# 비교 의도 트리거 키워드
-compare_trigger_keywords:
-  - 비교
-  - 차이
-  - " vs "
-  - 어느 쪽
-  # ...
-
-# lookup 강제 유지 키워드
-lookup_force_keywords:
-  - 알려줘
-  - 보여줘
-  - 어떻게
-  # ...
-
-# Intent 변경 불가 UI 이벤트 타입
-ui_events_no_intent_change:
-  - coverage_button_click
-  - related_coverage_select
-  - slot_select
+# 결과:
+resolution_state: RESOLVED
+primary_coverage_code: A9630_1
+recommended (debug): []  # 재추천 없음
+anchor: coverage_code=A9630_1 유지
 ```
 
-**2. QueryAnchor 모델 확장:**
-```python
-class QueryAnchor(BaseModel):
-    coverage_code: str
-    coverage_name: str | None
-    domain: str | None
-    original_query: str
-    # STEP 3.6: Intent Locking
-    intent: Literal["lookup", "compare"] = "lookup"
-```
+### 구현
 
-**3. Intent Resolution 로직:**
-```python
-def _resolve_intent(query, anchor, ui_event_type, query_insurers):
-    # 1. UI 이벤트인 경우 → intent 변경 금지, anchor 유지
-    # 2. anchor가 있는 경우 → 명시적 비교 키워드 없으면 유지
-    # 3. 새 질의인 경우 → 키워드 기반 판별
-```
+**Frontend (page.tsx)**:
+- `lockedCoverage` state 추가 (code, name)
+- `handleSelectCoverage`에서 lock 설정
+- `handleUnlockCoverage`로 명시적 unlock
+- `handleSendMessage`에서 lockedCoverage 있으면 항상 locked_coverage_code 전달
 
-**4. Frontend 변경:**
-- `QueryAnchor` 타입에 intent 필드 추가
-- `CompareRequestWithIntent` 타입 추가 (anchor, ui_event_type 포함)
-- 응답에서 anchor 저장 후 다음 요청에 전달
+**Frontend (ChatPanel.tsx)**:
+- 🔒 lock UI 표시 (amber 배경 + "담보 변경" 버튼)
+- props: lockedCoverage, onUnlockCoverage 추가
+
+**Backend**:
+- `locked_coverage_code`가 있으면 coverage resolver 완전 스킵
+- resolution_state 항상 RESOLVED
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `config/rules/intent_keywords.yaml` | 신규 생성 (intent 키워드 설정) |
-| `api/config_loader.py` | +42 lines: get_compare_trigger_keywords 등 함수 |
-| `api/compare.py` | QueryAnchor.intent 필드, _resolve_intent 로직, ui_event_type 처리 |
-| `apps/web/src/lib/types.ts` | QueryAnchor, CompareRequestWithIntent 타입 |
-| `apps/web/src/lib/api.ts` | anchor, ui_event_type 전달 |
-| `apps/web/src/app/page.tsx` | currentAnchor 상태 관리, 요청에 anchor 포함 |
-| `apps/web/src/components/ChatPanel.tsx` | CompareRequestWithIntent 타입 사용 |
+| `apps/web/src/app/page.tsx` | lockedCoverage state, handleUnlockCoverage 추가 |
+| `apps/web/src/components/ChatPanel.tsx` | 🔒 lock UI + UNLOCK 버튼 |
 
-### 검증 시나리오
-
-| # | 질의 | anchor 상태 | 결과 |
-|---|------|-------------|------|
-| 1 | "삼성의 암진단비 알려줘" | 없음 | intent=lookup ✅ |
-| 2 | "일반암 진단금" (UI 클릭) | lookup | intent=lookup (차단) ✅ |
-| 3 | "삼성과 메리츠 암진단비 비교" | 없음 | intent=compare ✅ |
-| 4 | "유사암은?" | compare | intent=compare (유지) ✅ |
-
-### 검증 결과
-
-```
-=== Scenario 1 ===
-Expected: intent=lookup
-  anchor.intent: lookup
-Result: ✅ PASS
-
-=== Scenario 2 ===
-Expected: intent=lookup (UI 이벤트 - 차단)
-  anchor.intent: lookup
-  ui_event_blocked_change: True
-Result: ✅ PASS
-
-=== Scenario 3 ===
-Expected: intent=compare
-  anchor.intent: compare
-  matched_compare_keyword: 비교
-Result: ✅ PASS
-
-=== Scenario 4 ===
-Expected: intent=compare (anchor 유지)
-  anchor.intent: compare
-  intent_locked: True
-Result: ✅ PASS
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| lookup/compare 분리 원칙 | ✅ 구현 완료 |
-| UI 이벤트 intent 변경 차단 | ✅ ui_events_no_intent_change 적용 |
-| coverage/insurer 변경 시 intent 유지 | ✅ anchor intent 보존 |
-| 하드코딩 없음 | ✅ YAML 외부화 |
-| 검증 시나리오 통과 | ✅ 4/4 (100%) |
+### 커밋
+- `7a4ee05`: feat: STEP 3.9 Anchor Persistence with explicit coverage lock
 
 ---
 
-## STEP 3.8: Evidence / Policy Read-Only Isolation (2025-12-19)
-
-### 목표
-- Evidence/Policy/Document 상세보기가 Query 실행이나 상태 변경을 유발하지 않도록 완전히 분리
-- 문서 열람은 Read-only 동작으로만 처리
-- Query Anchor / Intent / Insurer / Coverage 상태를 절대 변경하지 않음
-- 문서 열람 중에도 좌측 요약·우측 비교 결과가 불변으로 유지
-
-### 문제 인식
-
-**현상:**
-- Evidence 탭에서 "상품요약서 상세보기" 클릭 시 좌측 요약 영역이 재렌더링되거나 다른 상태로 변경됨
-- 마치 새로운 질의를 실행한 것처럼 화면이 흔들림
-
-**원인:**
-- Evidence 상세보기가 조회(Read)가 아닌 Query Mutation(상태 변경)으로 처리되고 있음
-- UI 이벤트가 Query Context를 침범함
-
-### 구현 내용
-
-**1. State 분류 정의 (`state-isolation.config.ts`):**
-```typescript
-// Query State: 질의 실행에 의해서만 변경되는 상태
-export const QUERY_STATE_KEYS = [
-  "messages",           // 채팅 메시지 목록
-  "currentResponse",    // 현재 비교 결과
-  "currentAnchor",      // Query Anchor (coverage, intent)
-  "isLoading",          // 질의 실행 중 여부
-] as const;
-
-// View State: Read-only UI 이벤트에 의해 변경되는 상태
-export const VIEW_STATE_KEYS = [
-  "viewingDocument",    // 현재 보고 있는 문서
-  "activeTab",          // 현재 활성 탭
-  "scrollPosition",     // 스크롤 위치
-  "expandedSections",   // 펼쳐진 섹션들
-] as const;
-```
-
-**2. Read-only View Events 정의:**
-```typescript
-export const READ_ONLY_VIEW_EVENTS = [
-  "evidence_view",              // Evidence 상세보기 클릭
-  "policy_view",                // Policy 상세보기 클릭
-  "document_view",              // 문서 상세보기 클릭
-  "document_page_change",       // 문서 페이지 이동
-  "document_zoom_change",       // 문서 확대/축소
-  "document_close",             // 문서 닫기
-  "tab_change",                 // 탭 전환
-  // ...
-] as const;
-```
-
-**3. ViewContext 생성 (`contexts/ViewContext.tsx`):**
-- Query State와 완전히 분리된 View State 전용 컨텍스트
-- viewingDocument, deepLinkDocument, activeTab 등 관리
-- openDocument(), closeDocument() 등 View State 변경 함수 제공
-- Query State 변경 불가 보장
-
-**4. page.tsx 리팩토링:**
-- ViewProvider 적용
-- Query State와 View State 명확히 분리
-- DocumentViewerLayer 컴포넌트로 뷰어 통합 관리
-- memoizedResponse로 불필요한 re-render 방지
-
-**5. EvidencePanel 수정:**
-- ViewContext.openDocument() 사용
-- 로컬 viewingEvidence 상태 제거
-- PdfPageViewer 렌더링을 page.tsx로 이동
-- Query State 변경 없이 문서 열기 보장
-
-### 파일 변경
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `apps/web/src/lib/state-isolation.config.ts` | 신규: State 분류 및 격리 규칙 정의 |
-| `apps/web/src/contexts/ViewContext.tsx` | 신규: View State 전용 컨텍스트 |
-| `apps/web/src/app/page.tsx` | ViewProvider 적용, DocumentViewerLayer 추가 |
-| `apps/web/src/components/EvidencePanel.tsx` | ViewContext 사용, 로컬 상태 제거 |
-| `apps/web/src/__tests__/state-isolation.test.ts` | 신규: 격리 규칙 단위 테스트 |
-
-### 검증 시나리오
-
-| # | 시나리오 | 기대 결과 | 검증 |
-|---|----------|----------|------|
-| 1 | "삼성의 암진단비 알려줘" | 좌측 요약 정상 표시 | ✅ |
-| 2 | Evidence 탭 → 상품요약서 상세보기 클릭 | 문서 뷰어 열림, 좌측 요약 내용 변경 없음 | ✅ |
-| 3 | 문서 페이지 이동 | Query 결과 불변 | ✅ |
-| 4 | 문서 닫기 | 동일 Query 결과 유지 | ✅ |
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| Evidence/Policy/Document 클릭 시 Query State 변경 0건 | ✅ 구현 완료 |
-| 좌측 요약 및 우측 비교 결과 항상 유지 | ✅ 구현 완료 |
-| Read-only View와 Query 실행 완전 분리 | ✅ ViewContext 분리 |
-| 하드코딩/임시 dict 없음 | ✅ config 기반 |
-| git 커밋 완료 | ✅ a6282d2 |
-| status.md 업데이트 완료 | ✅ 본 항목 |
-
----
-
-## STEP 3.7-β: Coverage 미확정 시 Results Panel UI Gating (2025-12-19)
-
-### 목표
-- 대표 담보가 확정되지 않은 상태(AMBIGUOUS / NOT_FOUND)에서 우측 Results Panel 렌더링 완전 차단
-- 좌측은 "선택 필요" 상태인데, 우측은 "확정된 결과"처럼 보이는 상태 불일치를 방지
-
-### 문제 인식
-
-**현상:**
-- "삼성 암진단금" (오타) 질의 시 "상해후유장해(3-100%)" 등 임의 담보가 대표 담보로 자동 선택됨
-- 좌측에서 담보 선택을 유도하는 동안 우측에 비교 결과가 표시됨
-
-**원인:**
-- coverage_resolution 상태와 Results Panel 렌더링이 연동되어 있지 않음
-- UI에서 EXACT/AMBIGUOUS/NOT_FOUND 상태에 따른 gating이 없음
-
-### 구현 내용
-
-**1. UI Gating 설정 (`ui-gating.config.ts`):**
-```typescript
-// API status → UI display state 매핑
-export type UIResolutionState = "EXACT" | "AMBIGUOUS" | "NOT_FOUND";
-
-export const RESOLUTION_STATUS_MAP: Record<string, UIResolutionState> = {
-  resolved: "EXACT",
-  suggest: "AMBIGUOUS",
-  clarify: "AMBIGUOUS",
-  failed: "NOT_FOUND",
-};
-
-// Results Panel 렌더링 허용 상태
-export const RESULTS_PANEL_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
-```
-
-**2. ResultsPanel 수정:**
-- canRenderResultsPanel() 호출로 렌더링 가능 여부 확인
-- AMBIGUOUS / NOT_FOUND 상태에서 EmptyState 표시
-- Compare / Diff / Evidence / Policy 탭 접근 차단
-
-### 파일 변경
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `apps/web/src/lib/ui-gating.config.ts` | 신규: UI Gating 규칙 정의 |
-| `apps/web/src/components/ResultsPanel.tsx` | UI Gating 적용, EmptyState 표시 |
-| `apps/web/src/__tests__/ui-gating.test.ts` | 신규: UI Gating 단위 테스트 |
-
-### 검증 시나리오
-
-| # | 시나리오 | 기대 결과 | 검증 |
-|---|----------|----------|------|
-| 1 | "삼성 암" | AMBIGUOUS → Results Panel 비활성화 | ✅ |
-| 2 | "삼성 암진단비" | EXACT → Results Panel 정상 표시 | ✅ |
-| 3 | "삼성 암zz" | NOT_FOUND → Results Panel 비활성화 | ✅ |
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| Coverage 미확정 시 Results Panel 렌더링 차단 | ✅ 구현 완료 |
-| EXACT 상태에서만 비교 결과 표시 | ✅ 구현 완료 |
-| 연관 담보 자동 노출 차단 | ✅ 구현 완료 |
-| 하드코딩 없음 | ✅ config 기반 |
-| git 커밋 완료 | ✅ e1052d9 |
-| status.md 업데이트 완료 | ✅ 본 항목 |
-
-## STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene (2025-12-19)
-
-### 목표
-- 담보 미확정(AMBIGUOUS/NOT_FOUND) 상태에서 가이드 메시지가 대화 로그에 누적되는 문제 제거
-- 담보 선택 안내를 단일 상태 패널(UI State)로 격리
-- Chat 영역은 "대화"로서의 역할만 수행
-
-### 문제 인식
-
-**현상:**
-- "삼성 암" (모호한 질의) 입력 시 "여러 담보가 검색되었습니다..." 가이드 메시지가 ChatMessage로 누적
-- 연속 질의 시 가이드 메시지가 계속 쌓여 대화 로그가 오염됨
-- 좌측 Chat 영역과 담보 선택 안내의 역할이 혼재
-
-**원인:**
-- 담보 미확정 안내를 ChatMessage로 취급
-- AMBIGUOUS/NOT_FOUND 상태에서도 assistant 메시지가 chat log에 추가됨
-
-### 적용 원칙
-
-| 원칙 | 설명 |
-|------|------|
-| 상태와 대화의 분리 | 담보 미확정 안내는 ChatMessage가 아님 |
-| 가이드 단일성 원칙 | 가이드는 항상 1개만 존재 (교체, 누적 금지) |
-| EXACT 상태 우선 원칙 | EXACT 상태에서만 Chat 로그에 정상 응답 추가 |
-
-### 구현 내용
-
-**1. Conversation Hygiene 설정 (`conversation-hygiene.config.ts`):**
-```typescript
-// ChatMessage로 추가 가능한 상태 (EXACT만 허용)
-export const CHAT_MESSAGE_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
-
-// 응답이 ChatMessage로 추가될 수 있는지 확인
-export function canAddToChatLog(resolution: CoverageResolution | null | undefined): boolean {
-  const state = getUIResolutionState(resolution);
-  return CHAT_MESSAGE_ALLOWED_STATES.includes(state);
-}
-
-// Coverage Guide 상태 팩토리
-export function createCoverageGuideState(
-  resolution: CoverageResolution | null | undefined,
-  originalQuery: string
-): CoverageGuideState | null;
-```
-
-**2. CoverageGuidePanel 컴포넌트:**
-```typescript
-// 담보 미확정 상태에서 표시되는 상태 안내 패널
-// - ChatMessage가 아님
-// - 항상 단 하나만 존재
-// - EXACT 상태에서는 자동 제거
-export function CoverageGuidePanel({
-  guide,
-  onSelectCoverage,
-}: CoverageGuidePanelProps);
-```
-
-**3. page.tsx 상태 분기:**
-```typescript
-// STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
-const canAddToChat = canAddToChatLog(response.coverage_resolution);
-
-if (!canAddToChat) {
-  // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-  const guide = createCoverageGuideState(response.coverage_resolution, request.query);
-  setCoverageGuide(guide);
-  return;
-}
-
-// (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
-setCoverageGuide(null);
-// ... 정상 응답 처리
-```
-
-### 생성/수정된 파일
-
-| 파일 | 변경 내용 |
-|------|----------|
-| `apps/web/src/lib/conversation-hygiene.config.ts` | 상태와 대화 분리 규칙 정의 (신규) |
-| `apps/web/src/components/CoverageGuidePanel.tsx` | 담보 선택 가이드 UI 컴포넌트 (신규) |
-| `apps/web/src/app/page.tsx` | EXACT 상태에서만 ChatMessage 추가 |
-| `apps/web/src/components/ChatPanel.tsx` | CoverageGuidePanel 통합 |
-| `apps/web/src/__tests__/conversation-hygiene.test.ts` | 단위 테스트 (26개 케이스) |
-
-### UI 역할 분리
-
-| 영역 | 허용 출력 | 금지 출력 |
-|------|----------|----------|
-| Chat Log | 사용자 입력, EXACT 상태의 정상 응답 | 담보 선택 가이드, 안내 문구 |
-| Coverage Guide Panel | AMBIGUOUS/NOT_FOUND 상태 안내 | - |
-| Results Panel | EXACT 상태의 비교 결과 | AMBIGUOUS/NOT_FOUND 상태의 결과 |
-
-### 검증 시나리오
-
-| # | 쿼리 | 예상 동작 | 결과 |
-|---|------|----------|------|
-| 1 | "삼성 암" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
-| 2 | "삼성 암진단비" | Chat: 사용자+응답, Guide Panel: 없음 | ✅ |
-| 3 | "삼성 암zz" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
-| 4 | 연속 질의 | 이전 가이드 교체, 누적 없음 | ✅ |
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| 담보 가이드가 ChatMessage에 누적되지 않음 | ✅ 구현 완료 |
-| 가이드는 항상 1개만 존재 | ✅ 구현 완료 |
-| EXACT 상태에서만 Chat 로그에 응답 추가 | ✅ 구현 완료 |
-| 하드코딩 없음 | ✅ config 기반 |
-| 단위 테스트 통과 | ✅ 26/26 pass |
-| git 커밋 완료 | ✅ 58b8231 |
-| status.md 업데이트 완료 | ✅ 본 항목 |

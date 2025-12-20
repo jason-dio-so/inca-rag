@@ -250,6 +250,24 @@ CREATE INDEX IF NOT EXISTS idx_coverage_alias_raw_name_norm ON coverage_alias(ra
 CREATE INDEX IF NOT EXISTS idx_coverage_alias_raw_name_trgm
     ON coverage_alias USING gin (raw_name_norm gin_trgm_ops);
 
+-- ----------------------------------------------------------------------------
+-- Chunk: pg_trgm 인덱스 (ILIKE 키워드 검색 성능 개선)
+-- 출처: db/migrations/20251217_add_trgm_indexes.sql
+-- ----------------------------------------------------------------------------
+
+-- 전체 chunk.content에 대한 trigram 인덱스
+CREATE INDEX IF NOT EXISTS idx_chunk_content_trgm
+    ON chunk USING gin (content gin_trgm_ops);
+
+-- 약관(doc_type='약관')에 대한 부분 인덱스 (policy_axis 검색용)
+CREATE INDEX IF NOT EXISTS idx_chunk_content_trgm_policy
+    ON chunk USING gin (content gin_trgm_ops)
+    WHERE doc_type = '약관';
+
+-- 복합 조건 검색용 인덱스 (insurer_id + doc_type)
+CREATE INDEX IF NOT EXISTS idx_chunk_insurer_doctype
+    ON chunk (insurer_id, doc_type);
+
 -- ============================================================================
 -- 4. TRIGGERS (updated_at 자동 갱신)
 -- ============================================================================
@@ -349,6 +367,47 @@ LEFT JOIN insurer i ON c.insurer_id = i.insurer_id
 LEFT JOIN document d ON c.document_id = d.document_id;
 
 COMMENT ON VIEW v_chunk_with_coverage IS '청크 + coverage_code 추출 뷰';
+
+-- ============================================================================
+-- 7. COMPARISON SLOT CACHE (선택적 캐싱)
+-- 출처: db/migrations/20251218_add_comparison_slots.sql
+-- ============================================================================
+
+-- 슬롯 결과 캐시 테이블 (on-the-fly 계산 우선, 선택적 캐싱용)
+CREATE TABLE IF NOT EXISTS comparison_slot_cache (
+    cache_id        BIGSERIAL PRIMARY KEY,
+    insurer_id      BIGINT NOT NULL REFERENCES insurer(insurer_id) ON DELETE CASCADE,
+    product_id      BIGINT REFERENCES product(product_id) ON DELETE SET NULL,
+    plan_id         BIGINT REFERENCES product_plan(plan_id) ON DELETE SET NULL,
+    coverage_code   TEXT NOT NULL,
+    slot_key        TEXT NOT NULL,
+    slot_value      TEXT,
+    slot_unit       TEXT,
+    normalized_value NUMERIC,
+    confidence      TEXT DEFAULT 'medium',
+    evidence_refs   JSONB DEFAULT '[]'::jsonb,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT uq_slot_cache UNIQUE (insurer_id, product_id, plan_id, coverage_code, slot_key)
+);
+
+COMMENT ON TABLE comparison_slot_cache IS '슬롯 결과 캐시 (선택적, on-the-fly 계산 우선)';
+COMMENT ON COLUMN comparison_slot_cache.slot_key IS '슬롯 키 (payout_amount, existence_status 등)';
+COMMENT ON COLUMN comparison_slot_cache.evidence_refs IS '근거 참조 [{document_id, page_start, chunk_id}]';
+
+-- Comparison Slot Cache 인덱스
+CREATE INDEX IF NOT EXISTS idx_slot_cache_insurer_coverage
+    ON comparison_slot_cache(insurer_id, coverage_code);
+
+CREATE INDEX IF NOT EXISTS idx_slot_cache_slot_key
+    ON comparison_slot_cache(slot_key);
+
+-- Comparison Slot Cache 트리거
+DROP TRIGGER IF EXISTS trg_slot_cache_updated_at ON comparison_slot_cache;
+CREATE TRIGGER trg_slot_cache_updated_at
+    BEFORE UPDATE ON comparison_slot_cache
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
 -- END OF SCHEMA

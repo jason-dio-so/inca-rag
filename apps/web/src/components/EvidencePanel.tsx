@@ -2,6 +2,7 @@
 
 /**
  * STEP 3.8: Evidence Panel with View State Isolation
+ * STEP 4.0: Evidence Priority Ordering (P1/P2/P3)
  *
  * Evidence/Policy 상세보기는 ViewContext를 통해 처리되며,
  * Query State(messages, currentResponse, anchor)에 영향을 주지 않습니다.
@@ -10,9 +11,10 @@
  * - Evidence 클릭 = Read-only View Event
  * - Query State 변경 없음
  * - View State만 업데이트
+ * - STEP 4.0: P1(결정근거) → P2(해석근거) → P3(보조근거) 순서 정렬
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +33,13 @@ import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidence
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
 import { Copy, Check, Eye, ChevronDown, Star, FileText } from "lucide-react";
 import { useViewContext } from "@/contexts/ViewContext";
+import {
+  determineEvidencePriority,
+  sortEvidenceByPriority,
+  PRIORITY_DEFINITIONS,
+  PRIORITY_STYLES,
+  EvidencePriority,
+} from "@/lib/evidence-priority.config";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -226,6 +235,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
               <AccordionContent>
                 <div className="space-y-4 pt-2">
                   {/* U-4.9: Section 1 - 비교에 사용된 대표 근거 */}
+                  {/* STEP 4.0: Sort by priority within section */}
                   {slots && representativeEvidence.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
@@ -233,7 +243,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                         비교에 사용된 대표 근거
                       </div>
                       <div className="space-y-2">
-                        {representativeEvidence.map((ev, idx) => (
+                        {sortEvidenceByPriority(representativeEvidence).map((ev, idx) => (
                           <EvidenceCard
                             key={`rep-${ev.document_id}-${ev.page_start}-${idx}`}
                             evidence={ev}
@@ -241,6 +251,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                             onView={handleView}
                             copiedRef={copiedRef}
                             isRepresentative={true}
+                            showPriority={true}
                           />
                         ))}
                       </div>
@@ -271,8 +282,9 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                         </Button>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
+                        {/* STEP 4.0: Sort by priority within section */}
                         <div className="space-y-2 pt-2">
-                          {additionalEvidence.map((ev, idx) => (
+                          {sortEvidenceByPriority(additionalEvidence).map((ev, idx) => (
                             <EvidenceCard
                               key={`add-${ev.document_id}-${ev.page_start}-${idx}`}
                               evidence={ev}
@@ -280,6 +292,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                               onView={handleView}
                               copiedRef={copiedRef}
                               isRepresentative={false}
+                              showPriority={true}
                             />
                           ))}
                         </div>
@@ -288,13 +301,15 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                   )}
 
                   {/* Fallback: No slots, show all evidence normally */}
-                  {!slots && allEvidence.map((ev, idx) => (
+                  {/* STEP 4.0: Sort by priority */}
+                  {!slots && sortEvidenceByPriority(allEvidence).map((ev, idx) => (
                     <EvidenceCard
                       key={`${ev.document_id}-${ev.page_start}-${idx}`}
                       evidence={ev}
                       onCopy={handleCopy}
                       onView={handleView}
                       copiedRef={copiedRef}
+                      showPriority={true}
                     />
                   ))}
                 </div>
@@ -313,6 +328,7 @@ interface EvidenceCardProps {
   onView: (evidence: Evidence) => void;
   copiedRef: string | null;
   isRepresentative?: boolean; // U-4.9: true = 대표 근거, false = 참고 근거
+  showPriority?: boolean; // STEP 4.0: show P1/P2/P3 priority badge
 }
 
 function EvidenceCard({
@@ -321,16 +337,22 @@ function EvidenceCard({
   onView,
   copiedRef,
   isRepresentative,
+  showPriority = false,
 }: EvidenceCardProps) {
   const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
   const isCopied = copiedRef === ref;
+
+  // STEP 4.0: Determine priority
+  const priority = useMemo(() => determineEvidencePriority(evidence), [evidence]);
+  const priorityDef = PRIORITY_DEFINITIONS[priority];
+  const priorityStyle = PRIORITY_STYLES[priority];
 
   return (
     <Card className={isRepresentative ? "border-amber-300 bg-amber-50/30" : ""}>
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 space-y-1">
-            {/* Doc Type Badge + Representative Badge */}
+            {/* Doc Type Badge + Representative Badge + Priority Badge */}
             <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 className={
@@ -340,6 +362,21 @@ function EvidenceCard({
               >
                 {evidence.doc_type}
               </Badge>
+              {/* STEP 4.0: Priority badge */}
+              {showPriority && (
+                <Badge
+                  variant="outline"
+                  className={`${priorityStyle.bgColor} ${priorityStyle.textColor} ${priorityStyle.borderColor}`}
+                >
+                  <span className="flex items-center gap-1">
+                    {/* Stars based on priority */}
+                    {Array.from({ length: priorityDef.stars }).map((_, i) => (
+                      <Star key={i} className="h-2.5 w-2.5 fill-current" />
+                    ))}
+                    <span className="ml-0.5">{priorityDef.name}</span>
+                  </span>
+                </Badge>
+              )}
               {/* U-4.9: 대표/참고 근거 badge */}
               {isRepresentative !== undefined && (
                 <Badge

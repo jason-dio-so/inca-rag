@@ -1,0 +1,141 @@
+# Subtype Slots Configuration
+# STEP 4.1: 다중 Subtype 비교를 위한 설정
+#
+# 헌법 준수: 코드 내 하드코딩 금지, 이 파일에서만 subtype 정의 관리
+
+# Subtype 정의
+# 각 subtype은 하나의 질병/조건 세부 분류를 나타냄
+subtypes:
+  # 암 관련 subtype
+  BORDERLINE_TUMOR:
+    name: "경계성 종양"
+    aliases:
+      - "경계성종양"
+      - "경계성 종양"
+      - "경계성"
+    domain: CANCER
+    description: "악성과 양성의 중간 성질을 가진 종양"
+    comparison_focus:
+      - "정의"
+      - "보장 여부"
+      - "지급 조건"
+
+  CIS_CARCINOMA:
+    name: "제자리암"
+    aliases:
+      - "제자리암"
+      - "상피내암"
+      - "상피내신생물"
+      - "carcinoma in situ"
+      - "CIS"
+    domain: CANCER
+    description: "암이 발생한 부위에 국한되어 주변 조직으로 퍼지지 않은 상태"
+    comparison_focus:
+      - "정의"
+      - "보장 여부"
+      - "지급 조건"
+
+  SIMILAR_CANCER:
+    name: "유사암"
+    aliases:
+      - "유사암"
+      - "기타피부암"
+      - "갑상선암"
+      - "전립선암"
+    domain: CANCER
+    description: "일반암보다 예후가 좋은 암 유형"
+    comparison_focus:
+      - "정의"
+      - "포함 질병"
+      - "지급 비율"
+
+  RECURRENT_CANCER:
+    name: "재진단암"
+    aliases:
+      - "재진단암"
+      - "재발암"
+      - "전이암"
+    domain: CANCER
+    description: "최초 암 진단 이후 재발 또는 전이된 암"
+    comparison_focus:
+      - "정의"
+      - "지급 조건"
+      - "진단 간격"
+
+  # 뇌/심혈관 관련 subtype
+  STROKE:
+    name: "뇌졸중"
+    aliases:
+      - "뇌졸중"
+      - "뇌경색"
+      - "뇌출혈"
+    domain: CARDIO
+    description: "뇌혈관 질환으로 인한 뇌 기능 장애"
+    comparison_focus:
+      - "정의"
+      - "보장 범위"
+      - "진단 기준"
+
+  CEREBROVASCULAR:
+    name: "뇌혈관질환"
+    aliases:
+      - "뇌혈관질환"
+      - "뇌혈관"
+    domain: CARDIO
+    description: "뇌혈관에 영향을 미치는 질환 전체"
+    comparison_focus:
+      - "정의"
+      - "포함 질환"
+      - "보장 범위"
+
+  ISCHEMIC_HEART:
+    name: "허혈성심장질환"
+    aliases:
+      - "허혈성심장질환"
+      - "허혈성심장"
+      - "심근경색"
+      - "협심증"
+    domain: CARDIO
+    description: "심장 근육에 혈액 공급이 부족한 질환"
+    comparison_focus:
+      - "정의"
+      - "포함 질환"
+      - "보장 범위"
+
+# Subtype 추출을 위한 질의 패턴
+# 이 패턴에 매칭되면 해당 subtype이 질의에 포함된 것으로 판단
+extraction_patterns:
+  # 복수 subtype 비교 패턴 (우선순위 높음)
+  multi_subtype:
+    - pattern: "경계성.*제자리|제자리.*경계성"
+      subtypes: ["BORDERLINE_TUMOR", "CIS_CARCINOMA"]
+    - pattern: "경계성.*유사암|유사암.*경계성"
+      subtypes: ["BORDERLINE_TUMOR", "SIMILAR_CANCER"]
+    - pattern: "제자리.*유사암|유사암.*제자리"
+      subtypes: ["CIS_CARCINOMA", "SIMILAR_CANCER"]
+
+# 비교 결과 표시 설정
+comparison_display:
+  # 각 subtype에 대해 추출할 정보 유형
+  info_types:
+    - type: "definition"
+      label: "정의"
+      priority: 1
+    - type: "coverage"
+      label: "보장 여부"
+      priority: 2
+    - type: "conditions"
+      label: "지급 조건"
+      priority: 3
+    - type: "included_diseases"
+      label: "포함 질병"
+      priority: 4
+    - type: "payment_ratio"
+      label: "지급 비율"
+      priority: 5
+
+  # 표 형식 출력 설정
+  table_format:
+    header_row: true
+    insurer_column: true
+    subtype_columns: true

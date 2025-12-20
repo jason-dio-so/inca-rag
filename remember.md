@@ -1,69 +1,87 @@
 # INCA-RAG 프로젝트 재개 가이드
 
-## 현재 상태 (2025-12-19)
+## 현재 상태 (2025-12-20)
 
-### 완료된 작업
-- [x] 금액 미확인 버그 수정 (Samsung/Meritz "3,000만원" 정상 출력)
-- [x] Git 커밋: `a888f72` - slot extraction, 2-pass retrieval, confidence priority
-- [x] coverage_alias 테이블 264개 매핑 적재 완료
-- [x] 47개 extraction 테스트 통과
-- [x] audit_slots.py 100% slot fill rate
-- [x] **STEP 1: Eval 최소 버전 구축 완료** (2025-12-19)
-  - `eval/goldset_cancer_minimal.csv` - 정답셋 4건
-  - `eval/eval_runner.py` - Eval 실행기 (coverage resolve, slot fill, value correctness)
-  - `tools/run_demo_eval.sh` - 데모 신뢰성 기준선 스크립트
-- [x] **STEP 2: Demo vs Main 분류 완료** (2025-12-19)
-  - `docs/demo_vs_main_diff.md` - 공통/데모전용 변경사항 분류 문서
+### 최근 완료된 작업
+- [x] **STEP 3.9: Anchor Persistence** - 담보 고정 기능 (A/B/C/D 시나리오 검증 완료)
+- [x] **STEP 4.0: Diff Summary & Evidence Priority** - 요약 문구 및 P1/P2/P3 우선순위
+- [x] **BUGFIX: normalize_query_for_coverage** - 보험사명 제거 버그 수정 + 헌법 준수 리팩터링
+- [x] **STEP 4.1: 다중 Subtype 비교** - 경계성 종양/제자리암 정의·조건 중심 비교
+  - `config/rules/subtype_slots.yaml` - Subtype 정의 (7개)
+  - `services/extraction/subtype_extractor.py` - Subtype 추출 서비스
+  - `apps/web/src/components/SubtypeComparePanel.tsx` - 비교 테이블 UI
+  - Git 커밋: `00c3fb3`
 
-### 현재 Eval 지표
+### 현재 브랜치
 ```
-- Coverage resolve rate: 100%
-- Slot fill rate: 100%
-- Value correctness: 100%
+recovery/step-3.7-delta-beta (origin보다 9 commits 앞섬)
 ```
 
-### 미커밋 파일 (필요시 확인)
+### 테스트 상태
 ```
-status.md, docs/, eval/, ontology/, ops/, tools/run_demo_eval.sh
+- tests/test_query_normalization.py: 9 passed
+- tests/test_subtype_extractor.py: 8 passed
 ```
 
 ---
 
 ## 재접속 시 체크리스트
 
-### 1. Docker 상태 확인
+### 1. Docker Desktop 실행
+**반드시 Docker Desktop 앱을 먼저 실행!**
+
+### 2. Docker 상태 확인
 ```bash
 docker ps --format "table {{.Names}}\t{{.Status}}" | grep inca
 ```
 
-### 2. 컨테이너가 내려가 있으면 시작
+### 3. 컨테이너가 내려가 있으면 시작
 ```bash
 docker compose -f docker-compose.demo.yml up -d
 ```
 
-### 3. API 동작 확인
+### 4. Backend 시작 (Docker 없이 로컬 실행 시)
+```bash
+cd /Users/cheollee/inca-rag
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 5. Frontend 시작
+```bash
+cd /Users/cheollee/inca-rag/apps/web
+pnpm dev
+```
+
+### 6. API 동작 확인
+```bash
+curl -s http://localhost:8000/health
+# 기대: {"status":"healthy"}
+```
+
+### 7. 다중 Subtype 비교 테스트 (STEP 4.1)
 ```bash
 curl -s http://localhost:8000/compare -H "Content-Type: application/json" -d '{
-  "query": "암진단비(유사암제외)",
-  "insurers": ["SAMSUNG", "MERITZ"],
-  "age": 40,
-  "gender": "F"
-}' | jq '.slots[] | select(.slot_key == "payout_amount") | .insurers'
+  "query": "경계성 종양과 제자리암 차이",
+  "insurers": ["SAMSUNG", "MERITZ"]
+}' | jq '.subtype_comparison'
+```
+**기대:** `is_multi_subtype: true`, `subtypes: ["BORDERLINE_TUMOR", "CIS_CARCINOMA"]`
+
+---
+
+## STEP 4.1 테스트 시나리오
+
+### 시나리오 A: 단일 Subtype (Subtype 탭 미표시)
+```
+질의: "경계성 종양 보장"
+기대: Subtype 탭 없음, 일반 비교 결과만 표시
 ```
 
-**기대 결과:** SAMSUNG, MERITZ 모두 "3,000만원"
-
-### 4. 테스트 실행
-```bash
-python -m pytest tests/test_extraction.py -v
-python tools/audit_slots.py
+### 시나리오 B: 다중 Subtype (Subtype 탭 표시)
 ```
-
-### 5. 데모 신뢰성 기준선 실행 (원샷)
-```bash
-./tools/run_demo_eval.sh
+질의: "경계성 종양과 제자리암 차이"
+기대: Subtype 탭 표시, 정의·보장 여부·조건 비교 테이블
 ```
-**기대 결과:** Coverage resolve 100%, Slot fill 100%, Value correctness 100%
 
 ---
 
@@ -71,15 +89,29 @@ python tools/audit_slots.py
 
 | 파일 | 역할 |
 |------|------|
-| `services/extraction/slot_extractor.py` | 슬롯 추출 (payout_amount 등) |
-| `services/extraction/amount_extractor.py` | 금액 추출 로직 |
+| `config/rules/subtype_slots.yaml` | **Subtype 정의 SSOT** (STEP 4.1) |
+| `services/extraction/subtype_extractor.py` | **Subtype 추출 서비스** (STEP 4.1) |
+| `apps/web/src/components/SubtypeComparePanel.tsx` | **Subtype 비교 UI** (STEP 4.1) |
+| `config/rules/query_normalization.yaml` | 질의 정규화 규칙 |
 | `services/retrieval/compare_service.py` | coverage 추천, 2-pass retrieval |
-| `data/담보명mapping자료.xlsx` | 담보명 매핑 원본 |
-| `tools/audit_slots.py` | 슬롯 완성도 검증 |
-| `eval/eval_runner.py` | Eval 실행기 (정답셋 검증) |
-| `eval/goldset_cancer_minimal.csv` | 암진단비 정답셋 (4건) |
-| `tools/run_demo_eval.sh` | 데모 신뢰성 기준선 (원샷 실행) |
-| `docs/demo_vs_main_diff.md` | Demo vs Main 변경사항 분류 |
+| `apps/web/src/app/page.tsx` | 메인 페이지 (lockedCoverage 상태) |
+| `apps/web/src/components/ChatPanel.tsx` | 채팅 UI (담보 잠금 표시) |
+| `apps/web/src/components/ResultsPanel.tsx` | 결과 패널 (Subtype 탭 연동) |
+
+---
+
+## 테스트 실행
+
+```bash
+# Query Normalization 테스트
+python -m pytest tests/test_query_normalization.py -v
+
+# Subtype Extractor 테스트
+python -m pytest tests/test_subtype_extractor.py -v
+
+# 전체 테스트
+python -m pytest tests/ -v --tb=short
+```
 
 ---
 
@@ -91,8 +123,7 @@ docker exec -it inca_demo_db psql -U postgres -d inca_rag
 
 **주요 테이블:**
 - `insurer` - 8개 보험사
-- `coverage_alias` - 담보명 → coverage_code 매핑 (264건)
-- `coverage_standard` - 표준 coverage_code
+- `coverage_alias` - 담보명 → coverage_code 매핑
 - `chunk` - 문서 청크 + embedding
 
 ---
@@ -100,47 +131,46 @@ docker exec -it inca_demo_db psql -U postgres -d inca_rag
 ## 다음 작업 후보
 
 ### 우선순위 높음
-1. **Main 브랜치 병합** - `a888f72` 체리픽 (docs/demo_vs_main_diff.md 참조)
-2. **Goldset 확장** - 현재 4건 → 더 많은 케이스 추가
+1. **STEP 4.1 UI 테스트** - 다중 Subtype 비교 화면 검증
+2. **Main 브랜치 병합** - recovery/step-3.7-delta-beta → main
 
 ### 우선순위 중간
-3. **추가 보험사 데이터 적재** - 현재 SAMSUNG, MERITZ만 chunk 있음
-4. **LLM 슬롯 추출 활성화** - 현재 rule-based만 사용 중
-5. **UI 개선** - SlotsTable 디자인, diff 시각화
-
-### 우선순위 낮음
-6. **coverage_code 자동 추천 개선** - similarity threshold 조정
-7. **Evidence doc_type 매칭** - 현재 0% (API 응답 구조 제한)
+3. **Subtype 비교 정밀도 향상** - evidence에서 정의/조건 추출 개선
+4. **추가 Subtype 지원** - 현재 7개 → 더 많은 질병 하위 개념
 
 ---
 
-## 빠른 빌드 & 재시작
+## 빠른 재시작
 
 ```bash
-# API만 재빌드
-docker compose -f docker-compose.demo.yml build api --no-cache && \
-docker compose -f docker-compose.demo.yml up -d api
+# 포트 정리 후 전체 재시작
+lsof -ti:3000,8000 | xargs kill -9 2>/dev/null
 
-# 전체 재빌드
-docker compose -f docker-compose.demo.yml build --no-cache && \
-docker compose -f docker-compose.demo.yml up -d
+# Backend
+cd /Users/cheollee/inca-rag && uvicorn api.main:app --port 8000 --reload &
+
+# Frontend
+cd /Users/cheollee/inca-rag/apps/web && pnpm dev &
 ```
 
 ---
 
 ## 문제 발생 시
 
-### API 로그 확인
-```bash
-docker logs inca_demo_api --tail 50
+### PostgreSQL 연결 오류
 ```
-
-### DB 연결 확인
-```bash
-docker exec inca_demo_db pg_isready -U postgres
+connection to server at "127.0.0.1", port 5432 failed
 ```
+→ Docker Desktop 실행 후 `docker compose -f docker-compose.demo.yml up -d`
 
-### 컨테이너 재시작
+### API import 오류
+```
+ModuleNotFoundError: No module named 'api'
+```
+→ 프로젝트 루트에서 `uvicorn api.main:app` 실행 (api 디렉토리에서 실행 X)
+
+### 포트 사용 중
 ```bash
-docker compose -f docker-compose.demo.yml restart api
+lsof -ti:8000 | xargs kill -9
+lsof -ti:3000 | xargs kill -9
 ```

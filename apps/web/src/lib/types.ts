@@ -97,13 +97,13 @@ export interface SuggestedCoverage {
 
 export interface CoverageResolution {
   /**
-   * status:
-   * - resolved: 확정된 coverage_code 존재
-   * - suggest: 유사 담보 존재하지만 확정 불가 (유저 선택 필요)
-   * - failed: 매핑 불가 (재입력 필요)
-   * - clarify: 도메인만 추정 가능 (구체화 필요)
+   * STEP 3.7-δ-β: status (resolution_state)
+   * - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
+   * - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
+   * - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
    */
-  status: "resolved" | "suggest" | "failed" | "clarify";
+  status: "RESOLVED" | "UNRESOLVED" | "INVALID";
+  resolved_coverage_code?: string | null;
   message?: string | null;
   suggested_coverages: SuggestedCoverage[];
   detected_domain?: string | null;
@@ -112,7 +112,10 @@ export interface CoverageResolution {
 // Extend CompareResponse to include slots and STEP 2.5 fields
 // (Until types.generated.ts is regenerated)
 export type CompareResponseWithSlots = CompareResponse & {
-  slots?: ComparisonSlot[];
+  // STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
+  resolution_state: "RESOLVED" | "UNRESOLVED" | "INVALID";
+  resolved_coverage_code?: string | null;
+  slots?: ComparisonSlot[] | null;
   // STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
   primary_coverage_code?: string | null;
   primary_coverage_name?: string | null;
@@ -122,15 +125,50 @@ export type CompareResponseWithSlots = CompareResponse & {
   recovery_message?: string | null;
   // STEP 2.9 + 3.6: Query Anchor with Intent
   anchor?: QueryAnchor | null;
-  // STEP 3.7: Coverage Resolution
+  // STEP 3.7: Coverage Resolution (상세 정보)
   coverage_resolution?: CoverageResolution | null;
 };
 
 // STEP 3.6: Extended CompareRequest with ui_event_type
+// STEP 3.9: Added locked_coverage_code for anchor persistence
+// STEP 4.5: Extended to locked_coverage_codes for multi-subtype support
 export interface CompareRequestWithIntent extends CompareRequest {
   anchor?: QueryAnchor | null;
   ui_event_type?: string | null;
+  // STEP 3.9: 담보 고정 코드 (제공 시 backend에서 resolver 스킵) - deprecated, use locked_coverage_codes
+  locked_coverage_code?: string | null;
+  // STEP 4.5: 복수 담보 고정 코드 (멀티 subtype 지원)
+  locked_coverage_codes?: string[] | null;
 }
+
+// =============================================================================
+// STEP 4.1: Subtype Comparison Types
+// =============================================================================
+
+export interface SubtypeComparisonItem {
+  subtype_code: string;
+  subtype_name: string;
+  info_type: string;  // definition, coverage, conditions
+  info_label: string;  // 정의, 보장 여부, 지급 조건
+  insurer_code: string;
+  value: string | null;
+  confidence: "high" | "medium" | "low" | "not_found";
+  evidence_ref?: {
+    document_id?: number | null;
+    page_start?: number | null;
+  } | null;
+}
+
+export interface SubtypeComparison {
+  subtypes: string[];
+  comparison_items: SubtypeComparisonItem[];
+  is_multi_subtype: boolean;
+}
+
+// Extend CompareResponseWithSlots to include subtype_comparison
+export type CompareResponseWithSubtype = CompareResponseWithSlots & {
+  subtype_comparison?: SubtypeComparison | null;
+};
 
 // =============================================================================
 // UI-Only Types (not from API)

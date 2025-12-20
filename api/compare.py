@@ -12,6 +12,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.retrieval.compare_service import compare, CompareResponse
+from services.extraction.subtype_extractor import (
+    extract_subtypes_from_query,
+    extract_subtype_comparison,
+    is_multi_subtype_query,
+    get_subtype_definition,
+    SubtypeComparisonResult,
+)
 from api.config_loader import (
     get_coverage_domains,
     get_domain_keywords,
@@ -93,6 +100,16 @@ class CompareRequest(BaseModel):
     ui_event_type: str | None = Field(
         None,
         description="UI 이벤트 타입 (coverage_button_click 등 - intent 변경 차단)"
+    )
+    # STEP 3.9: Anchor Persistence - 담보 고정 요청
+    locked_coverage_code: str | None = Field(
+        None,
+        description="고정할 담보 코드 (제공 시 coverage resolver 스킵) - deprecated, use locked_coverage_codes"
+    )
+    # STEP 4.5: Multi-subtype 지원 - 복수 담보 고정
+    locked_coverage_codes: list[str] | None = Field(
+        None,
+        description="고정할 담보 코드 목록 (복수 subtype 비교 시 사용)"
     )
 
     model_config = {
@@ -204,15 +221,17 @@ class SuggestedCoverageResponse(BaseModel):
 
 class CoverageResolutionResponse(BaseModel):
     """
-    STEP 3.7: Coverage Resolution 결과
+    STEP 3.7-δ-β: Coverage Resolution 결과
+    STEP 4.1: SUBTYPE_MULTI 추가
 
-    status:
-    - resolved: 확정된 coverage_code 존재
-    - suggest: 유사 담보 존재하지만 확정 불가 (유저 선택 필요)
-    - failed: 매핑 불가 (재입력 필요)
-    - clarify: 도메인만 추정 가능 (구체화 필요)
+    status (resolution_state):
+    - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
+    - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
+    - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
+    - SUBTYPE_MULTI: 복수 Subtype 비교 (경계성 종양 + 제자리암 등)
     """
-    status: Literal["resolved", "suggest", "failed", "clarify"]
+    status: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
+    resolved_coverage_code: str | None = None
     message: str | None = None
     suggested_coverages: list[SuggestedCoverageResponse] = []
     detected_domain: str | None = None
@@ -256,14 +275,49 @@ class ComparisonSlotResponse(BaseModel):
     diff_summary: str | None = None  # 슬롯별 차이 요약
 
 
+# =============================================================================
+# STEP 4.1: Subtype Comparison Models
+# =============================================================================
+
+class SubtypeComparisonItemResponse(BaseModel):
+    """Subtype별 보험사 비교 항목"""
+    subtype_code: str
+    subtype_name: str
+    info_type: str  # definition, coverage, conditions
+    info_label: str  # 정의, 보장 여부, 지급 조건
+    insurer_code: str
+    value: str | None
+    confidence: Literal["high", "medium", "low", "not_found"] = "medium"
+    evidence_ref: dict | None = None
+
+
+class SubtypeComparisonResponse(BaseModel):
+    """
+    STEP 4.1: Subtype 비교 결과
+
+    경계성 종양, 제자리암 등 질병 하위 개념의
+    정의·포함 여부·조건 중심 비교 제공
+    """
+    subtypes: list[str] = []  # 추출된 subtype 코드 리스트
+    comparison_items: list[SubtypeComparisonItemResponse] = []
+    is_multi_subtype: bool = False  # 복수 subtype 비교 여부
+
+
 class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
-    compare_axis: list[CompareAxisItemResponse]
-    policy_axis: list[PolicyAxisItemResponse]
-    coverage_compare_result: list[CoverageCompareRowResponse]
-    diff_summary: list[DiffSummaryItemResponse]
+    # STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
+    # STEP 4.1: SUBTYPE_MULTI 추가
+    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
+    resolved_coverage_code: str | None = None
+    # 결과 필드들 (resolution_state != RESOLVED 시 null/empty)
+    compare_axis: list[CompareAxisItemResponse] | None = None
+    policy_axis: list[PolicyAxisItemResponse] | None = None
+    coverage_compare_result: list[CoverageCompareRowResponse] | None = None
+    diff_summary: list[DiffSummaryItemResponse] | None = None
     # U-4.8: Comparison Slots
-    slots: list[ComparisonSlotResponse] = []
+    slots: list[ComparisonSlotResponse] | None = None
+    # STEP 4.1: Subtype Comparison (경계성 종양, 제자리암 등)
+    subtype_comparison: SubtypeComparisonResponse | None = None
     # resolved_coverage_codes: 질의에서 자동 추론된 coverage_code 목록
     resolved_coverage_codes: list[str] | None = None
     # STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
@@ -275,7 +329,7 @@ class CompareResponseModel(BaseModel):
     anchor: QueryAnchor | None = None
     # STEP 3.5: Insurer Auto-Recovery 메시지
     recovery_message: str | None = None
-    # STEP 3.7: Coverage Resolution 결과
+    # STEP 3.7: Coverage Resolution 결과 (상세 정보)
     coverage_resolution: CoverageResolutionResponse | None = None
     debug: dict[str, Any]
 
@@ -531,7 +585,7 @@ def _detect_intent_from_query(query: str) -> tuple[Literal["lookup", "compare"],
 
 
 # =============================================================================
-# STEP 3.7: Coverage Resolution Failure Handling
+# STEP 3.7-δ-β: Coverage Resolution State Evaluation
 # =============================================================================
 
 def _evaluate_coverage_resolution(
@@ -540,12 +594,12 @@ def _evaluate_coverage_resolution(
     coverage_recommendations: list[dict[str, Any]] | None,
 ) -> tuple[CoverageResolutionResponse, dict[str, Any]]:
     """
-    STEP 3.7: Coverage Resolution 상태 평가
+    STEP 3.7-δ-β: Coverage Resolution 상태 평가
 
-    핵심 원칙:
-    - coverage_name → coverage_code 매핑 실패는 정상 응답이 아님
-    - 실패 시 "관련 담보 전체 조회" 확장 금지
-    - 실패 시 허용되는 응답 유형: 명시적 실패, 추천, 재질문
+    상태 분류 로직:
+    - candidates == 0 → INVALID (재입력 필요)
+    - candidates == 1 && similarity >= confident → RESOLVED (확정)
+    - candidates >= 1 but not confident → UNRESOLVED (선택 필요)
 
     Args:
         query: 사용자 질의
@@ -556,24 +610,26 @@ def _evaluate_coverage_resolution(
         (CoverageResolutionResponse, debug_info)
     """
     thresholds = get_similarity_thresholds()
-    status_codes = get_resolution_status_codes()
     failure_messages = get_failure_messages()
     max_recommendations = get_max_recommendations()
 
+    num_candidates = len(resolved_coverage_codes) if resolved_coverage_codes else 0
+
     debug_info: dict[str, Any] = {
         "thresholds": thresholds,
-        "resolved_codes_count": len(resolved_coverage_codes) if resolved_coverage_codes else 0,
+        "num_candidates": num_candidates,
         "recommendations_count": len(coverage_recommendations) if coverage_recommendations else 0,
     }
 
-    # Case 1: coverage_codes가 비어있으면 실패
-    if not resolved_coverage_codes:
-        # 도메인 추정 시도
+    # ==========================================================================
+    # Case 1: candidates == 0 → INVALID
+    # ==========================================================================
+    if num_candidates == 0:
         detected_domain = _detect_query_domain(query)
         debug_info["detected_domain"] = detected_domain
 
         if detected_domain:
-            # 도메인은 추정됨 → clarify (재질문)
+            # 도메인은 추정됨 → INVALID with domain suggestions
             domain_coverages = get_domain_representative_coverages()
             domain_info = domain_coverages.get(detected_domain, {})
             domain_display = domain_info.get("display_name", detected_domain)
@@ -589,106 +645,130 @@ def _evaluate_coverage_resolution(
 
             message = failure_messages.get("clarify_domain", "").format(domain=domain_display)
 
-            debug_info["status"] = "clarify"
-            debug_info["reason"] = "domain_detected_no_codes"
+            debug_info["status"] = "INVALID"
+            debug_info["reason"] = "no_candidates_domain_detected"
 
             return CoverageResolutionResponse(
-                status="clarify",
+                status="INVALID",
+                resolved_coverage_code=None,
                 message=message,
                 suggested_coverages=suggested,
                 detected_domain=detected_domain,
             ), debug_info
         else:
-            # 도메인도 추정 불가 → 완전 실패
+            # 도메인도 추정 불가 → INVALID
             message = failure_messages.get("clarify_general", "담보명을 좀 더 구체적으로 입력해 주세요.")
 
-            debug_info["status"] = "failed"
-            debug_info["reason"] = "no_codes_no_domain"
+            debug_info["status"] = "INVALID"
+            debug_info["reason"] = "no_candidates_no_domain"
 
             return CoverageResolutionResponse(
-                status="failed",
+                status="INVALID",
+                resolved_coverage_code=None,
                 message=message,
                 suggested_coverages=[],
                 detected_domain=None,
             ), debug_info
 
-    # Case 2: coverage_codes가 있으면 similarity 체크
-    if coverage_recommendations:
-        # 최고 similarity 확인
-        best_similarity = max(
-            (r.get("similarity", 0.0) for r in coverage_recommendations),
-            default=0.0,
-        )
-        debug_info["best_similarity"] = best_similarity
+    # ==========================================================================
+    # Case 2: candidates >= 1 → RESOLVED or UNRESOLVED
+    # ==========================================================================
+    confident_threshold = thresholds.get("confident", 0.5)
 
-        if best_similarity >= thresholds.get("confident", 0.5):
-            # resolved: 확정
-            debug_info["status"] = "resolved"
-            debug_info["reason"] = "confidence_threshold_met"
+    # similarity 정보 수집 (1위, 2위 - 서로 다른 coverage_code 기준)
+    sorted_recommendations = sorted(
+        coverage_recommendations or [],
+        key=lambda x: x.get("similarity", 0),
+        reverse=True
+    )
 
-            return CoverageResolutionResponse(
-                status="resolved",
-                message=None,
-                suggested_coverages=[],
-                detected_domain=None,
-            ), debug_info
-        elif best_similarity >= thresholds.get("suggest", 0.2):
-            # suggest: 추천 (유저 선택 필요)
-            display_names = get_display_names()
-            coverage_names_map = display_names.get("coverage_names", {})
+    best_similarity = sorted_recommendations[0].get("similarity", 0.0) if sorted_recommendations else 0.0
+    best_code = sorted_recommendations[0].get("coverage_code") if sorted_recommendations else None
 
-            suggested = []
-            seen_codes = set()
-            for r in sorted(coverage_recommendations, key=lambda x: x.get("similarity", 0), reverse=True):
-                code = r.get("coverage_code")
-                if code and code not in seen_codes:
-                    suggested.append(
-                        SuggestedCoverageResponse(
-                            coverage_code=code,
-                            coverage_name=coverage_names_map.get(code, r.get("coverage_name")),
-                            similarity=r.get("similarity", 0.0),
-                            insurer_code=r.get("insurer_code"),
-                        )
-                    )
-                    seen_codes.add(code)
-                    if len(suggested) >= max_recommendations:
-                        break
+    # 2위 찾기: 1위와 다른 coverage_code 중 가장 높은 similarity
+    second_similarity = 0.0
+    second_code = None
+    for r in sorted_recommendations[1:]:
+        if r.get("coverage_code") != best_code:
+            second_similarity = r.get("similarity", 0.0)
+            second_code = r.get("coverage_code")
+            break
 
-            message = failure_messages.get("suggest_intro", "")
+    similarity_gap = best_similarity - second_similarity
 
-            debug_info["status"] = "suggest"
-            debug_info["reason"] = "suggest_threshold_met"
+    debug_info["best_similarity"] = best_similarity
+    debug_info["best_code"] = best_code
+    debug_info["second_similarity"] = second_similarity
+    debug_info["second_code"] = second_code
+    debug_info["similarity_gap"] = similarity_gap
 
-            return CoverageResolutionResponse(
-                status="suggest",
-                message=message,
-                suggested_coverages=suggested,
-                detected_domain=None,
-            ), debug_info
+    # RESOLVED 조건 (완화):
+    # 1) candidates == 1 && similarity >= confident
+    # 2) best_similarity >= confident && gap >= 0.15 (1위가 압도적)
+    # 3) best_similarity >= 0.9 (완벽 매칭에 가까움)
+    gap_threshold = 0.15
+    perfect_match_threshold = 0.9
+    is_single_confident = num_candidates == 1 and best_similarity >= confident_threshold
+    is_gap_confident = best_similarity >= confident_threshold and similarity_gap >= gap_threshold
+    is_perfect_match = best_similarity >= perfect_match_threshold
+
+    if is_single_confident or is_gap_confident or is_perfect_match:
+        resolved_code = best_code
+
+        if is_single_confident:
+            reason = "single_candidate_confident"
+        elif is_perfect_match:
+            reason = "perfect_match"
         else:
-            # 완전 실패 (similarity 너무 낮음)
-            message = failure_messages.get("no_match", "").format(query=query)
+            reason = "gap_confident"
 
-            debug_info["status"] = "failed"
-            debug_info["reason"] = "similarity_too_low"
-
-            return CoverageResolutionResponse(
-                status="failed",
-                message=message,
-                suggested_coverages=[],
-                detected_domain=None,
-            ), debug_info
-    else:
-        # recommendations가 없지만 codes가 있음 (explicit coverage_codes 전달됨)
-        debug_info["status"] = "resolved"
-        debug_info["reason"] = "explicit_codes_provided"
+        debug_info["status"] = "RESOLVED"
+        debug_info["reason"] = reason
 
         return CoverageResolutionResponse(
-            status="resolved",
+            status="RESOLVED",
+            resolved_coverage_code=resolved_code,
             message=None,
             suggested_coverages=[],
             detected_domain=None,
         ), debug_info
+
+    # ==========================================================================
+    # UNRESOLVED: candidates >= 1 but not confident
+    # ==========================================================================
+    display_names = get_display_names()
+    coverage_names_map = display_names.get("coverage_names", {})
+
+    suggested = []
+    seen_codes = set()
+    if coverage_recommendations:
+        for r in sorted(coverage_recommendations, key=lambda x: x.get("similarity", 0), reverse=True):
+            code = r.get("coverage_code")
+            if code and code not in seen_codes:
+                suggested.append(
+                    SuggestedCoverageResponse(
+                        coverage_code=code,
+                        coverage_name=coverage_names_map.get(code, r.get("coverage_name")),
+                        similarity=r.get("similarity", 0.0),
+                        insurer_code=r.get("insurer_code"),
+                    )
+                )
+                seen_codes.add(code)
+                if len(suggested) >= max_recommendations:
+                    break
+
+    message = failure_messages.get("suggest_intro", "아래 담보 중 하나를 선택해 주세요:")
+
+    debug_info["status"] = "UNRESOLVED"
+    debug_info["reason"] = "candidates_not_confident"
+
+    return CoverageResolutionResponse(
+        status="UNRESOLVED",
+        resolved_coverage_code=None,
+        message=message,
+        suggested_coverages=suggested,
+        detected_domain=None,
+    ), debug_info
 
 
 def _resolve_intent(
@@ -1192,6 +1272,8 @@ def _convert_response(
     # STEP 3.7: Coverage Resolution
     coverage_resolution: CoverageResolutionResponse | None = None,
     resolution_debug: dict[str, Any] | None = None,
+    # STEP 4.1: Subtype Comparison
+    subtype_comparison: SubtypeComparisonResponse | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -1241,17 +1323,90 @@ def _convert_response(
         (intent_debug and intent_debug.get("intent_locked") and intent_debug.get("ui_event_blocked_change"))
     )
 
-    # STEP 3.7: Resolution 상태 확인
-    resolution_status = coverage_resolution.status if coverage_resolution else "resolved"
-    anchor_blocked_by_resolution = resolution_status != "resolved"
+    # ==========================================================================
+    # STEP 3.7-δ-β: Resolution State Gate
+    # STEP 4.1: SUBTYPE_MULTI는 특별 처리 (담보 선택 UI 없이 subtype 비교 결과 반환)
+    # ==========================================================================
+    resolution_state = coverage_resolution.status if coverage_resolution else "RESOLVED"
+    resolved_coverage_code = coverage_resolution.resolved_coverage_code if coverage_resolution else None
 
-    if anchor_blocked_by_resolution:
-        # STEP 3.7: coverage 미확정 시 anchor 생성 금지
-        # 기존 anchor도 유지하지 않음 (새 질의로 처리)
-        new_anchor = None
-        merged_debug["anchor_blocked"] = True
-        merged_debug["anchor_blocked_reason"] = f"resolution_status={resolution_status}"
-    elif should_preserve_anchor and input_anchor:
+    # STEP 4.1: SUBTYPE_MULTI 상태 - subtype 비교 결과 포함하여 반환
+    if resolution_state == "SUBTYPE_MULTI":
+        merged_debug["resolution_gate"] = "subtype_multi_allowed"
+        merged_debug["resolution_gate_reason"] = "multi_subtype_comparison"
+
+        # 멀티 Subtype 비교용 요약 문구 생성
+        display_names = get_display_names()
+        insurer_display = display_names.get("insurer_names", {})
+        insurer_names = [insurer_display.get(ic, ic) for ic in final_insurers]
+        insurer_str = ", ".join(insurer_names)
+
+        # subtype_comparison에서 subtype 이름 추출
+        subtype_names = []
+        if subtype_comparison and subtype_comparison.subtypes:
+            for code in subtype_comparison.subtypes:
+                defn = get_subtype_definition(code)
+                if defn:
+                    subtype_names.append(defn.name)
+
+        subtype_str = " 및 ".join(subtype_names) if subtype_names else "경계성 종양 및 제자리암"
+
+        multi_subtype_summary = (
+            f"{insurer_str}의 {subtype_str} 보장 기준을 비교했습니다.\n"
+            f"두 subtype은 동일 담보가 아니며, 보장 정의와 지급 조건이 다를 수 있습니다."
+        )
+
+        return CompareResponseModel(
+            resolution_state=resolution_state,
+            resolved_coverage_code=None,  # STEP 4.1: 단일 coverage_code 확정 금지
+            compare_axis=None,  # 멀티 subtype에서는 compare_axis 불필요
+            policy_axis=None,
+            coverage_compare_result=None,
+            diff_summary=None,
+            slots=None,
+            subtype_comparison=subtype_comparison,  # STEP 4.1: subtype 비교 결과 제공!
+            resolved_coverage_codes=None,
+            primary_coverage_code=None,
+            primary_coverage_name=None,
+            related_coverage_codes=[],
+            user_summary=multi_subtype_summary,  # 멀티 subtype 요약 문구
+            anchor=None,  # STEP 4.1: anchor 생성 금지 (Resolution Lock 금지)
+            recovery_message=recovery_message,
+            coverage_resolution=coverage_resolution,
+            debug=merged_debug,
+        )
+
+    # STEP 3.7-δ-β: RESOLVED가 아니면 (UNRESOLVED, INVALID) 결과 데이터 null 반환
+    if resolution_state != "RESOLVED":
+        merged_debug["resolution_gate"] = "blocked"
+        merged_debug["resolution_gate_reason"] = f"resolution_state={resolution_state}"
+
+        return CompareResponseModel(
+            resolution_state=resolution_state,
+            resolved_coverage_code=resolved_coverage_code,
+            compare_axis=None,
+            policy_axis=None,
+            coverage_compare_result=None,
+            diff_summary=None,
+            slots=None,
+            subtype_comparison=None,
+            resolved_coverage_codes=result.resolved_coverage_codes,
+            primary_coverage_code=None,
+            primary_coverage_name=None,
+            related_coverage_codes=[],
+            user_summary=None,
+            anchor=None,
+            recovery_message=recovery_message,
+            coverage_resolution=coverage_resolution,
+            debug=merged_debug,
+        )
+
+    # ==========================================================================
+    # RESOLVED 상태: 전체 데이터 반환
+    # ==========================================================================
+    anchor_blocked_by_resolution = False  # RESOLVED이므로 anchor 생성 허용
+
+    if should_preserve_anchor and input_anchor:
         # 기존 anchor 유지 (intent도 유지)
         new_anchor = input_anchor
     elif primary_code:
@@ -1266,6 +1421,8 @@ def _convert_response(
         )
 
     return CompareResponseModel(
+        resolution_state=resolution_state,
+        resolved_coverage_code=resolved_coverage_code,
         compare_axis=[
             CompareAxisItemResponse(
                 insurer_code=item.insurer_code,
@@ -1322,6 +1479,8 @@ def _convert_response(
         ],
         # U-4.8: Comparison Slots
         slots=converted_slots,
+        # STEP 4.1: Subtype Comparison
+        subtype_comparison=subtype_comparison,
         # resolved_coverage_codes: top-level 승격
         resolved_coverage_codes=result.resolved_coverage_codes,
         # STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
@@ -1402,10 +1561,26 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         )
         anchor_debug["query_type"] = query_type
 
-        # insurer-only 후속 질의인 경우, anchor의 coverage_code 사용
+        # STEP 3.9 + 4.5: locked_coverage_code(s) 우선 적용
+        # locked_coverage_codes 또는 locked_coverage_code가 있으면 coverage resolver를 완전히 스킵
         coverage_codes_to_use = request.coverage_codes
-        if query_type == "insurer_only" and request.anchor:
-            # anchor에서 coverage_code 복원
+        is_coverage_locked = False
+
+        # STEP 4.5: locked_coverage_codes (복수) 우선, 없으면 locked_coverage_code (단일) 사용
+        effective_locked_codes: list[str] | None = None
+        if request.locked_coverage_codes and len(request.locked_coverage_codes) > 0:
+            effective_locked_codes = request.locked_coverage_codes
+        elif request.locked_coverage_code:
+            effective_locked_codes = [request.locked_coverage_code]
+
+        if effective_locked_codes:
+            # STEP 4.5: 담보 고정 - resolver 스킵
+            coverage_codes_to_use = effective_locked_codes
+            anchor_debug["locked_coverage_codes"] = effective_locked_codes
+            anchor_debug["coverage_locked"] = True
+            is_coverage_locked = True
+        elif query_type == "insurer_only" and request.anchor:
+            # insurer-only 후속 질의인 경우, anchor의 coverage_code 사용
             coverage_codes_to_use = [request.anchor.coverage_code]
             anchor_debug["restored_from_anchor"] = True
             anchor_debug["anchor_coverage_code"] = request.anchor.coverage_code
@@ -1422,12 +1597,39 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             gender=request.gender,
         )
 
+        # =======================================================================
+        # STEP 4.1: 멀티 Subtype 감지 (Resolution 평가보다 먼저!)
+        # =======================================================================
+        is_multi_subtype = is_multi_subtype_query(request.query)
+        extracted_subtypes = extract_subtypes_from_query(request.query) if is_multi_subtype else []
+
         # STEP 3.7: Coverage Resolution 평가
-        # insurer-only 후속 질의이거나 explicit coverage_codes가 제공된 경우 평가 스킵
+        # STEP 3.9: locked_coverage_code, insurer-only 후속 질의, explicit coverage_codes가 제공된 경우 평가 스킵
+        # STEP 4.1: 멀티 Subtype인 경우 SUBTYPE_MULTI 상태 강제 (Resolution Lock 금지)
         coverage_resolution: CoverageResolutionResponse | None = None
         resolution_debug: dict[str, Any] | None = None
 
-        if query_type != "insurer_only" and not request.coverage_codes:
+        if is_multi_subtype:
+            # STEP 4.1: 멀티 Subtype 입력 - Resolution Lock 금지
+            # similarity gap 기반 RESOLVED, perfect_match 기반 RESOLVED 모두 금지
+            coverage_resolution = CoverageResolutionResponse(
+                status="SUBTYPE_MULTI",
+                resolved_coverage_code=None,  # 단일 coverage_code 확정 금지
+                message=None,
+                suggested_coverages=[],
+                detected_domain="CANCER",  # 경계성종양/제자리암은 암 계열
+            )
+            resolution_debug = {
+                "status": "SUBTYPE_MULTI",
+                "reason": "multi_subtype_detected",
+                "subtypes": [s.code for s in extracted_subtypes],
+                "subtype_names": [s.name for s in extracted_subtypes],
+                "resolution_lock_blocked": True,
+            }
+        elif is_coverage_locked:
+            # STEP 3.9: 담보가 고정된 경우 resolution 평가 완전 스킵
+            resolution_debug = {"skipped": True, "reason": "coverage_locked"}
+        elif query_type != "insurer_only" and not request.coverage_codes:
             # 자동 추론된 경우에만 resolution 평가
             coverage_recommendations = result.debug.get("recommended_coverage_details", [])
 
@@ -1435,6 +1637,44 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
                 query=request.query,
                 resolved_coverage_codes=result.resolved_coverage_codes,
                 coverage_recommendations=coverage_recommendations,
+            )
+
+        # STEP 4.1: Subtype Comparison 추출 (다중 subtype 질의인 경우)
+        subtype_comparison_resp: SubtypeComparisonResponse | None = None
+        if is_multi_subtype:
+            # Evidence를 보험사별로 그룹화
+            evidence_by_insurer: dict[str, list] = {ic: [] for ic in final_insurers}
+            for item in result.compare_axis:
+                if item.insurer_code in evidence_by_insurer:
+                    evidence_by_insurer[item.insurer_code].extend(item.evidence)
+            for item in result.policy_axis:
+                if item.insurer_code in evidence_by_insurer:
+                    evidence_by_insurer[item.insurer_code].extend(item.evidence)
+
+            # Subtype 비교 추출
+            subtype_result = extract_subtype_comparison(
+                query=request.query,
+                evidence_by_insurer=evidence_by_insurer,
+                insurers=final_insurers,
+            )
+
+            # 결과를 API 응답 모델로 변환
+            subtype_comparison_resp = SubtypeComparisonResponse(
+                subtypes=subtype_result.subtypes,
+                comparison_items=[
+                    SubtypeComparisonItemResponse(
+                        subtype_code=item.subtype_code,
+                        subtype_name=item.subtype_name,
+                        info_type=item.info_type,
+                        info_label=item.info_label,
+                        insurer_code=item.insurer_code,
+                        value=item.value,
+                        confidence=item.confidence,
+                        evidence_ref=item.evidence_ref,
+                    )
+                    for item in subtype_result.comparison_items
+                ],
+                is_multi_subtype=subtype_result.is_multi_subtype,
             )
 
         return _convert_response(
@@ -1451,6 +1691,8 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             # STEP 3.7: Coverage Resolution
             coverage_resolution=coverage_resolution,
             resolution_debug=resolution_debug,
+            # STEP 4.1: Subtype Comparison
+            subtype_comparison=subtype_comparison_resp,
         )
     except HTTPException:
         raise

@@ -1,0 +1,64 @@
+# STEP 4.0: Diff Summary Text Rules
+#
+# Diff 요약 문구 생성 규칙
+# - 비교 결과 요약만 담당 (유리/불리/추천 표현 금지)
+# - 새로운 계산 로직 추가 금지
+# - 기존 Diff 계산 결과를 텍스트로 변환만 수행
+
+# 숫자 비교 템플릿
+numeric:
+  higher:
+    template: "{field}은 {insurer_high}가 {insurer_low}보다 {delta}{unit} 높습니다."
+    template_ko: "{field}은 {insurer_high}({value_high})가 {insurer_low}({value_low})보다 높습니다."
+  lower:
+    template: "{field}은 {insurer_low}가 {insurer_high}보다 {delta}{unit} 낮습니다."
+    template_ko: "{field}은 {insurer_low}({value_low})가 {insurer_high}({value_high})보다 낮습니다."
+  equal:
+    template: "두 보험사의 {field}은 동일합니다 ({value})."
+    template_ko: "{field}은 모든 보험사가 동일합니다 ({value})."
+
+# 조건/문자열 비교 템플릿
+condition:
+  different:
+    template: "{field}의 적용 조건이 보험사별로 다릅니다."
+    template_ko: "{field}은 보험사마다 조건이 상이합니다."
+  equal:
+    template: "두 보험사의 {field} 조건은 동일합니다."
+    template_ko: "{field} 조건은 모든 보험사가 동일합니다."
+
+# 값 없음 처리
+missing:
+  one_side:
+    template: "{field}은 {insurer_has}에서만 확인됩니다."
+  both_sides:
+    template: "{field}은 확인되지 않았습니다."
+
+# 필드별 한글명 매핑
+field_names:
+  amount: "지급금액"
+  limit: "한도"
+  condition: "지급조건"
+  surgery_type: "수술유형"
+  hospital_grade: "병원급"
+  waiting_period: "면책기간"
+  renewal_period: "갱신주기"
+  coverage_term: "보장기간"
+
+# 보험사 한글명 (display_names.yaml 참조하되 fallback용)
+insurer_names:
+  SAMSUNG: "삼성"
+  MERITZ: "메리츠"
+  LOTTE: "롯데"
+  DB: "DB"
+  KB: "KB"
+  HANWHA: "한화"
+  HYUNDAI: "현대"
+  HEUNGKUK: "흥국"
+
+# 단위 매핑
+units:
+  amount: "원"
+  percentage: "%"
+  days: "일"
+  months: "개월"
+  years: "년"

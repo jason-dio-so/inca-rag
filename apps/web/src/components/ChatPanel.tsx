@@ -52,8 +52,17 @@ interface ChatPanelProps {
   isLoading: boolean;
   /** STEP 3.7-γ: Coverage Guide State (UI State) */
   coverageGuide?: CoverageGuideState | null;
-  /** STEP 3.7-γ: 담보 선택 핸들러 */
+  /** STEP 3.7-γ: 담보 선택 핸들러 (단일) */
   onSelectCoverage?: (coverage: SuggestedCoverage) => void;
+  /** STEP 4.5-β: 담보 선택 핸들러 (복수) */
+  onSelectCoverages?: (coverages: SuggestedCoverage[]) => void;
+  /** STEP 3.7-δ-γ10: Lifted insurer selection state */
+  selectedInsurers: string[];
+  onInsurersChange: (insurers: string[]) => void;
+  /** STEP 3.9: Locked coverage state */
+  lockedCoverage?: { code: string; name: string } | null;
+  /** STEP 3.9: Unlock coverage handler */
+  onUnlockCoverage?: () => void;
 }
 
 export function ChatPanel({
@@ -62,12 +71,14 @@ export function ChatPanel({
   isLoading,
   coverageGuide,
   onSelectCoverage,
+  onSelectCoverages,
+  selectedInsurers,
+  onInsurersChange,
+  lockedCoverage,
+  onUnlockCoverage,
 }: ChatPanelProps) {
   const [query, setQuery] = useState("");
-  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
-    "SAMSUNG",
-    "MERITZ",
-  ]);
+  // STEP 3.7-δ-γ10: selectedInsurers lifted to parent (page.tsx)
   const [age, setAge] = useState<string>("");
   const [gender, setGender] = useState<"M" | "F" | "">("");
   const [topK, setTopK] = useState<number>(5);
@@ -89,12 +100,12 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  // STEP 3.7-δ-γ10: Use lifted state callback
   const toggleInsurer = (insurer: string) => {
-    setSelectedInsurers((prev) =>
-      prev.includes(insurer)
-        ? prev.filter((i) => i !== insurer)
-        : [...prev, insurer]
-    );
+    const newInsurers = selectedInsurers.includes(insurer)
+      ? selectedInsurers.filter((i) => i !== insurer)
+      : [...selectedInsurers, insurer];
+    onInsurersChange(newInsurers);
   };
 
   const handleSend = () => {
@@ -106,6 +117,12 @@ export function ChatPanel({
       query: query.trim(),
       top_k_per_insurer: topK,
     };
+
+    // STEP 3.9: Debug logging for SSOT verification
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[ChatPanel] UI selectedInsurers(state):", selectedInsurers);
+      console.log("[ChatPanel] Outbound payload insurers:", request.insurers);
+    }
 
     if (age) {
       request.age = parseInt(age, 10);
@@ -182,11 +199,12 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* STEP 3.7-γ: Coverage Guide Panel (UI State, NOT Chat State) */}
-            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재 */}
+            {/* STEP 3.7-γ + 4.5-β: Coverage Guide Panel (UI State, NOT Chat State) */}
+            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재, 복수 선택 가능 */}
             <CoverageGuidePanel
               guide={coverageGuide ?? null}
               onSelectCoverage={onSelectCoverage}
+              onSelectCoverages={onSelectCoverages}
             />
           </div>
         </ScrollArea>
@@ -304,6 +322,26 @@ export function ChatPanel({
             </div>
           </CollapsibleContent>
         </Collapsible>
+
+        {/* STEP 3.9: Locked Coverage Display + UNLOCK Button */}
+        {lockedCoverage && (
+          <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+            <Badge variant="default" className="bg-amber-500">
+              🔒 {lockedCoverage.name}
+            </Badge>
+            <span className="text-xs text-amber-700">담보 고정됨</span>
+            {onUnlockCoverage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onUnlockCoverage}
+                className="ml-auto text-xs h-6 px-2"
+              >
+                담보 변경
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Selected Insurers Display (when advanced is closed) */}
         {!advancedOpen && (

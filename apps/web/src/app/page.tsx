@@ -3,6 +3,7 @@
 /**
  * STEP 3.8: Main Page with State Isolation
  * STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene
+ * STEP 3.7-δ-γ: Frontend derives UI only from resolution_state
  *
  * Query State와 View State의 명확한 분리:
  * - Query State: messages, currentResponse, currentAnchor, isLoading
@@ -12,9 +13,13 @@
  *
  * Conversation Hygiene (STEP 3.7-γ):
  * - 담보 미확정 안내는 ChatMessage가 아님
- * - AMBIGUOUS / NOT_FOUND는 UI State로 취급
+ * - UNRESOLVED / INVALID는 UI State로 취급
  * - 가이드는 항상 1개만 존재 (교체, 누적 금지)
- * - EXACT 상태에서만 Chat 로그에 정상 응답 추가
+ * - RESOLVED 상태에서만 Chat 로그에 정상 응답 추가
+ *
+ * STEP 3.7-δ-γ: resolution_state만 사용
+ * - coverage_resolution.status에서 재계산 금지
+ * - API 응답의 resolution_state를 직접 사용
  */
 
 import { useState, useCallback, useEffect, Suspense, useMemo } from "react";
@@ -25,20 +30,18 @@ import { ResultsPanel } from "@/components/ResultsPanel";
 import { PdfPageViewer } from "@/components/PdfPageViewer";
 import { compare } from "@/lib/api";
 import { ChatMessage, CompareRequestWithIntent, CompareResponseWithSlots, QueryAnchor, SuggestedCoverage } from "@/lib/types";
-import { ViewProvider, useViewContext, ViewingDocument } from "@/contexts/ViewContext";
+import { ViewProvider, useViewContext } from "@/contexts/ViewContext";
 import {
   CoverageGuideState,
-  canAddToChatLog,
   createCoverageGuideState,
 } from "@/lib/conversation-hygiene.config";
 import {
   detectResetCondition,
   resolveAnchorUpdate,
   resolveResolutionState,
-  isResolutionLocked,
   logTransition,
 } from "@/lib/resolution-lock.config";
-import { getUIResolutionState } from "@/lib/ui-gating.config";
+import { ResolutionState } from "@/lib/ui-gating.config";
 
 // =============================================================================
 // Deep-link Handler (View State만 변경, Query State 변경 없음)
@@ -135,19 +138,59 @@ function HomeContent() {
   const [coverageGuide, setCoverageGuide] = useState<CoverageGuideState | null>(null);
 
   // ===========================================================================
+  // STEP 3.7-δ-γ10: Lifted Insurer Selection State
+  // - UI 체크박스 선택값이 유일한 Source of Truth
+  // - 담보 선택 시에도 insurers 변경 금지
+  // ===========================================================================
+  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
+    "SAMSUNG",
+    "MERITZ",
+  ]);
+
+  // ===========================================================================
+  // STEP 3.9 + 4.5: Explicit Coverage Lock State
+  // - 사용자가 명시적으로 담보를 선택하면 lock
+  // - UNLOCK 버튼을 누르기 전까지 유지
+  // - STEP 4.5: 복수 담보 지원 (멀티 subtype)
+  // ===========================================================================
+  const [lockedCoverages, setLockedCoverages] = useState<Array<{
+    code: string;
+    name: string;
+  }>>([]);
+
+  // 하위 호환성: 첫 번째 locked coverage 반환
+  const lockedCoverage = lockedCoverages.length > 0 ? lockedCoverages[0] : null;
+
+  // ===========================================================================
   // Query State 변경 함수 (유일한 Query State 변경 경로)
   // STEP 3.8: send_message 이벤트만 Query State 변경 허용
   // STEP 3.7-γ: EXACT 상태에서만 Chat 로그에 응답 추가
   // STEP 3.7-δ: Resolution Lock - EXACT 상태 퇴행 방지
   // ===========================================================================
   const handleSendMessage = useCallback(async (request: CompareRequestWithIntent) => {
-    // STEP 3.7-δ: 리셋 조건 감지 (새 담보 키워드 질의 등)
-    const resetCondition = detectResetCondition(request.query, currentAnchor);
+    // STEP 3.9 + 4.5: 명시적 coverage lock이 있으면 항상 사용 (리셋 조건 무시)
+    // lockedCoverages는 사용자가 UNLOCK 버튼을 누르기 전까지 유지
+    const effectiveLockedCodes = lockedCoverages.length > 0
+      ? lockedCoverages.map(c => c.code)
+      : undefined;
+
+    // STEP 3.7-δ: 리셋 조건 감지 (새 담보 키워드 질의 등) - lock이 없을 때만 적용
+    const resetCondition = lockedCoverages.length > 0 ? null : detectResetCondition(request.query, currentAnchor);
+
+    console.log("[STEP 4.5] Anchor Persistence:", {
+      query: request.query,
+      lockedCoverages,
+      effectiveLockedCodes,
+      resetCondition,
+      currentAnchor: currentAnchor?.coverage_code,
+    });
 
     // STEP 3.6: 이전 anchor가 있으면 요청에 포함 (리셋 조건이 아닐 때만)
+    // STEP 4.5: locked_coverage_codes 사용 (복수 담보 지원)
     const requestWithAnchor: CompareRequestWithIntent = {
       ...request,
       anchor: resetCondition ? undefined : (currentAnchor ?? undefined),
+      locked_coverage_codes: effectiveLockedCodes,
     };
 
     // STEP 3.7-γ: 새 질의 시 기존 가이드 제거 (교체 준비)
@@ -170,31 +213,31 @@ function HomeContent() {
       const response = await compare(requestWithAnchor);
 
       // =======================================================================
-      // STEP 3.7-δ: Resolution Lock 적용
+      // STEP 3.7-δ-γ: Resolution Lock 적용 (resolution_state 직접 사용)
       // - Lock 위반 시 기존 anchor 유지, 새 resolution 무시
       // =======================================================================
-      const currentState = currentAnchor ? "EXACT" : null; // anchor가 있으면 EXACT
-      const newState = getUIResolutionState(response.coverage_resolution);
+      const currentState: ResolutionState | null = currentAnchor ? "RESOLVED" : null;
+      const newState: ResolutionState = response.resolution_state || "RESOLVED";
 
       // Resolution Lock: anchor 업데이트 결정
       const resolvedAnchor = resolveAnchorUpdate(
         currentAnchor,
         response.anchor,
-        response.coverage_resolution,
+        newState,
         resetCondition
       );
 
-      // Resolution Lock: 상태 결정 (Lock 위반 시 EXACT 유지)
+      // Resolution Lock: 상태 결정 (Lock 위반 시 RESOLVED 유지)
       const resolvedState = resolveResolutionState(
         currentAnchor,
-        response.coverage_resolution,
+        newState,
         resetCondition
       );
 
       // 디버그 로그
       logTransition(currentState, newState, resolvedState === newState, resetCondition ?? undefined);
 
-      // STEP 3.7-δ: Lock 위반 시 기존 anchor + 기존 response 유지
+      // STEP 3.7-δ-γ: Lock 위반 시 기존 anchor + 기존 response 유지
       const isLockViolated = resolvedState !== newState;
       setCurrentAnchor(resolvedAnchor);
 
@@ -206,20 +249,32 @@ function HomeContent() {
       }
 
       // =======================================================================
-      // STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
-      // STEP 3.7-δ: resolvedState 기반으로 판단 (Lock 적용 후)
+      // STEP 3.7-δ-γ5: resolution_state 우선순위 (UNRESOLVED > INVALID > RESOLVED)
+      // - UNRESOLVED: "담보 선택 필요" + 후보 버튼
+      // - INVALID: "담보 미확정" (후보 없음)
+      // - RESOLVED: 결과 표시
       // =======================================================================
-      const canAddToChat = resolvedState === "EXACT";
+      const canAddToChat = resolvedState === "RESOLVED";
 
       if (!canAddToChat) {
-        // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-        const guide = createCoverageGuideState(response.coverage_resolution, request.query);
+        // (A) UNRESOLVED / INVALID: ChatMessage 추가 ❌, Guide Panel 표시 ✅
+        // STEP 3.7-δ-γ6: 전체 후보 렌더링 (slice/filter 없음)
+        const candidates =
+          response.coverage_resolution?.suggested_coverages ?? [];
+
+        const guide = createCoverageGuideState({
+          resolutionState: resolvedState,
+          message: response.coverage_resolution?.message,
+          suggestedCoverages: candidates,
+          detectedDomain: response.coverage_resolution?.detected_domain,
+          originalQuery: request.query,
+        });
         setCoverageGuide(guide);
         // 사용자 메시지는 이미 추가됨, assistant 메시지는 추가하지 않음
         return;
       }
 
-      // (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
+      // (B) RESOLVED: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
       setCoverageGuide(null);
 
       // STEP 2.5: 사용자 친화적 요약 사용 (API에서 제공)
@@ -268,26 +323,72 @@ function HomeContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentAnchor]);
+  }, [currentAnchor, lockedCoverages]);
 
   // ===========================================================================
-  // STEP 3.7-γ: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // STEP 3.7-δ-γ2 + 4.5: 담보 선택 핸들러 (Guide Panel에서 담보 선택 시)
+  // coverage_code를 직접 전달하여 즉시 RESOLVED 상태로 전환
+  // STEP 3.7-δ-γ10: UI 선택된 insurers 유지 (하드코딩 금지)
+  // STEP 4.5: 복수 담보 선택 지원 (멀티 subtype)
   // ===========================================================================
   const handleSelectCoverage = useCallback((coverage: SuggestedCoverage) => {
-    // 선택된 담보로 새 질의 실행
-    const newQuery = coverage.coverage_name || coverage.coverage_code;
-    if (newQuery) {
-      // 가이드 제거 후 새 질의 실행
+    const coverageCode = coverage.coverage_code;
+    const coverageName = coverage.coverage_name || coverageCode;
+    if (coverageCode) {
+      // STEP 4.5: 사용자가 담보를 선택하면 명시적으로 lock
+      setLockedCoverages([{ code: coverageCode, name: coverageName }]);
       setCoverageGuide(null);
-      // ChatPanel의 인터페이스를 통해 질의하지 않고, 직접 비교 요청
-      // 이전 request의 insurers 등을 유지하기 위해 기본값 사용
+
+      console.log("[STEP 4.5] Coverage locked by user:", { code: coverageCode, name: coverageName });
+
+      // STEP 3.7-δ-γ10: UI 선택된 insurers 사용 (기본값 하드코딩 금지)
       handleSendMessage({
-        query: newQuery,
-        insurers: ["SAMSUNG", "MERITZ"], // 기본값, 실제로는 이전 선택 유지 필요
+        query: coverageName,
+        insurers: selectedInsurers, // UI 선택값 사용
+        coverage_codes: [coverageCode],
         top_k_per_insurer: 5,
       });
     }
-  }, [handleSendMessage]);
+  }, [handleSendMessage, selectedInsurers]);
+
+  // ===========================================================================
+  // STEP 4.5-β: 복수 담보 선택 핸들러 (멀티 subtype 비교)
+  // ===========================================================================
+  const handleSelectCoverages = useCallback((coverages: SuggestedCoverage[]) => {
+    if (coverages.length === 0) return;
+
+    const lockedItems = coverages.map(c => ({
+      code: c.coverage_code,
+      name: c.coverage_name || c.coverage_code,
+    }));
+    const codes = coverages.map(c => c.coverage_code);
+    const names = coverages.map(c => c.coverage_name || c.coverage_code).join(", ");
+
+    setLockedCoverages(lockedItems);
+    setCoverageGuide(null);
+
+    console.log("[STEP 4.5-β] Multiple coverages locked by user:", lockedItems);
+
+    handleSendMessage({
+      query: names,
+      insurers: selectedInsurers,
+      coverage_codes: codes,
+      top_k_per_insurer: 5,
+    });
+  }, [handleSendMessage, selectedInsurers]);
+
+  // ===========================================================================
+  // STEP 3.9 + 4.5: UNLOCK 핸들러 (담보 변경 버튼)
+  // - 명시적 lock 해제
+  // - 다음 질의에서 다시 UNRESOLVED 플로우로 진입
+  // ===========================================================================
+  const handleUnlockCoverage = useCallback(() => {
+    console.log("[STEP 4.5] Coverage unlocked by user");
+    setLockedCoverages([]);
+    setCurrentAnchor(null);
+    setCoverageGuide(null);
+    setCurrentResponse(null);
+  }, []);
 
   // ===========================================================================
   // Memoized Response (STEP 3.8: 불필요한 re-render 방지)
@@ -330,6 +431,11 @@ function HomeContent() {
             isLoading={isLoading}
             coverageGuide={coverageGuide}
             onSelectCoverage={handleSelectCoverage}
+            onSelectCoverages={handleSelectCoverages}
+            selectedInsurers={selectedInsurers}
+            onInsurersChange={setSelectedInsurers}
+            lockedCoverage={lockedCoverage}
+            onUnlockCoverage={handleUnlockCoverage}
           />
         </div>
       </div>
