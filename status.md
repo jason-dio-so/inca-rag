@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.1: 다중 Subtype 비교 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.2: DB 복구 안정화 완료)
 
 ---
 
@@ -77,12 +77,60 @@
 | **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
 | **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
 | **STEP 4.1** | **다중 Subtype 비교 (경계성 종양/제자리암)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.2** | **DB 복구 안정화 (schema.sql 현행화 + Option A+)** | **DevOps/DB** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+
+## STEP 4.2: DB 복구 안정화 (schema.sql 현행화 + Option A+) (2025-12-20)
+
+### 배경
+Docker crash 후 DB 재생성 시:
+- coverage_standard/coverage_alias가 수동 입력으로 잘못 적재됨
+- migrations 2건 (trgm 인덱스, comparison_slot_cache)이 미적용됨
+- 엑셀 기준 28개 표준코드 vs 6개 수동 입력 불일치
+
+### 수행 내용
+
+1. **schema.sql 현행화 (squash)**
+   - `idx_chunk_content_trgm`: chunk.content 전체 trigram 인덱스
+   - `idx_chunk_content_trgm_policy`: 약관 전용 부분 인덱스
+   - `idx_chunk_insurer_doctype`: 복합 검색 인덱스
+   - `comparison_slot_cache` 테이블 + 인덱스 + 트리거
+
+2. **Option A+ 스크립트 추가**
+   - 경로: `tools/reset_db_option_a_plus.sh`
+   - coverage_standard/coverage_alias TRUNCATE
+   - `담보명mapping자료.xlsx` 기반 적재 (28개 표준코드, 264개 alias)
+   - 누락 인덱스/테이블 자동 생성
+   - 검증: rowcount, extension, index, table
+
+3. **감사 리포트**
+   - `docs/audit/db_gap_report_20251220.md`
+
+### 검증 결과
+
+| 항목 | 기대값 | 실제값 | 상태 |
+|------|--------|--------|------|
+| coverage_standard | 28 | 28 | ✅ |
+| coverage_alias | 264 | 264 | ✅ |
+| pg_trgm extension | 존재 | 존재 | ✅ |
+| trgm 인덱스 | 2+ | 2 | ✅ |
+| comparison_slot_cache | 존재 | 존재 | ✅ |
+
+### 관련 커밋
+- `e31a53c`: chore(db): squash migrations into schema.sql
+- `637feec`: tools: add reset_db_option_a_plus for reproducible coverage reload
+
+### 주의사항
+- API 컨테이너 재빌드 필요 시 `docker compose -f docker-compose.demo.yml build api`
+- 새 DB 생성 시 schema.sql만으로 전체 스키마 적용됨
+- coverage 데이터는 `tools/reset_db_option_a_plus.sh` 또는 `load_coverage_mapping.py`로 적재
+
+---
 
 ## STEP 4.1: 다중 Subtype 비교 (경계성 종양/제자리암) (2025-12-20)
 
