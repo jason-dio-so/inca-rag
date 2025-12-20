@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.9 Anchor Persistence)
+> 최종 업데이트: 2025-12-20 (STEP 4.0 Diff Summary & Evidence Priority)
 
 ---
 
@@ -74,12 +74,56 @@
 | **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
 | **STEP 3.9** | **Anchor Persistence / locked_coverage_code** | **기능** | ✅ 완료 |
+| **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+
+## STEP 4.0: Diff Summary Text & Evidence Priority Ordering (2025-12-20)
+
+### 목표
+- 비교 결과 가독성 향상: Diff 탭에 요약 문구 추가
+- Evidence 신뢰성 표시: P1/P2/P3 우선순위로 정렬 및 표시
+- 표현만 변경, 비교 로직/계산/해석 변경 금지
+
+### 구현
+
+**1. Diff Summary Text**
+- `config/rules/diff_summary_rules.yaml`: 요약 문구 템플릿 정의
+- `apps/web/src/lib/diff-summary.config.ts`: 프론트엔드 규칙 로더
+- Diff 탭 상단에 요약 섹션 추가
+
+**2. Evidence Priority**
+- `config/rules/evidence_priority_rules.yaml`: 우선순위 분류 규칙
+- `apps/web/src/lib/evidence-priority.config.ts`: P1/P2/P3 분류 로직
+
+| 우선순위 | 이름 | 설명 | 표시 |
+|----------|------|------|------|
+| P1 | 결정 근거 | 금액/값이 직접 추출된 문장 | ⭐⭐⭐ (펼침) |
+| P2 | 해석 근거 | 정의/조건 설명 문장 | ⭐⭐ (접힘) |
+| P3 | 보조 근거 | 요약/설명성 문장 | ⭐ (접힘) |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/diff_summary_rules.yaml` | 신규 - Diff 요약 규칙 |
+| `config/rules/evidence_priority_rules.yaml` | 신규 - Evidence 우선순위 규칙 |
+| `apps/web/src/lib/diff-summary.config.ts` | 신규 - Diff 요약 config |
+| `apps/web/src/lib/evidence-priority.config.ts` | 신규 - Evidence 우선순위 config |
+| `apps/web/src/components/DiffSummary.tsx` | 요약 섹션 추가 |
+| `apps/web/src/components/EvidencePanel.tsx` | 우선순위 정렬 및 배지 표시 |
+
+### 금지 사항 준수
+- ✅ Diff 계산 로직 변경 없음
+- ✅ Evidence 내용 수정/요약 없음
+- ✅ 유리/불리/추천 표현 미사용
+- ✅ Resolution Lock 영향 없음
+
+---
 
 ## STEP 3.9: Anchor Persistence / locked_coverage_code (2025-12-20)
 
