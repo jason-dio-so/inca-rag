@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.4: UI Contract Debug View 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.5: locked_coverage_codes 확장 완료)
 
 ---
 
@@ -80,12 +80,39 @@
 | **STEP 4.2** | **DB 복구 안정화 (schema.sql 현행화 + Option A+)** | **DevOps/DB** | ✅ 완료 |
 | **STEP 4.3** | **API/Container Code Sync Audit** | **DevOps/검증** | ✅ 완료 |
 | **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
+| **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.5: locked_coverage_codes 확장 (2025-12-20)
+
+### 목적
+멀티 subtype 비교를 위해 `locked_coverage_code` (단일)을 `locked_coverage_codes` (복수)로 확장
+
+### 변경 사항
+
+**1. Backend (api/compare.py)**
+- `locked_coverage_codes: list[str] | None` 필드 추가
+- `locked_coverage_codes` 우선, `locked_coverage_code` fallback 처리
+- `anchor_debug.locked_coverage_codes` 배열로 표시
+
+**2. Frontend**
+- `types.ts`: `CompareRequestWithIntent.locked_coverage_codes` 추가
+- `page.tsx`: `lockedCoverage` → `lockedCoverages` (배열) 변경
+- `ResultsPanel.tsx`: Contract Debug에 `locked_coverage_codes` 표시
+
+### 하위 호환성
+- 기존 `locked_coverage_code` (단일)도 계속 지원
+- 복수 형태가 우선 적용됨
+
+### 관련 커밋
+- `d901d37`: feat: STEP 4.5 locked_coverage_codes for multi-subtype support
+
+---
 
 ## STEP 4.4: UI Contract Debug View (2025-12-20)
 
