@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.5-β: 복수 담보 선택 UI 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.6: 멀티 Subtype 비교 UX 고도화 완료)
 
 ---
 
@@ -82,12 +82,71 @@
 | **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
 | **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
+| **STEP 4.6** | **멀티 Subtype 비교 UX 고도화 (소비 규약 고정)** | **UI/아키텍처** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.6: 멀티 Subtype 비교 UX 고도화 (2025-12-20)
+
+### 목적
+1. **정답 소비 규약 고정**: Backend가 제공하는 유일한 정답 경로를 UI에서 일관되게 소비
+2. **멀티 Subtype 비교 UX 정식화**: 경계성 종양 + 제자리암 등 복수 subtype 동시 비교 지원
+
+### 절대 규약 (Hard Contract Rules)
+
+**Coverage Lock 규약** (단 하나의 정답 경로):
+```
+debug.anchor.coverage_locked
+debug.anchor.locked_coverage_codes
+```
+- ❌ 최상위 필드 참조 금지
+- ❌ anchor_debug 직접 참조 금지
+
+**Suggested Coverage 소비 규약**:
+```
+coverage_resolution.suggested_coverages
+```
+- ❌ debug 내부 추천 데이터 사용 금지
+
+### 구현
+
+**1. ResultsPanel.tsx - Lock 규약 수정**
+- `debug.anchor.*` 경로만 사용
+- Contract Debug View에 정답 경로 명시
+
+**2. SubtypeComparePanel.tsx - Subtype별 결과 분리 표시**
+- Accordion 형태로 Subtype별 그룹핑
+- 각 Subtype: 보장 여부 / 정의 요약 / 지급 조건
+- 금액 중심 단일 테이블 표현 금지
+
+**3. Debug View 책임 분리**
+- "🔧 Debug (개발자 전용)" 라벨
+- 경고 메시지 추가: "이 섹션은 개발자/QA 전용입니다"
+- 사용자 UX 판단 기준으로 사용 금지
+
+### 검증 시나리오 (모두 PASS)
+
+| 시나리오 | 입력 | 결과 |
+|----------|------|------|
+| A: 단일 subtype | `locked_coverage_codes: ["A4200_1"]` | `coverage_locked: true`, RESOLVED ✅ |
+| B: 멀티 subtype | `locked_coverage_codes: ["A4200_1", "A4210"]` | `coverage_locked: true`, SUBTYPE_MULTI, 2개 subtype ✅ |
+| C: 미선택 | (없음) | UNRESOLVED, suggested_coverages 표시 ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `ResultsPanel.tsx` | debug.anchor.* 경로 사용, Debug 섹션 책임 분리 |
+| `SubtypeComparePanel.tsx` | Subtype별 Accordion 그룹핑 UI |
+
+### 관련 커밋
+- `ecc8738`: feat: STEP 4.6 multi-subtype UX refinement with contract rules
+
+---
 
 ## STEP 4.5-β: 복수 담보 선택 UI (2025-12-20)
 

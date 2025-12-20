@@ -278,7 +278,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
         </ScrollArea>
       </Tabs>
 
-      {/* Debug Section */}
+      {/* STEP 4.6: Debug Section - 개발자/QA 전용 (사용자 UX에서 분리) */}
       <div className="border-t">
         <Collapsible open={debugOpen} onOpenChange={setDebugOpen}>
           <CollapsibleTrigger asChild>
@@ -287,7 +287,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
               size="sm"
               className="w-full justify-between rounded-none"
             >
-              <span className="text-xs text-muted-foreground">Debug</span>
+              <span className="text-xs text-muted-foreground">🔧 Debug (개발자 전용)</span>
               {debugOpen ? (
                 <ChevronDown className="h-3 w-3" />
               ) : (
@@ -298,9 +298,13 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           <CollapsibleContent>
             <ScrollArea className="h-[300px]">
               <div className="p-4 space-y-4">
-                {/* STEP 4.4: Contract Debug View */}
+                {/* STEP 4.6: 개발자 전용 경고 */}
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                  ⚠️ 이 섹션은 개발자/QA 전용입니다. 사용자 UX 판단 기준으로 사용하지 마세요.
+                </div>
+                {/* STEP 4.4 + 4.6: Contract Debug View (정답 경로 표시) */}
                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                  <h4 className="text-sm font-medium text-purple-800 mb-2">Contract Debug (STEP 4.4):</h4>
+                  <h4 className="text-sm font-medium text-purple-800 mb-2">Contract Debug (정답 경로):</h4>
                   <div className="text-xs text-purple-700 space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">resolution_state:</span>
@@ -317,17 +321,30 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
                       {response.coverage_resolution?.suggested_coverages?.length ?? 0}
                     </div>
                     {(() => {
+                      // STEP 4.6: 정답 경로 - debug.anchor.* 사용 (최상위 필드 참조 금지)
                       const debug = response.debug as Record<string, unknown> | undefined;
-                      // STEP 4.5: locked_coverage_codes 우선, fallback으로 locked_coverage_code
-                      const lockedCodes = (debug as { locked_coverage_codes?: string[] })?.locked_coverage_codes;
-                      const lockedCode = (debug as { locked_coverage_code?: string })?.locked_coverage_code;
-                      const displayCodes = lockedCodes ?? (lockedCode ? [lockedCode] : null);
-                      return displayCodes && displayCodes.length > 0 ? (
-                        <div>
-                          <span className="font-medium">locked_coverage_codes:</span>{" "}
-                          <span className="text-green-700">{displayCodes.join(", ")}</span>
-                        </div>
-                      ) : null;
+                      const anchor = debug?.anchor as {
+                        coverage_locked?: boolean;
+                        locked_coverage_codes?: string[];
+                      } | undefined;
+                      const coverageLocked = anchor?.coverage_locked;
+                      const lockedCodes = anchor?.locked_coverage_codes;
+                      return (
+                        <>
+                          <div>
+                            <span className="font-medium">debug.anchor.coverage_locked:</span>{" "}
+                            <span className={coverageLocked ? "text-green-700" : "text-gray-500"}>
+                              {coverageLocked === true ? "true" : coverageLocked === false ? "false" : "(undefined)"}
+                            </span>
+                          </div>
+                          {lockedCodes && lockedCodes.length > 0 && (
+                            <div>
+                              <span className="font-medium">debug.anchor.locked_coverage_codes:</span>{" "}
+                              <span className="text-green-700">{lockedCodes.join(", ")}</span>
+                            </div>
+                          )}
+                        </>
+                      );
                     })()}
                   </div>
                 </div>
