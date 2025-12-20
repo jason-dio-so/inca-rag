@@ -1717,6 +1717,7 @@ def compare(
     db_url: str | None = None,
     age: int | None = None,
     gender: Literal["M", "F"] | None = None,
+    locked_coverage_codes: list[str] | None = None,  # STEP 4.7: 고정된 담보 코드
 ) -> CompareResponse:
     """
     2-Phase Retrieval 비교 검색
@@ -1904,6 +1905,15 @@ def compare(
         slot_type_for_retrieval = determine_slot_type_from_codes(resolved_coverage_codes)
         debug["slot_type_for_retrieval"] = slot_type_for_retrieval
 
+        # STEP 4.7: locked_coverage_codes가 있으면 effective_locked_code 결정
+        # fallback 시 coverage_code로 사용 (단일 insurer 기준)
+        effective_locked_code: str | None = None
+        if locked_coverage_codes and len(locked_coverage_codes) > 0:
+            effective_locked_code = locked_coverage_codes[0]
+
+        # STEP 4.7: retrieval fallback 추적용
+        retrieval_debug: dict[str, Any] = {}
+
         for insurer_code in insurers:
             # Find insurer's compare_axis entries
             insurer_evidence = []
@@ -1954,10 +1964,25 @@ def compare(
                     )
                     if existing_result is None:
                         # Create new CompareAxisResult for this insurer
+                        # STEP 4.7: locked_coverage_codes가 있으면 해당 코드 사용
+                        # "__amount_fallback__"은 locked 상태에서 절대 금지
+                        fallback_coverage_code = (
+                            effective_locked_code
+                            if effective_locked_code
+                            else "__amount_fallback__"
+                        )
+
+                        # STEP 4.7: fallback 사용 여부 debug에 기록
+                        if effective_locked_code:
+                            retrieval_debug["fallback_used"] = True
+                            retrieval_debug["fallback_reason"] = "no_tagged_chunks_for_locked_code"
+                            retrieval_debug["fallback_source"] = "amount_pass_2"
+                            retrieval_debug["effective_locked_code"] = effective_locked_code
+
                         compare_axis.append(
                             CompareAxisResult(
                                 insurer_code=insurer_code,
-                                coverage_code="__amount_fallback__",
+                                coverage_code=fallback_coverage_code,
                                 coverage_name=None,
                                 doc_type_counts={},
                                 evidence=amount_evidence,
@@ -1977,6 +2002,10 @@ def compare(
 
         debug["timing_ms"]["amount_retrieval_2pass"] = round((time.time() - start) * 1000, 2)
         debug["amount_retrieval_used"] = amount_retrieval_used
+
+        # STEP 4.7: retrieval fallback debug 정보 추가
+        if retrieval_debug:
+            debug["retrieval"] = retrieval_debug
 
         # Policy Axis (resolved_policy_keywords 사용)
         start = time.time()

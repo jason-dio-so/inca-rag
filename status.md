@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.7: Subtype Description Quality 강화)
+> 최종 업데이트: 2025-12-20 (STEP 4.7-β: 단일 회사 특정 담보 조회 결과 생성 보장)
 
 ---
 
@@ -84,12 +84,73 @@
 | **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
 | **STEP 4.6** | **멀티 Subtype 비교 UX 고도화 (소비 규약 고정)** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 4.7** | **Subtype Description Quality 강화 (4요소 규약)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.7-β** | **단일 회사 특정 담보 조회 결과 생성 보장** | **기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.7-β: 단일 회사 특정 담보 조회 결과 생성 보장 (2025-12-20)
+
+### 목적
+단일 회사 + 특정 담보 조회(`locked_coverage_codes`) 요청 시 RESOLVED 상태에서 실제 비교 결과가 생성되지 않는 문제 수정
+
+### 문제 분석
+
+**As-Is (문제 상황)**:
+- 입력: `{"query": "암진단비", "insurers": ["SAMSUNG"], "locked_coverage_codes": ["A4200_1"]}`
+- `resolution_state`: RESOLVED ✅
+- `debug.anchor.coverage_locked`: true ✅
+- `coverage_compare_result[0].coverage_code`: **`__amount_fallback__`** ❌
+
+**원인**:
+1. DB에 `A4200_1`로 태깅된 chunk가 0건
+2. `get_compare_axis()`가 빈 결과 반환
+3. 2-pass fallback으로 `get_amount_bearing_evidence()` 호출
+4. 새 `CompareAxisResult` 생성 시 `coverage_code="__amount_fallback__"` 하드코딩
+
+**To-Be (수정 후)**:
+- `locked_coverage_codes`가 제공된 경우, fallback 결과의 `coverage_code`도 해당 locked code 사용
+- `__amount_fallback__`은 locked 상태에서 UI/사용자에게 절대 노출 금지
+
+### 구현
+
+**1. compare_service.py**
+- `compare()` 함수에 `locked_coverage_codes: list[str] | None` 파라미터 추가
+- `effective_locked_code = locked_coverage_codes[0]` (단일 insurer 기준)
+- fallback 시:
+  - `coverage_code = effective_locked_code` (not `__amount_fallback__`)
+  - `debug.retrieval.fallback_used = true`
+  - `debug.retrieval.fallback_reason = "no_tagged_chunks_for_locked_code"`
+  - `debug.retrieval.fallback_source = "amount_pass_2"`
+
+**2. api/compare.py**
+- `compare()` 호출 시 `locked_coverage_codes=effective_locked_codes` 전달
+
+### 검증 기준 (DoD)
+
+| 조건 | 기대값 |
+|------|--------|
+| `debug.anchor.coverage_locked` | `true` |
+| `resolution_state` | `RESOLVED` |
+| `coverage_compare_result[0].coverage_code` | `A4200_1` (not `__amount_fallback__`) |
+| `debug.retrieval.fallback_used` | `true` (DB 태깅 누락 시) |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | `locked_coverage_codes` 파라미터 추가, fallback 시 effective_locked_code 사용 |
+| `api/compare.py` | `compare()` 호출 시 `locked_coverage_codes` 전달 |
+| `status.md` | STEP 4.7-β 문서화 |
+
+### 비고
+- Docker/DB 미실행 상태로 실제 E2E 테스트는 미수행
+- 코드 변경 적용 후 서버 재시작 필요
+
+---
 
 ## STEP 4.7: Subtype Description Quality 강화 (2025-12-20)
 

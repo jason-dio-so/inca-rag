@@ -1595,6 +1595,8 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             policy_keywords=request.policy_keywords,
             age=request.age,
             gender=request.gender,
+            # STEP 4.7: locked_coverage_codes 전달 (fallback 시 coverage_code 정체성 유지)
+            locked_coverage_codes=effective_locked_codes,
         )
 
         # =======================================================================
