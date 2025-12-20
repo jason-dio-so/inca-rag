@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.6: 멀티 Subtype 비교 UX 고도화 완료)
+> 최종 업데이트: 2025-12-20 (STEP 4.7: Subtype Description Quality 강화)
 
 ---
 
@@ -83,12 +83,76 @@
 | **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
 | **STEP 4.6** | **멀티 Subtype 비교 UX 고도화 (소비 규약 고정)** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 4.7** | **Subtype Description Quality 강화 (4요소 규약)** | **기능/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.7: Subtype Description Quality 강화 (2025-12-20)
+
+### 목적
+Subtype별 비교 항목을 4요소(Definition/Condition/Boundary/Evidence)로 규격화하여 정보 품질 향상
+
+### 4요소 규약
+
+| 요소 | 설명 | 필수 |
+|------|------|------|
+| **Definition** (정의) | 해당 subtype의 약관 정의 | ✅ |
+| **Condition** (지급 조건) | 보장 조건, 대기기간 등 | ✅ |
+| **Boundary** (경계/감액/제한) | 감액, 지급률, 면책, 제외 조건 | ✅ |
+| **Evidence** (근거 인용) | doc_type + page + excerpt | ✅ |
+
+### Evidence 우선순위
+1. 약관 (최우선)
+2. 사업방법서
+3. 가입설계서
+4. 상품요약서 (보조만)
+
+### 구현
+
+**1. config/rules/subtype_slots.yaml**
+- `boundary` info_type 추가 (priority: 4, required: true)
+- `boundary_keywords` 리스트: 감액, 지급률, 면책, 제외, 미지급, 한도, 90일 등
+- 모든 subtype `comparison_focus`에 "경계/감액/제한" 추가
+
+**2. services/extraction/subtype_extractor.py**
+- `BOUNDARY_KEYWORDS` 상수 정의
+- `_extract_boundary()` 함수: 경계/감액/제한 정보 추출
+- `evidence_ref` 필드 강화: `doc_type`, `excerpt` 추가
+- `unknown_reason` 필드: 미확인 시 사유 표시
+
+**3. apps/web/src/lib/types.ts**
+- `SubtypeComparisonItem.evidence_ref` 강화:
+  - `doc_type?: string | null` (약관, 사업방법서, 상품요약서)
+  - `excerpt?: string | null` (원문 발췌 1-2문장)
+- `unknown_reason?: string | null` 추가
+
+**4. apps/web/src/components/SubtypeComparePanel.tsx**
+- `infoTypeOrder`: coverage → definition → conditions → boundary
+- `EvidenceIndicator` 컴포넌트: doc_type/page/excerpt 표시
+- Boundary 미발견 시 "특이 조건 없음" 표시
+
+### 검증 시나리오 (모두 PASS)
+
+| 시나리오 | 입력 | 결과 |
+|----------|------|------|
+| A: Multi-subtype 4요소 | `query: "경계성 종양과 제자리암 비교"` | 4 info_types (definition, coverage, conditions, boundary), evidence_ref with doc_type/excerpt ✅ |
+| B: locked_coverage_codes | `locked_coverage_codes: ["A4200_1","A4210"]` | `debug.anchor.coverage_locked: true` ✅ |
+| C: UNRESOLVED | `query: "다빈치 수술비 비교"` | `resolution_state: UNRESOLVED`, suggested_coverages 표시 ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/rules/subtype_slots.yaml` | boundary info_type + keywords 추가 |
+| `services/extraction/subtype_extractor.py` | _extract_boundary(), enhanced evidence_ref |
+| `apps/web/src/lib/types.ts` | SubtypeComparisonItem.evidence_ref 강화 |
+| `apps/web/src/components/SubtypeComparePanel.tsx` | EvidenceIndicator 컴포넌트, 4요소 순서 |
+
+---
 
 ## STEP 4.6: 멀티 Subtype 비교 UX 고도화 (2025-12-20)
 

@@ -135,11 +135,12 @@ export function SubtypeComparePanel({
 }
 
 /**
- * STEP 4.6: 각 Subtype의 비교 테이블
+ * STEP 4.6 + 4.7: 각 Subtype의 비교 테이블
  * - 보장 여부
- * - 정의 요약
- * - 지급 조건
- * - (근거 문서는 Evidence 탭 참조)
+ * - 정의 (Definition)
+ * - 지급 조건 (Condition)
+ * - 경계/감액/제한 (Boundary) - STEP 4.7 추가
+ * - Evidence는 셀 내부에 근거 표시 (STEP 4.7)
  */
 function SubtypeGroupTable({
   subtypeCode,
@@ -150,7 +151,8 @@ function SubtypeGroupTable({
   infoTypes: Record<string, Record<string, SubtypeComparisonItem>>;
   insurers: string[];
 }) {
-  const infoTypeOrder = ["coverage", "definition", "conditions"];
+  // STEP 4.7: 4요소 순서 (coverage → definition → conditions → boundary)
+  const infoTypeOrder = ["coverage", "definition", "conditions", "boundary"];
   const sortedInfoTypes = Object.keys(infoTypes).sort((a, b) => {
     const idxA = infoTypeOrder.indexOf(a);
     const idxB = infoTypeOrder.indexOf(b);
@@ -202,10 +204,27 @@ function SubtypeGroupTable({
   );
 }
 
+/**
+ * STEP 4.7: 각 셀에 값 + Evidence 표시
+ */
 function SubtypeValueCell({ item }: { item: SubtypeComparisonItem }) {
+  // STEP 4.7: 미확인 시 사유 표시
   if (item.confidence === "not_found" || !item.value) {
+    // boundary 타입은 "특이 경계 조건 없음"으로 표시
+    if (item.info_type === "boundary") {
+      return (
+        <span className="text-muted-foreground text-xs">특이 조건 없음</span>
+      );
+    }
     return (
-      <span className="text-muted-foreground text-xs">미확인</span>
+      <div className="text-xs">
+        <span className="text-muted-foreground">미확인</span>
+        {item.unknown_reason && (
+          <div className="text-muted-foreground/60 mt-1 text-[10px]">
+            ({item.unknown_reason})
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -213,23 +232,32 @@ function SubtypeValueCell({ item }: { item: SubtypeComparisonItem }) {
   if (item.info_type === "coverage") {
     if (item.value === "Y") {
       return (
-        <Badge variant="default" className="bg-green-500 text-xs">
-          보장
-        </Badge>
+        <div>
+          <Badge variant="default" className="bg-green-500 text-xs">
+            보장
+          </Badge>
+          <EvidenceIndicator item={item} />
+        </div>
       );
     }
     if (item.value === "N") {
       return (
-        <Badge variant="destructive" className="text-xs">
-          제외
-        </Badge>
+        <div>
+          <Badge variant="destructive" className="text-xs">
+            제외
+          </Badge>
+          <EvidenceIndicator item={item} />
+        </div>
       );
     }
     if (item.value === "부분보장") {
       return (
-        <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-xs">
-          부분보장
-        </Badge>
+        <div>
+          <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-xs">
+            부분보장
+          </Badge>
+          <EvidenceIndicator item={item} />
+        </div>
       );
     }
     return (
@@ -239,13 +267,54 @@ function SubtypeValueCell({ item }: { item: SubtypeComparisonItem }) {
     );
   }
 
-  // Definition or conditions (text)
+  // Definition, conditions, or boundary (text)
   return (
-    <div
-      className="text-xs text-left max-w-[200px] overflow-hidden text-ellipsis"
-      title={item.value}
-    >
-      {item.value.length > 50 ? `${item.value.slice(0, 50)}...` : item.value}
+    <div className="text-left">
+      <div
+        className="text-xs max-w-[200px] overflow-hidden text-ellipsis"
+        title={item.value}
+      >
+        {item.value.length > 50 ? `${item.value.slice(0, 50)}...` : item.value}
+      </div>
+      <EvidenceIndicator item={item} />
+    </div>
+  );
+}
+
+/**
+ * STEP 4.7: Evidence Indicator Component
+ * 각 셀 하단에 근거 정보 표시 (doc_type, page, excerpt)
+ */
+function EvidenceIndicator({ item }: { item: SubtypeComparisonItem }) {
+  const evidenceRef = item.evidence_ref;
+
+  // 근거 정보가 없으면 표시하지 않음
+  if (!evidenceRef || (!evidenceRef.doc_type && !evidenceRef.page_start && !evidenceRef.excerpt)) {
+    return null;
+  }
+
+  // 문서 유형 라벨
+  const docTypeLabel = evidenceRef.doc_type || "문서";
+  const pageInfo = evidenceRef.page_start ? `p.${evidenceRef.page_start}` : null;
+
+  return (
+    <div className="mt-1 text-[10px] text-muted-foreground/70">
+      {/* 문서 유형 + 페이지 */}
+      <div className="flex items-center gap-1">
+        <span className="text-blue-600/70">[{docTypeLabel}]</span>
+        {pageInfo && <span>{pageInfo}</span>}
+      </div>
+      {/* 원문 발췌 (있는 경우) */}
+      {evidenceRef.excerpt && (
+        <div
+          className="mt-0.5 italic text-[9px] line-clamp-2"
+          title={evidenceRef.excerpt}
+        >
+          "{evidenceRef.excerpt.length > 40
+            ? `${evidenceRef.excerpt.slice(0, 40)}...`
+            : evidenceRef.excerpt}"
+        </div>
+      )}
     </div>
   );
 }

@@ -226,6 +226,13 @@ COVERAGE_POSITIVE_KEYWORDS = ["보장", "지급", "보험금", "해당"]
 COVERAGE_NEGATIVE_KEYWORDS = ["제외", "면책", "지급하지", "해당하지", "보장하지"]
 PARTIAL_PAYMENT_KEYWORDS = ["감액", "50%", "20%", "10%", "지급률", "일부지급", "부분지급"]
 
+# STEP 4.7: 경계/감액/제한 키워드 (약관에서 추출)
+BOUNDARY_KEYWORDS = [
+    "감액", "지급률", "면책", "제외", "미지급", "한도", "특약",
+    "해당하지 아니", "단", "다만", "50%", "20%", "10%", "1년", "90일",
+    "대기기간", "면책기간", "보장개시일", "책임개시일"
+]
+
 
 def extract_subtype_comparison(
     query: str,
@@ -289,6 +296,7 @@ def _focus_to_info_type(focus: str) -> str:
         "정의": "definition",
         "보장 여부": "coverage",
         "지급 조건": "conditions",
+        "경계/감액/제한": "boundary",  # STEP 4.7
         "포함 질병": "included_diseases",
         "지급 비율": "payment_ratio",
         "보장 범위": "coverage_scope",
@@ -363,10 +371,15 @@ def _extract_subtype_info(
                 best_evidence_ref = {
                     "document_id": getattr(ev, 'document_id', None),
                     "page_start": getattr(ev, 'page_start', None),
+                    "doc_type": ev.doc_type,  # STEP 4.7: 문서 유형 추가
+                    "excerpt": preview[:100] if len(preview) > 100 else preview,  # STEP 4.7: 근거 발췌
                 }
             continue
         elif info_type == "conditions":
             value = _extract_conditions(preview, found_keyword)
+        elif info_type == "boundary":
+            # STEP 4.7: 경계/감액/제한 추출
+            value = _extract_boundary(preview, found_keyword)
         else:
             value = _extract_generic(preview, found_keyword)
 
@@ -377,6 +390,8 @@ def _extract_subtype_info(
             best_evidence_ref = {
                 "document_id": getattr(ev, 'document_id', None),
                 "page_start": getattr(ev, 'page_start', None),
+                "doc_type": ev.doc_type,  # STEP 4.7: 문서 유형 추가
+                "excerpt": preview[:100] if len(preview) > 100 else preview,  # STEP 4.7: 근거 발췌
             }
 
     return SubtypeComparisonItem(
@@ -469,6 +484,48 @@ def _extract_conditions(preview: str, keyword: str) -> str | None:
 
     # 조건 키워드 없으면 주변 텍스트
     return context[:150].strip() if len(context) >= 20 else None
+
+
+def _extract_boundary(preview: str, keyword: str) -> str | None:
+    """
+    STEP 4.7: 경계/감액/제한 추출
+
+    경계 조건: 감액, 지급률, 면책, 제외, 미지급, 한도, 대기기간 등
+    """
+    keyword_lower = keyword.lower()
+    preview_lower = preview.lower()
+
+    idx = preview_lower.find(keyword_lower)
+    if idx == -1:
+        return None
+
+    # 경계/제한 관련 키워드 검색
+    # 키워드 주변에서 경계 조건 문구 찾기
+    start = max(0, idx - 50)
+    end = min(len(preview), idx + len(keyword) + 250)
+    context = preview[start:end]
+    context_lower = context.lower()
+
+    # 경계 조건 키워드 탐지
+    found_boundary_keywords = []
+    for bk in BOUNDARY_KEYWORDS:
+        if bk.lower() in context_lower:
+            found_boundary_keywords.append(bk)
+
+    if found_boundary_keywords:
+        # 첫 번째 발견된 경계 키워드 주변 텍스트 추출
+        first_bk = found_boundary_keywords[0]
+        bk_idx = context_lower.find(first_bk.lower())
+        if bk_idx != -1:
+            snippet_start = max(0, bk_idx - 30)
+            snippet_end = min(len(context), bk_idx + 120)
+            snippet = context[snippet_start:snippet_end].strip()
+            if len(snippet) >= 15:
+                return snippet[:150]
+
+    # 경계 키워드 없으면 "특이 경계 조건 없음" 또는 주변 텍스트
+    # 약관에서 경계 조건이 없다면 "해당 없음"으로 처리
+    return None  # UI에서 "특이 경계 조건 없음"으로 표시
 
 
 def _extract_generic(preview: str, keyword: str) -> str | None:

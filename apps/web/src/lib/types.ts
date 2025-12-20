@@ -148,15 +148,20 @@ export interface CompareRequestWithIntent extends CompareRequest {
 export interface SubtypeComparisonItem {
   subtype_code: string;
   subtype_name: string;
-  info_type: string;  // definition, coverage, conditions
-  info_label: string;  // 정의, 보장 여부, 지급 조건
+  info_type: string;  // definition, coverage, conditions, boundary (STEP 4.7)
+  info_label: string;  // 정의, 보장 여부, 지급 조건, 경계/감액/제한
   insurer_code: string;
   value: string | null;
   confidence: "high" | "medium" | "low" | "not_found";
+  // STEP 4.7: 강화된 evidence 필드
   evidence_ref?: {
     document_id?: number | null;
     page_start?: number | null;
+    doc_type?: string | null;  // 약관, 사업방법서, 상품요약서
+    excerpt?: string | null;   // 원문 발췌 (1-2문장)
   } | null;
+  // STEP 4.7: 불명확 시 사유
+  unknown_reason?: string | null;
 }
 
 export interface SubtypeComparison {
