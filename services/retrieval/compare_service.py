@@ -7,6 +7,7 @@ policy_axis: 약관에서 키워드 기반 검색 (A2 정책: 약관은 비교�
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
+import yaml
 from psycopg.rows import dict_row
 
 from services.extraction.amount_extractor import extract_amount, AmountExtract
@@ -119,30 +121,59 @@ def get_hybrid_vector_top_k() -> int:
     return int(os.environ.get("COMPARE_AXIS_VECTOR_TOP_K", "20"))
 
 
+_logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Query Normalization (헌법 준수: 설정 파일에서만 규칙 로드)
+# ============================================================================
+
+_CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
+
+
 def _load_insurer_aliases() -> list[str]:
-    """insurer_alias.yaml에서 모든 보험사 alias 로드 (긴 것부터 정렬)"""
-    config_path = Path(__file__).parent.parent.parent / "config" / "mappings" / "insurer_alias.yaml"
+    """
+    insurer_alias.yaml에서 모든 보험사 alias 로드 (긴 것부터 정렬)
+
+    헌법 준수: 하드코딩 fallback 금지. 설정 파일이 SSOT.
+    로드 실패 시 빈 리스트 반환 + 경고 로그.
+    """
+    config_path = _CONFIG_DIR / "mappings" / "insurer_alias.yaml"
     try:
         with open(config_path, encoding="utf-8") as f:
-            import yaml
             data = yaml.safe_load(f) or {}
             # 모든 key (alias)를 가져와서 긴 것부터 정렬 (greedy match)
             aliases = list(data.keys())
             aliases.sort(key=lambda x: len(x), reverse=True)
             return aliases
-    except Exception:
-        # fallback: 하드코딩된 기본 리스트 (긴 것부터)
-        return [
-            "메리츠손해보험", "현대손해보험", "한화손해보험", "DB손해보험", "KB손해보험",
-            "롯데손해보험", "흥국손해보험", "메리츠화재", "현대해상", "한화손보",
-            "삼성화재", "삼성생명", "흥국화재", "롯데손보", "KB손보", "DB손보",
-            "디비손보", "케이비", "삼성", "메리츠", "현대", "한화", "롯데", "흥국",
-            "디비", "samsung", "meritz", "hyundai", "hanwha", "lotte", "heungkuk", "db", "kb"
-        ]
+    except FileNotFoundError:
+        _logger.error(f"[CRITICAL] insurer_alias.yaml not found: {config_path}")
+        return []
+    except Exception as e:
+        _logger.error(f"[CRITICAL] Failed to load insurer_alias.yaml: {e}")
+        return []
 
 
-# 모듈 로드 시 한 번만 로드
+def _load_normalization_rules() -> dict:
+    """
+    query_normalization.yaml에서 정규화 규칙 로드
+
+    헌법 준수: 하드코딩 금지. 설정 파일이 SSOT.
+    """
+    config_path = _CONFIG_DIR / "rules" / "query_normalization.yaml"
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        _logger.error(f"[CRITICAL] query_normalization.yaml not found: {config_path}")
+        return {}
+    except Exception as e:
+        _logger.error(f"[CRITICAL] Failed to load query_normalization.yaml: {e}")
+        return {}
+
+
+# 모듈 로드 시 한 번만 로드 (캐시)
 _INSURER_ALIASES: list[str] | None = None
+_NORMALIZATION_RULES: dict | None = None
 
 
 def _get_insurer_aliases() -> list[str]:
@@ -153,46 +184,57 @@ def _get_insurer_aliases() -> list[str]:
     return _INSURER_ALIASES
 
 
+def _get_normalization_rules() -> dict:
+    """캐시된 정규화 규칙 반환"""
+    global _NORMALIZATION_RULES
+    if _NORMALIZATION_RULES is None:
+        _NORMALIZATION_RULES = _load_normalization_rules()
+    return _NORMALIZATION_RULES
+
+
 def normalize_query_for_coverage(query: str) -> str:
     """
     coverage 추천을 위한 query 정규화
-    - 보험사명 제거 (중요: similarity 검색 정확도 향상)
-    - 질의 의도 표현 제거 (비교해줘, 알려줘 등)
+
+    헌법 준수: 모든 규칙은 config/rules/query_normalization.yaml에서 로드
+    - 보험사명 제거 (config/mappings/insurer_alias.yaml)
+    - 질의 의도 표현 제거
     - 공백 제거
     - 특수문자 제거
-    - 소문자 변환은 하지 않음 (한글이므로)
     """
+    rules = _get_normalization_rules()
     normalized = query
 
-    # 보험사명/alias 제거 (긴 것부터 제거하여 부분 매칭 방지)
+    # 1. 보험사명/alias 제거 (긴 것부터 제거하여 부분 매칭 방지)
     for alias in _get_insurer_aliases():
         normalized = normalized.replace(alias, "")
 
-    # "과", "와", "의", "를", "을" 등 조사 제거 (보험사명 제거 후 남은 조사)
-    normalized = re.sub(r"^[과와의를을에서]|[과와의를을에서]$", "", normalized)
-    normalized = re.sub(r"[과와](?=[가-힣])", "", normalized)  # "삼성과현대" -> "현대" 후 "과" 제거
+    # 2. 중간 조사 제거 (보험사명 제거 후 남은 조사)
+    intermediate = rules.get("intermediate_particles", {})
+    if boundary_pattern := intermediate.get("boundary_pattern"):
+        normalized = re.sub(boundary_pattern, "", normalized)
+    if conjunction_pattern := intermediate.get("conjunction_pattern"):
+        normalized = re.sub(conjunction_pattern, "", normalized)
 
-    # 공백 제거 (먼저 수행)
-    normalized = normalized.replace(" ", "")
+    # 3. 공백 제거
+    if rules.get("options", {}).get("strip_whitespace", True):
+        normalized = normalized.replace(" ", "")
 
-    # 질의 의도 표현 제거 (긴 것부터)
-    intent_suffixes = [
-        "를비교해줘", "을비교해줘", "비교해줘", "비교해", "비교",
-        "를알려줘", "을알려줘", "알려줘", "알려",
-        "를찾아줘", "을찾아줘", "찾아줘", "찾아",
-        "어떻게되나요", "어떻게돼", "뭐야", "뭐가있어",
-        "좀", "요", "해줘", "해",
-    ]
+    # 4. 질의 의도 표현 제거 (긴 것부터)
+    intent_suffixes = rules.get("intent_suffixes", [])
     for suffix in intent_suffixes:
         if normalized.endswith(suffix):
             normalized = normalized[:-len(suffix)]
             break
 
-    # 끝에 남은 조사 제거
-    normalized = re.sub(r"[를을의에]$", "", normalized)
+    # 5. 끝에 남은 조사 제거
+    if trailing_pattern := rules.get("trailing_particles_pattern"):
+        normalized = re.sub(trailing_pattern, "", normalized)
 
-    # 일반적인 특수문자 제거 (괄호, 하이픈 등 유지)
-    normalized = re.sub(r"[,\.;:!?]", "", normalized)
+    # 6. 특수문자 제거
+    if punctuation_pattern := rules.get("punctuation_pattern"):
+        normalized = re.sub(punctuation_pattern, "", normalized)
+
     return normalized
 
 
