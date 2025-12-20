@@ -11,6 +11,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
@@ -118,15 +119,78 @@ def get_hybrid_vector_top_k() -> int:
     return int(os.environ.get("COMPARE_AXIS_VECTOR_TOP_K", "20"))
 
 
+def _load_insurer_aliases() -> list[str]:
+    """insurer_alias.yaml에서 모든 보험사 alias 로드 (긴 것부터 정렬)"""
+    config_path = Path(__file__).parent.parent.parent / "config" / "mappings" / "insurer_alias.yaml"
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            import yaml
+            data = yaml.safe_load(f) or {}
+            # 모든 key (alias)를 가져와서 긴 것부터 정렬 (greedy match)
+            aliases = list(data.keys())
+            aliases.sort(key=lambda x: len(x), reverse=True)
+            return aliases
+    except Exception:
+        # fallback: 하드코딩된 기본 리스트 (긴 것부터)
+        return [
+            "메리츠손해보험", "현대손해보험", "한화손해보험", "DB손해보험", "KB손해보험",
+            "롯데손해보험", "흥국손해보험", "메리츠화재", "현대해상", "한화손보",
+            "삼성화재", "삼성생명", "흥국화재", "롯데손보", "KB손보", "DB손보",
+            "디비손보", "케이비", "삼성", "메리츠", "현대", "한화", "롯데", "흥국",
+            "디비", "samsung", "meritz", "hyundai", "hanwha", "lotte", "heungkuk", "db", "kb"
+        ]
+
+
+# 모듈 로드 시 한 번만 로드
+_INSURER_ALIASES: list[str] | None = None
+
+
+def _get_insurer_aliases() -> list[str]:
+    """캐시된 보험사 alias 리스트 반환"""
+    global _INSURER_ALIASES
+    if _INSURER_ALIASES is None:
+        _INSURER_ALIASES = _load_insurer_aliases()
+    return _INSURER_ALIASES
+
+
 def normalize_query_for_coverage(query: str) -> str:
     """
     coverage 추천을 위한 query 정규화
+    - 보험사명 제거 (중요: similarity 검색 정확도 향상)
+    - 질의 의도 표현 제거 (비교해줘, 알려줘 등)
     - 공백 제거
     - 특수문자 제거
     - 소문자 변환은 하지 않음 (한글이므로)
     """
-    # 공백 제거
-    normalized = query.replace(" ", "")
+    normalized = query
+
+    # 보험사명/alias 제거 (긴 것부터 제거하여 부분 매칭 방지)
+    for alias in _get_insurer_aliases():
+        normalized = normalized.replace(alias, "")
+
+    # "과", "와", "의", "를", "을" 등 조사 제거 (보험사명 제거 후 남은 조사)
+    normalized = re.sub(r"^[과와의를을에서]|[과와의를을에서]$", "", normalized)
+    normalized = re.sub(r"[과와](?=[가-힣])", "", normalized)  # "삼성과현대" -> "현대" 후 "과" 제거
+
+    # 공백 제거 (먼저 수행)
+    normalized = normalized.replace(" ", "")
+
+    # 질의 의도 표현 제거 (긴 것부터)
+    intent_suffixes = [
+        "를비교해줘", "을비교해줘", "비교해줘", "비교해", "비교",
+        "를알려줘", "을알려줘", "알려줘", "알려",
+        "를찾아줘", "을찾아줘", "찾아줘", "찾아",
+        "어떻게되나요", "어떻게돼", "뭐야", "뭐가있어",
+        "좀", "요", "해줘", "해",
+    ]
+    for suffix in intent_suffixes:
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)]
+            break
+
+    # 끝에 남은 조사 제거
+    normalized = re.sub(r"[를을의에]$", "", normalized)
+
     # 일반적인 특수문자 제거 (괄호, 하이픈 등 유지)
     normalized = re.sub(r"[,\.;:!?]", "", normalized)
     return normalized
