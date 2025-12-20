@@ -16,6 +16,7 @@ from services.extraction.subtype_extractor import (
     extract_subtypes_from_query,
     extract_subtype_comparison,
     is_multi_subtype_query,
+    get_subtype_definition,
     SubtypeComparisonResult,
 )
 from api.config_loader import (
@@ -216,13 +217,15 @@ class SuggestedCoverageResponse(BaseModel):
 class CoverageResolutionResponse(BaseModel):
     """
     STEP 3.7-δ-β: Coverage Resolution 결과
+    STEP 4.1: SUBTYPE_MULTI 추가
 
     status (resolution_state):
     - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
     - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
     - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
+    - SUBTYPE_MULTI: 복수 Subtype 비교 (경계성 종양 + 제자리암 등)
     """
-    status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    status: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
     resolved_coverage_code: str | None = None
     message: str | None = None
     suggested_coverages: list[SuggestedCoverageResponse] = []
@@ -298,7 +301,8 @@ class SubtypeComparisonResponse(BaseModel):
 class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
     # STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
-    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    # STEP 4.1: SUBTYPE_MULTI 추가
+    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
     resolved_coverage_code: str | None = None
     # 결과 필드들 (resolution_state != RESOLVED 시 null/empty)
     compare_axis: list[CompareAxisItemResponse] | None = None
@@ -1316,11 +1320,58 @@ def _convert_response(
 
     # ==========================================================================
     # STEP 3.7-δ-β: Resolution State Gate
+    # STEP 4.1: SUBTYPE_MULTI는 특별 처리 (담보 선택 UI 없이 subtype 비교 결과 반환)
     # ==========================================================================
     resolution_state = coverage_resolution.status if coverage_resolution else "RESOLVED"
     resolved_coverage_code = coverage_resolution.resolved_coverage_code if coverage_resolution else None
 
-    # STEP 3.7-δ-β: RESOLVED가 아니면 결과 데이터 null 반환
+    # STEP 4.1: SUBTYPE_MULTI 상태 - subtype 비교 결과 포함하여 반환
+    if resolution_state == "SUBTYPE_MULTI":
+        merged_debug["resolution_gate"] = "subtype_multi_allowed"
+        merged_debug["resolution_gate_reason"] = "multi_subtype_comparison"
+
+        # 멀티 Subtype 비교용 요약 문구 생성
+        display_names = get_display_names()
+        insurer_display = display_names.get("insurer_names", {})
+        insurer_names = [insurer_display.get(ic, ic) for ic in final_insurers]
+        insurer_str = ", ".join(insurer_names)
+
+        # subtype_comparison에서 subtype 이름 추출
+        subtype_names = []
+        if subtype_comparison and subtype_comparison.subtypes:
+            for code in subtype_comparison.subtypes:
+                defn = get_subtype_definition(code)
+                if defn:
+                    subtype_names.append(defn.name)
+
+        subtype_str = " 및 ".join(subtype_names) if subtype_names else "경계성 종양 및 제자리암"
+
+        multi_subtype_summary = (
+            f"{insurer_str}의 {subtype_str} 보장 기준을 비교했습니다.\n"
+            f"두 subtype은 동일 담보가 아니며, 보장 정의와 지급 조건이 다를 수 있습니다."
+        )
+
+        return CompareResponseModel(
+            resolution_state=resolution_state,
+            resolved_coverage_code=None,  # STEP 4.1: 단일 coverage_code 확정 금지
+            compare_axis=None,  # 멀티 subtype에서는 compare_axis 불필요
+            policy_axis=None,
+            coverage_compare_result=None,
+            diff_summary=None,
+            slots=None,
+            subtype_comparison=subtype_comparison,  # STEP 4.1: subtype 비교 결과 제공!
+            resolved_coverage_codes=None,
+            primary_coverage_code=None,
+            primary_coverage_name=None,
+            related_coverage_codes=[],
+            user_summary=multi_subtype_summary,  # 멀티 subtype 요약 문구
+            anchor=None,  # STEP 4.1: anchor 생성 금지 (Resolution Lock 금지)
+            recovery_message=recovery_message,
+            coverage_resolution=coverage_resolution,
+            debug=merged_debug,
+        )
+
+    # STEP 3.7-δ-β: RESOLVED가 아니면 (UNRESOLVED, INVALID) 결과 데이터 null 반환
     if resolution_state != "RESOLVED":
         merged_debug["resolution_gate"] = "blocked"
         merged_debug["resolution_gate_reason"] = f"resolution_state={resolution_state}"
@@ -1333,7 +1384,7 @@ def _convert_response(
             coverage_compare_result=None,
             diff_summary=None,
             slots=None,
-            subtype_comparison=None,  # STEP 4.1
+            subtype_comparison=None,
             resolved_coverage_codes=result.resolved_coverage_codes,
             primary_coverage_code=None,
             primary_coverage_name=None,
@@ -1534,12 +1585,36 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             gender=request.gender,
         )
 
+        # =======================================================================
+        # STEP 4.1: 멀티 Subtype 감지 (Resolution 평가보다 먼저!)
+        # =======================================================================
+        is_multi_subtype = is_multi_subtype_query(request.query)
+        extracted_subtypes = extract_subtypes_from_query(request.query) if is_multi_subtype else []
+
         # STEP 3.7: Coverage Resolution 평가
         # STEP 3.9: locked_coverage_code, insurer-only 후속 질의, explicit coverage_codes가 제공된 경우 평가 스킵
+        # STEP 4.1: 멀티 Subtype인 경우 SUBTYPE_MULTI 상태 강제 (Resolution Lock 금지)
         coverage_resolution: CoverageResolutionResponse | None = None
         resolution_debug: dict[str, Any] | None = None
 
-        if is_coverage_locked:
+        if is_multi_subtype:
+            # STEP 4.1: 멀티 Subtype 입력 - Resolution Lock 금지
+            # similarity gap 기반 RESOLVED, perfect_match 기반 RESOLVED 모두 금지
+            coverage_resolution = CoverageResolutionResponse(
+                status="SUBTYPE_MULTI",
+                resolved_coverage_code=None,  # 단일 coverage_code 확정 금지
+                message=None,
+                suggested_coverages=[],
+                detected_domain="CANCER",  # 경계성종양/제자리암은 암 계열
+            )
+            resolution_debug = {
+                "status": "SUBTYPE_MULTI",
+                "reason": "multi_subtype_detected",
+                "subtypes": [s.code for s in extracted_subtypes],
+                "subtype_names": [s.name for s in extracted_subtypes],
+                "resolution_lock_blocked": True,
+            }
+        elif is_coverage_locked:
             # STEP 3.9: 담보가 고정된 경우 resolution 평가 완전 스킵
             resolution_debug = {"skipped": True, "reason": "coverage_locked"}
         elif query_type != "insurer_only" and not request.coverage_codes:
@@ -1554,7 +1629,7 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
 
         # STEP 4.1: Subtype Comparison 추출 (다중 subtype 질의인 경우)
         subtype_comparison_resp: SubtypeComparisonResponse | None = None
-        if is_multi_subtype_query(request.query):
+        if is_multi_subtype:
             # Evidence를 보험사별로 그룹화
             evidence_by_insurer: dict[str, list] = {ic: [] for ic in final_insurers}
             for item in result.compare_axis:
