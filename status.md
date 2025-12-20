@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.0 Diff Summary & Evidence Priority)
+> 최종 업데이트: 2025-12-20 (BUGFIX: normalize_query_for_coverage)
 
 ---
 
@@ -75,6 +75,7 @@
 | **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
 | **STEP 3.9** | **Anchor Persistence / locked_coverage_code** | **기능** | ✅ 완료 |
 | **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
+| **BUGFIX** | **normalize_query_for_coverage 보험사명/의도표현 제거** | **버그수정** | ✅ 완료 |
 
 ---
 
@@ -122,6 +123,32 @@
 - ✅ Evidence 내용 수정/요약 없음
 - ✅ 유리/불리/추천 표현 미사용
 - ✅ Resolution Lock 영향 없음
+
+---
+
+## BUGFIX: normalize_query_for_coverage 보험사명/의도표현 제거 (2025-12-20)
+
+### 문제
+- 질의: "삼성과 현대 다빈치 수술비를 비교해줘"
+- 증상: `resolution_state: INVALID`, `recommended_coverage_codes: []`
+- 원인: `normalize_query_for_coverage()`가 보험사명을 제거하지 않아 pg_trgm similarity가 낮음
+
+### 해결
+`services/retrieval/compare_service.py`의 `normalize_query_for_coverage()` 수정:
+1. `config/mappings/insurer_alias.yaml`에서 보험사 alias 로드 (긴 것부터)
+2. 보험사명 제거: "삼성과 현대 다빈치 수술비를 비교해줘" → "다빈치 수술비를 비교해줘"
+3. 의도 표현 제거: "비교해줘", "알려줘", "찾아줘" 등
+4. 끝 조사 제거: "를", "을", "의", "에"
+
+### 결과
+| 질의 | Before | After |
+|------|--------|-------|
+| "삼성과 현대 다빈치 수술비를 비교해줘" | INVALID | UNRESOLVED (A9630_1 다빈치로봇암수술비) |
+| "삼성 암진단비" | "삼성 암진단비" | "암진단비" |
+| "메리츠 뇌졸중진단비 알려줘" | "메리츠 뇌졸중진단비 알려줘" | "뇌졸중진단비" |
+
+### 커밋
+- `c98ef9c`: fix: normalize_query_for_coverage strips insurer names and intent suffixes
 
 ---
 
