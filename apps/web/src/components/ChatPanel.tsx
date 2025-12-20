@@ -57,6 +57,10 @@ interface ChatPanelProps {
   /** STEP 3.7-δ-γ10: Lifted insurer selection state */
   selectedInsurers: string[];
   onInsurersChange: (insurers: string[]) => void;
+  /** STEP 3.9: Locked coverage state */
+  lockedCoverage?: { code: string; name: string } | null;
+  /** STEP 3.9: Unlock coverage handler */
+  onUnlockCoverage?: () => void;
 }
 
 export function ChatPanel({
@@ -67,6 +71,8 @@ export function ChatPanel({
   onSelectCoverage,
   selectedInsurers,
   onInsurersChange,
+  lockedCoverage,
+  onUnlockCoverage,
 }: ChatPanelProps) {
   const [query, setQuery] = useState("");
   // STEP 3.7-δ-γ10: selectedInsurers lifted to parent (page.tsx)
@@ -108,6 +114,12 @@ export function ChatPanel({
       query: query.trim(),
       top_k_per_insurer: topK,
     };
+
+    // STEP 3.9: Debug logging for SSOT verification
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[ChatPanel] UI selectedInsurers(state):", selectedInsurers);
+      console.log("[ChatPanel] Outbound payload insurers:", request.insurers);
+    }
 
     if (age) {
       request.age = parseInt(age, 10);
@@ -306,6 +318,26 @@ export function ChatPanel({
             </div>
           </CollapsibleContent>
         </Collapsible>
+
+        {/* STEP 3.9: Locked Coverage Display + UNLOCK Button */}
+        {lockedCoverage && (
+          <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+            <Badge variant="default" className="bg-amber-500">
+              🔒 {lockedCoverage.name}
+            </Badge>
+            <span className="text-xs text-amber-700">담보 고정됨</span>
+            {onUnlockCoverage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onUnlockCoverage}
+                className="ml-auto text-xs h-6 px-2"
+              >
+                담보 변경
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Selected Insurers Display (when advanced is closed) */}
         {!advancedOpen && (
