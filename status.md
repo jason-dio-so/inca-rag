@@ -90,6 +90,18 @@
 - 경계성 종양, 제자리암 등 **질병 하위 개념(Subtype)**이 복수로 포함된 질의에 대해
 - **정의·포함 여부·조건 중심 비교** 제공 (금액 중심 비교가 아님)
 - 헌법 준수: 모든 Subtype 정의는 YAML 설정 파일에서 로드
+- **SUBTYPE_MULTI 상태 도입**: 멀티 Subtype 입력 시 Resolution Lock 금지
+
+### 핵심 규칙
+
+1. **경계성 종양 / 제자리암은 단일 담보가 아니다**
+   - 두 개 모두 `암 subtype` 이며 하나의 coverage_code로 RESOLVED 하면 안 된다
+
+2. **멀티 subtype 입력 시 Resolution Lock 금지**
+   - `resolution_state = SUBTYPE_MULTI`
+   - `resolved_coverage_code = null`
+   - `locked_coverage_code = null`
+   - 담보 선택 UI 노출 금지
 
 ### 구현
 
@@ -108,7 +120,10 @@
   - `extract_subtypes_from_query()`: 질의에서 subtype 추출
   - `is_multi_subtype_query()`: 복수 subtype 질의 판별
   - `extract_subtype_comparison()`: 보험사별 비교 추출
-- `api/compare.py`: API 응답에 `subtype_comparison` 필드 추가
+- `api/compare.py`:
+  - `resolution_state`에 `SUBTYPE_MULTI` 추가 (line 227, 304)
+  - 멀티 Subtype 감지 시 SUBTYPE_MULTI 상태 강제 (line 1552-1616)
+  - SUBTYPE_MULTI 상태 특별 처리 (line 1327-1371)
 
 **3. Frontend**
 - `apps/web/src/lib/types.ts`: SubtypeComparison 타입 추가
@@ -135,12 +150,23 @@ interface SubtypeComparisonItem {
 }
 ```
 
+### 검증 시나리오
+
+| 시나리오 | 입력 | 기대 결과 | 상태 |
+|---------|------|----------|------|
+| A | "경계성 종양과 제자리암을 삼성과 메리츠로 비교해줘" | `SUBTYPE_MULTI`, subtypes=2개 | ✅ PASS |
+| B | "제자리암, 경계성 종양 차이 알려줘" | `SUBTYPE_MULTI`, subtypes=2개 | ✅ PASS |
+| 단일 | "경계성 종양 보장 비교" | `RESOLVED` (A4210) | ✅ PASS |
+
 ### 테스트
 - `tests/test_subtype_extractor.py`: 8개 유닛 테스트 (PASS)
   - 단일/복수 subtype 추출
   - Alias 매칭 (상피내암 → CIS_CARCINOMA)
   - 도메인별 조회
   - 설정 파일 로드 확인
+
+### 커밋
+- `e4bd059`: feat: STEP 4.1 multi-subtype comparison (borderline + in-situ)
 
 ### 파일 변경
 
