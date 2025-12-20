@@ -40,6 +40,7 @@ import {
   resolveAnchorUpdate,
   resolveResolutionState,
   logTransition,
+  shouldLockCoverage,
 } from "@/lib/resolution-lock.config";
 import { ResolutionState } from "@/lib/ui-gating.config";
 
@@ -157,10 +158,24 @@ function HomeContent() {
     // STEP 3.7-δ: 리셋 조건 감지 (새 담보 키워드 질의 등)
     const resetCondition = detectResetCondition(request.query, currentAnchor);
 
+    // STEP 3.9: 담보 고정 여부 결정
+    const lockCoverage = shouldLockCoverage(currentAnchor, resetCondition);
+    const lockedCoverageCode = lockCoverage ? currentAnchor?.coverage_code : undefined;
+
+    console.log("[STEP 3.9] Anchor Persistence:", {
+      query: request.query,
+      resetCondition,
+      lockCoverage,
+      lockedCoverageCode,
+      currentAnchor: currentAnchor?.coverage_code,
+    });
+
     // STEP 3.6: 이전 anchor가 있으면 요청에 포함 (리셋 조건이 아닐 때만)
+    // STEP 3.9: locked_coverage_code 추가
     const requestWithAnchor: CompareRequestWithIntent = {
       ...request,
       anchor: resetCondition ? undefined : (currentAnchor ?? undefined),
+      locked_coverage_code: lockedCoverageCode,
     };
 
     // STEP 3.7-γ: 새 질의 시 기존 가이드 제거 (교체 준비)

@@ -94,6 +94,11 @@ class CompareRequest(BaseModel):
         None,
         description="UI 이벤트 타입 (coverage_button_click 등 - intent 변경 차단)"
     )
+    # STEP 3.9: Anchor Persistence - 담보 고정 요청
+    locked_coverage_code: str | None = Field(
+        None,
+        description="고정할 담보 코드 (제공 시 coverage resolver 스킵)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -1429,10 +1434,19 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         )
         anchor_debug["query_type"] = query_type
 
-        # insurer-only 후속 질의인 경우, anchor의 coverage_code 사용
+        # STEP 3.9: locked_coverage_code 우선 적용
+        # locked_coverage_code가 있으면 coverage resolver를 완전히 스킵
         coverage_codes_to_use = request.coverage_codes
-        if query_type == "insurer_only" and request.anchor:
-            # anchor에서 coverage_code 복원
+        is_coverage_locked = False
+
+        if request.locked_coverage_code:
+            # STEP 3.9: 담보 고정 - resolver 스킵
+            coverage_codes_to_use = [request.locked_coverage_code]
+            anchor_debug["locked_coverage_code"] = request.locked_coverage_code
+            anchor_debug["coverage_locked"] = True
+            is_coverage_locked = True
+        elif query_type == "insurer_only" and request.anchor:
+            # insurer-only 후속 질의인 경우, anchor의 coverage_code 사용
             coverage_codes_to_use = [request.anchor.coverage_code]
             anchor_debug["restored_from_anchor"] = True
             anchor_debug["anchor_coverage_code"] = request.anchor.coverage_code
@@ -1450,11 +1464,14 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         )
 
         # STEP 3.7: Coverage Resolution 평가
-        # insurer-only 후속 질의이거나 explicit coverage_codes가 제공된 경우 평가 스킵
+        # STEP 3.9: locked_coverage_code, insurer-only 후속 질의, explicit coverage_codes가 제공된 경우 평가 스킵
         coverage_resolution: CoverageResolutionResponse | None = None
         resolution_debug: dict[str, Any] | None = None
 
-        if query_type != "insurer_only" and not request.coverage_codes:
+        if is_coverage_locked:
+            # STEP 3.9: 담보가 고정된 경우 resolution 평가 완전 스킵
+            resolution_debug = {"skipped": True, "reason": "coverage_locked"}
+        elif query_type != "insurer_only" and not request.coverage_codes:
             # 자동 추론된 경우에만 resolution 평가
             coverage_recommendations = result.debug.get("recommended_coverage_details", [])
 

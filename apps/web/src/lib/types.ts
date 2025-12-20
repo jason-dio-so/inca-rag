@@ -130,9 +130,12 @@ export type CompareResponseWithSlots = CompareResponse & {
 };
 
 // STEP 3.6: Extended CompareRequest with ui_event_type
+// STEP 3.9: Added locked_coverage_code for anchor persistence
 export interface CompareRequestWithIntent extends CompareRequest {
   anchor?: QueryAnchor | null;
   ui_event_type?: string | null;
+  // STEP 3.9: 담보 고정 코드 (제공 시 backend에서 resolver 스킵)
+  locked_coverage_code?: string | null;
 }
 
 // =============================================================================

@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 3.7-δ Complete)
+> 최종 업데이트: 2025-12-20 (STEP 3.9 Anchor Persistence)
 
 ---
 
@@ -73,12 +73,62 @@
 | **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
 | **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
+| **STEP 3.9** | **Anchor Persistence / locked_coverage_code** | **기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+
+## STEP 3.9: Anchor Persistence / locked_coverage_code (2025-12-20)
+
+### 목표
+- 담보가 RESOLVED된 후, 후속 질의에서 불필요한 coverage re-resolution 방지
+- `locked_coverage_code` 필드를 통해 backend에서 resolver 스킵
+- 담보 언급 유무에 따른 intelligent anchor persistence
+
+### 시나리오
+
+| 시나리오 | 설명 | 동작 |
+|----------|------|------|
+| A | 후속 질의에 담보 언급 없음 | locked_coverage_code 전달 → RESOLVED 유지 |
+| B | 후속 질의에 동일 담보 언급 | locked_coverage_code 전달 → RESOLVED 유지 |
+| C | 후속 질의에 다른 담보 언급 | anchor 리셋 → 재분석 |
+| D | 새 담보 질의 | anchor 리셋 → 신규 분석 |
+
+### 구현
+
+**Backend (api/compare.py)**:
+- `locked_coverage_code` 필드를 CompareRequest에 추가
+- `locked_coverage_code`가 있으면 coverage resolver 스킵
+- resolution 평가도 스킵 (항상 RESOLVED)
+
+**Frontend**:
+- `shouldLockCoverage()` 함수로 lock 여부 결정
+- `hasCoverageKeyword()`, `mentionsCurrentCoverage()` 헬퍼 함수 추가
+- request에 `locked_coverage_code` 자동 포함
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | CompareRequest에 locked_coverage_code 추가, resolver 스킵 로직 |
+| `apps/web/src/lib/types.ts` | CompareRequestWithIntent에 locked_coverage_code 추가 |
+| `apps/web/src/lib/resolution-lock.config.ts` | shouldLockCoverage, hasCoverageKeyword, mentionsCurrentCoverage 추가 |
+| `apps/web/src/lib/api.ts` | locked_coverage_code 전송 로직 추가 |
+| `apps/web/src/app/page.tsx` | handleSendMessage에 anchor persistence 로직 추가 |
+
+### 테스트 결과
+
+```
+Scenario A (no coverage mention + lock): RESOLVED ✅
+Scenario B (same coverage mention + lock): RESOLVED ✅
+Scenario C (different coverage, no lock): UNRESOLVED ✅
+Scenario D (new coverage, no lock): UNRESOLVED ✅
+```
+
+---
 
 ## STEP 2.8: 하드코딩 비즈니스 규칙 YAML 외부화 (2025-12-19)
 

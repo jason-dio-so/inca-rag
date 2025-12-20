@@ -47,6 +47,10 @@ export async function compare(request: CompareRequestWithIntent): Promise<Compar
     if (request.ui_event_type) {
       body.ui_event_type = request.ui_event_type;
     }
+    // STEP 3.9: locked_coverage_code for anchor persistence
+    if (request.locked_coverage_code) {
+      body.locked_coverage_code = request.locked_coverage_code;
+    }
 
     const response = await fetch(`${API_BASE}/compare`, {
       method: "POST",

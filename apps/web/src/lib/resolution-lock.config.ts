@@ -120,6 +120,34 @@ export type ResetCondition =
   | "SESSION_END"; // 세션 종료
 
 /**
+ * STEP 3.9: 질의에 담보 키워드가 포함되어 있는지 확인
+ * - 담보 관련 키워드: 진단비, 수술비, 담보, 보장, 특약
+ */
+export function hasCoverageKeyword(query: string): boolean {
+  return /진단비|수술비|담보|보장|특약|보험금|한도/.test(query);
+}
+
+/**
+ * STEP 3.9: 질의가 현재 anchor의 담보를 언급하는지 확인
+ * - anchor의 coverage_name 또는 coverage_code가 질의에 포함되어 있으면 true
+ */
+export function mentionsCurrentCoverage(
+  query: string,
+  currentAnchor: QueryAnchor | null
+): boolean {
+  if (!currentAnchor) return false;
+
+  const normalizedQuery = query.toLowerCase().trim();
+  const coverageName = currentAnchor.coverage_name?.toLowerCase();
+  const coverageCode = currentAnchor.coverage_code.toLowerCase();
+
+  return (
+    (!!coverageName && normalizedQuery.includes(coverageName)) ||
+    normalizedQuery.includes(coverageCode)
+  );
+}
+
+/**
  * 질의가 새로운 담보 키워드를 포함하는지 확인
  * - 현재 anchor의 coverage와 다른 담보를 언급하면 리셋 대상
  */
@@ -129,20 +157,46 @@ export function isNewCoverageQuery(
 ): boolean {
   if (!currentAnchor) return false;
 
-  // 현재 anchor의 담보명/코드가 질의에 포함되어 있으면 동일 담보
-  const normalizedQuery = query.toLowerCase().trim();
-  const coverageName = currentAnchor.coverage_name?.toLowerCase();
-  const coverageCode = currentAnchor.coverage_code.toLowerCase();
+  // 담보 관련 키워드가 없으면 새 담보 질의가 아님
+  if (!hasCoverageKeyword(query)) {
+    return false;
+  }
 
-  // 현재 담보가 질의에 포함되어 있지 않으면 새로운 담보 질의
-  const containsCurrentCoverage =
-    (coverageName && normalizedQuery.includes(coverageName)) ||
-    normalizedQuery.includes(coverageCode);
+  // 현재 담보가 질의에 포함되어 있으면 새 담보 질의가 아님
+  if (mentionsCurrentCoverage(query, currentAnchor)) {
+    return false;
+  }
 
-  // 담보 관련 키워드가 있고, 현재 담보가 아니면 새 담보 질의
-  const hasCoverageKeyword = /진단비|수술비|담보|보장|특약/.test(query);
+  // 담보 키워드가 있고 현재 담보가 아니면 새 담보 질의
+  return true;
+}
 
-  return hasCoverageKeyword && !containsCurrentCoverage;
+/**
+ * STEP 3.9: 담보 고정(lock) 여부 결정
+ * - 리셋 조건이 없고, anchor가 있으면 locked_coverage_code 전달
+ *
+ * Scenarios:
+ * - A: 후속 질의에 담보 언급 없음 → lock
+ * - B: 후속 질의에 동일 담보 언급 → lock
+ * - C: 후속 질의에 다른 담보 언급 → no lock (reset)
+ * - D: 새 담보 질의 → no lock (reset)
+ */
+export function shouldLockCoverage(
+  currentAnchor: QueryAnchor | null,
+  resetCondition: ResetCondition | null
+): boolean {
+  // 리셋 조건이면 lock하지 않음
+  if (resetCondition) {
+    return false;
+  }
+
+  // anchor가 없으면 lock할 것이 없음
+  if (!currentAnchor || !currentAnchor.coverage_code) {
+    return false;
+  }
+
+  // anchor가 있고 리셋 조건이 아니면 lock
+  return true;
 }
 
 /**
