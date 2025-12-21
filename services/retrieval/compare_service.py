@@ -240,13 +240,18 @@ def normalize_query_for_coverage(query: str) -> str:
 
 @dataclass
 class CoverageRecommendation:
-    """coverage_code 추천 결과"""
+    """coverage_code 추천 결과 (U-5.0-A: confidence 추가)"""
     insurer_code: str
     coverage_code: str
     coverage_name: str | None
     raw_name: str
     source_doc_type: str
     similarity: float
+    # U-5.0-A: 매핑 신뢰도 (테이블 기반)
+    confidence: float = 0.8
+    semantic_scope: str = "UNKNOWN"
+    # U-5.0-A: Combined score (similarity * confidence)
+    combined_score: float = 0.0
 
 
 def recommend_coverage_codes(
@@ -279,7 +284,7 @@ def recommend_coverage_codes(
     with conn.cursor() as cur:
         # 보험사별로 추천 (쏠림 방지)
         for insurer_code in insurers:
-            # pg_trgm similarity 기반 검색
+            # U-5.0-A: pg_trgm similarity * confidence 기반 검색
             # source_doc_type 우선순위 적용 (가입설계서 > 상품요약서 > 사업방법서)
             query_sql = """
                 WITH ranked AS (
@@ -290,6 +295,11 @@ def recommend_coverage_codes(
                         ca.raw_name,
                         ca.source_doc_type,
                         similarity(ca.raw_name_norm, %s) AS sim,
+                        -- U-5.0-A: confidence 및 semantic_scope 추가
+                        COALESCE(ca.confidence, 0.8) AS confidence,
+                        COALESCE(cs.semantic_scope, 'UNKNOWN') AS semantic_scope,
+                        -- U-5.0-A: combined score = similarity * confidence
+                        similarity(ca.raw_name_norm, %s) * COALESCE(ca.confidence, 0.8) AS combined_score,
                         CASE ca.source_doc_type
                             WHEN '가입설계서' THEN 3
                             WHEN '상품요약서' THEN 2
@@ -299,13 +309,14 @@ def recommend_coverage_codes(
                         ROW_NUMBER() OVER (
                             PARTITION BY ca.coverage_code
                             ORDER BY
+                                -- U-5.0-A: combined score 우선 정렬
+                                similarity(ca.raw_name_norm, %s) * COALESCE(ca.confidence, 0.8) DESC,
                                 CASE ca.source_doc_type
                                     WHEN '가입설계서' THEN 3
                                     WHEN '상품요약서' THEN 2
                                     WHEN '사업방법서' THEN 1
                                     ELSE 0
-                                END DESC,
-                                similarity(ca.raw_name_norm, %s) DESC
+                                END DESC
                         ) AS rn
                     FROM coverage_alias ca
                     JOIN insurer i ON ca.insurer_id = i.insurer_id
@@ -313,15 +324,16 @@ def recommend_coverage_codes(
                     WHERE i.insurer_code = %s
                       AND similarity(ca.raw_name_norm, %s) >= %s
                 )
-                SELECT insurer_code, coverage_code, coverage_name, raw_name, source_doc_type, sim
+                SELECT insurer_code, coverage_code, coverage_name, raw_name, source_doc_type,
+                       sim, confidence, semantic_scope, combined_score
                 FROM ranked
                 WHERE rn = 1
-                ORDER BY sim DESC, doc_priority DESC
+                ORDER BY combined_score DESC, doc_priority DESC
                 LIMIT %s
             """
             cur.execute(
                 query_sql,
-                (q_norm, q_norm, insurer_code, q_norm, min_similarity, top_n_per_insurer),
+                (q_norm, q_norm, q_norm, insurer_code, q_norm, min_similarity, top_n_per_insurer),
             )
             rows = cur.fetchall()
 
@@ -334,6 +346,10 @@ def recommend_coverage_codes(
                         raw_name=row["raw_name"],
                         source_doc_type=row["source_doc_type"],
                         similarity=float(row["sim"]),
+                        # U-5.0-A: 테이블 기반 필드
+                        confidence=float(row["confidence"]),
+                        semantic_scope=row["semantic_scope"],
+                        combined_score=float(row["combined_score"]),
                     )
                 )
 

@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18-δ: Slots Anti-Overreach UX)
+> 최종 업데이트: 2025-12-22 (U-5.0-A: Coverage Name Mapping Table 기반 Resolution)
 
 ---
 
@@ -98,6 +98,7 @@
 | **U-4.18-β** | **Subtype Coverage 종속 원칙 강제** | **기능/UI** | ✅ 완료 |
 | **U-4.18-γ** | **Evidence Source Boundary & Anti-Comparison UX** | **UI** | ✅ 완료 |
 | **U-4.18-δ** | **Slots Anti-Overreach UX (역할 제한)** | **UI** | ✅ 완료 |
+| **U-5.0-A** | **Coverage Name Mapping Table 기반 Resolution** | **아키텍처** | ✅ 완료 |
 
 ---
 
@@ -358,6 +359,127 @@ function SourceHint({ sourceLevel }: { sourceLevel?: string }) {
 - [x] Source Hint 표시 (비교 문서 기준/약관 기준/근거 부족)
 - [x] Evidence 유도 안내 문구 추가
 - [x] Build 성공
+
+---
+
+## U-5.0-A: Coverage Name Mapping Table 기반 Resolution (2025-12-22)
+
+### 목적
+Coverage Resolution을 코드 하드코딩에서 DB 테이블(coverage_name_map) 기반으로 전환하여 Single Source of Truth 확립
+
+### 핵심 원칙
+
+1. **테이블 우선 Resolution**
+   - Coverage Resolution은 coverage_alias + coverage_standard 테이블 조회 우선
+   - LLM/rule은 보조 수단 (테이블에 없을 때만 사용)
+
+2. **Subtype은 coverage_code에 종속**
+   - Subtype 판단은 coverage_code 확정 후에만 가능
+   - coverage_code 없이 Subtype만 질의 → UNRESOLVED
+
+3. **combined_score = similarity × confidence**
+   - 매칭 신뢰도(confidence) × 유사도(similarity)로 최종 순위 결정
+   - 동일 유사도라도 confidence가 높은 alias 우선
+
+### 스키마 변경
+
+**1. coverage_standard 테이블 확장**
+
+```sql
+ALTER TABLE coverage_standard
+ADD COLUMN IF NOT EXISTS semantic_scope TEXT DEFAULT 'UNKNOWN';
+-- CANCER, CARDIO, SURGERY, INJURY, DEATH, UNKNOWN
+```
+
+**2. coverage_alias 테이블 확장**
+
+```sql
+ALTER TABLE coverage_alias
+ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT false;
+ADD COLUMN IF NOT EXISTS confidence NUMERIC(3,2) DEFAULT 0.8;
+-- confidence: 1.0 (신정원), 0.95 (상품요약서), 0.85 (사업방법서), 0.7 (약관)
+```
+
+**3. coverage_name_map 뷰 생성**
+
+```sql
+CREATE OR REPLACE VIEW coverage_name_map AS
+SELECT
+    i.insurer_code,
+    ca.raw_name AS insurer_coverage_name,
+    cs.coverage_name AS standard_coverage_name,
+    ca.coverage_code,
+    cs.semantic_scope,
+    ca.is_primary,
+    ca.confidence,
+    ca.source_doc_type AS source
+FROM coverage_alias ca
+JOIN insurer i ON ca.insurer_id = i.insurer_id
+JOIN coverage_standard cs ON ca.coverage_code = cs.coverage_code;
+```
+
+### 구현
+
+**1. CoverageRecommendation 확장**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class CoverageRecommendation:
+    insurer_code: str
+    coverage_code: str
+    coverage_name: str | None
+    raw_name: str
+    source_doc_type: str
+    similarity: float
+    confidence: float = 0.8       # U-5.0-A
+    semantic_scope: str = "UNKNOWN"  # U-5.0-A
+    combined_score: float = 0.0   # U-5.0-A: similarity × confidence
+```
+
+**2. recommend_coverage_codes() SQL 수정**
+
+```sql
+SELECT
+    i.insurer_code,
+    ca.coverage_code,
+    cs.coverage_name,
+    ca.raw_name,
+    ca.source_doc_type,
+    1 - (ca.embedding <=> %s) AS similarity,
+    COALESCE(ca.confidence, 0.8) AS confidence,
+    COALESCE(cs.semantic_scope, 'UNKNOWN') AS semantic_scope,
+    (1 - (ca.embedding <=> %s)) * COALESCE(ca.confidence, 0.8) AS combined_score
+FROM coverage_alias ca
+...
+ORDER BY combined_score DESC
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `db/migrations/005_coverage_name_map_enhancement.sql` | 마이그레이션 SQL (스키마 확장 + 뷰 생성) |
+| `db/schema.sql` | coverage_standard, coverage_alias 컬럼 추가, coverage_name_map 뷰 |
+| `services/retrieval/compare_service.py` | CoverageRecommendation 확장, combined_score 기반 정렬 |
+
+### 검증 결과
+
+| 테스트 | 결과 |
+|--------|------|
+| 마이그레이션 적용 | ✅ 성공 (28 coverage_standard, 284 coverage_alias) |
+| semantic_scope 초기화 | ✅ CANCER 7건, CARDIO 7건, INJURY 3건, SURGERY 2건, DEATH 2건 |
+| confidence 초기화 | ✅ 1.0 (279건), 0.7 (5건) |
+| API 테스트 (UNRESOLVED) | ✅ similarity < threshold → UNRESOLVED |
+| API 테스트 (RESOLVED) | ✅ locked_coverage_codes 전달 → RESOLVED |
+
+### DoD 체크리스트
+- [x] coverage_standard에 semantic_scope 컬럼 추가
+- [x] coverage_alias에 is_primary, confidence 컬럼 추가
+- [x] coverage_name_map 뷰 생성
+- [x] combined_score = similarity × confidence 기반 정렬
+- [x] 마이그레이션 적용 및 검증
+- [x] API 정상 동작 확인
 
 ---
 
@@ -829,4 +951,9 @@ if (compareStatus === "NO_COMPARABLE_EVIDENCE") {
 - [x] 관련 커밋 생성
 
 ---
+
+
+
+
+
 
