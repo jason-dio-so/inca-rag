@@ -13,8 +13,9 @@ import { CoverageResolution } from "./types";
 
 /**
  * STEP 3.7-δ-β: Resolution State
+ * U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
  * - RESOLVED: 확정 (비교 결과 표시)
- * - UNRESOLVED: 후보 있음, 선택 필요
+ * - UNRESOLVED: 후보 있음, 선택 필요 (Subtype-only 질의 포함)
  * - INVALID: 매핑 실패, 재입력 필요
  */
 export type ResolutionState = "RESOLVED" | "UNRESOLVED" | "INVALID";
@@ -25,12 +26,14 @@ export type ResolutionState = "RESOLVED" | "UNRESOLVED" | "INVALID";
 
 /**
  * Results Panel 렌더링 허용 상태
- * RESOLVED 상태에서만 Results Panel 활성화
+ * U-4.18-β: RESOLVED 상태에서만 Results Panel 활성화
+ * (Subtype-only 질의는 UNRESOLVED → 차단됨)
  */
 export const RESULTS_PANEL_ALLOWED_STATES: ResolutionState[] = ["RESOLVED"];
 
 /**
  * 각 상태별 UI 메시지
+ * U-4.18-β: UNRESOLVED 메시지는 coverage_resolution.message에서 동적으로 가져옴
  */
 export const RESOLUTION_STATE_MESSAGES: Record<ResolutionState, string> = {
   RESOLVED: "",

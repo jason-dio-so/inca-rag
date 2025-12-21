@@ -2,13 +2,16 @@
 
 /**
  * STEP 3.7-δ-β: Results Panel with Resolution State Gate
+ * U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
  *
  * Resolution State에 따른 렌더링 제어:
  * - RESOLVED: Results Panel 전체 활성화
  * - UNRESOLVED: Results Panel 렌더링 차단 (담보 선택 필요)
  * - INVALID: Results Panel 렌더링 차단 (재입력 필요)
  *
- * 원칙: resolution_state !== "RESOLVED"일 때 우측 패널은 비어 있어야 함
+ * 원칙:
+ * - resolution_state !== "RESOLVED"일 때 우측 패널은 비어 있어야 함
+ * - Subtype-only 질의(경계성 종양, 제자리암)는 UNRESOLVED 처리
  */
 
 import { useState, useMemo } from "react";
@@ -89,21 +92,23 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
 
   // ===========================================================================
   // STEP 3.7-δ-β: Resolution State Gate
-  // resolution_state !== "RESOLVED"이면 Results Panel 렌더링 차단
+  // U-4.18-β: resolution_state !== "RESOLVED"이면 Results Panel 렌더링 차단
+  // Subtype-only 질의도 UNRESOLVED로 처리되어 차단됨
   // ===========================================================================
   const resolutionState = response.resolution_state;
 
   // ===========================================================================
   // STEP 3.7-δ-γ3: resolution_state 직접 사용 (UNRESOLVED 우선)
-  // - coverage_resolution에서 재파생 금지
-  // - UNRESOLVED → "담보 선택 필요"
+  // U-4.18-β: coverage_resolution.message를 사용하여 동적 메시지 표시
+  // - UNRESOLVED → "담보 선택 필요" (coverage_resolution.message 우선)
   // - INVALID → "담보 미확정"
   // ===========================================================================
   if (resolutionState !== "RESOLVED") {
     const isUnresolved = resolutionState === "UNRESOLVED";
     const title = isUnresolved ? "담보 선택 필요" : "담보 미확정";
+    // U-4.18-β: coverage_resolution.message가 있으면 사용 (Subtype-only 질의 메시지)
     const message = isUnresolved
-      ? "담보를 선택해 주세요. 선택 후 비교 결과가 표시됩니다."
+      ? (response.coverage_resolution?.message || "담보를 선택해 주세요. 선택 후 비교 결과가 표시됩니다.")
       : "담보가 확정되면 비교 결과가 표시됩니다.";
 
     return (
@@ -157,6 +162,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
         </div>
       )}
 
+      {/* U-4.18-β: Subtype 탭은 RESOLVED + is_multi_subtype일 때만 표시 */}
       <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col min-h-0">
         {/* STEP 4.9-β-1: 탭 목록 고정 */}
         <TabsList className="shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0">
@@ -193,7 +199,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           >
             Policy(약관)
           </TabsTrigger>
-          {/* STEP 4.1: Subtype Comparison Tab */}
+          {/* U-4.18-β: Subtype Tab - RESOLVED 상태에서 is_multi_subtype일 때만 표시 */}
           {response.subtype_comparison?.is_multi_subtype && (
             <TabsTrigger
               value="subtype"
@@ -263,7 +269,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
             <EvidencePanel data={response.policy_axis} isPolicyMode={true} />
           </TabsContent>
 
-          {/* STEP 4.1: Subtype Comparison content */}
+          {/* U-4.18-β: Subtype Comparison content - RESOLVED + is_multi_subtype일 때만 */}
           {response.subtype_comparison?.is_multi_subtype && (
             <TabsContent value="subtype" className="m-0 p-4">
               <SubtypeComparePanel

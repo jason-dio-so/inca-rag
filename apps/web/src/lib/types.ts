@@ -113,8 +113,12 @@ export interface CoverageResolution {
 // (Until types.generated.ts is regenerated)
 export type CompareResponseWithSlots = CompareResponse & {
   // STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
+  // U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
   resolution_state: "RESOLVED" | "UNRESOLVED" | "INVALID";
   resolved_coverage_code?: string | null;
+  // STEP 4.12-γ: Comparison Mode
+  comparison_mode?: "COVERAGE" | "SUBTYPE";
+  subtype_targets?: string[] | null;
   slots?: ComparisonSlot[] | null;
   // STEP 2.5: 대표 담보 / 연관 담보 / 사용자 요약
   primary_coverage_code?: string | null;

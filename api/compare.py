@@ -235,15 +235,17 @@ class SuggestedCoverageResponse(BaseModel):
 class CoverageResolutionResponse(BaseModel):
     """
     STEP 3.7-δ-β: Coverage Resolution 결과
-    STEP 4.1: SUBTYPE_MULTI 추가
+    U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
 
     status (resolution_state):
     - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
     - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
     - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
-    - SUBTYPE_MULTI: 복수 Subtype 비교 (경계성 종양 + 제자리암 등)
+
+    Note: Subtype-only 질의(경계성 종양, 제자리암 등)는 상위 담보 없이
+          독립적으로 비교할 수 없으므로 UNRESOLVED 처리됨
     """
-    status: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
+    status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
     resolved_coverage_code: str | None = None
     message: str | None = None
     suggested_coverages: list[SuggestedCoverageResponse] = []
@@ -321,8 +323,8 @@ class SubtypeComparisonResponse(BaseModel):
 class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
     # STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
-    # STEP 4.1: SUBTYPE_MULTI 추가
-    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
+    # U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
+    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
     resolved_coverage_code: str | None = None
     # STEP 4.12-γ: Comparison Mode (COVERAGE: 금액 비교, SUBTYPE: 유사암/제자리암 정의 비교)
     comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE"
@@ -1401,58 +1403,10 @@ def _convert_response(
 
     # ==========================================================================
     # STEP 3.7-δ-β: Resolution State Gate
-    # STEP 4.1: SUBTYPE_MULTI는 특별 처리 (담보 선택 UI 없이 subtype 비교 결과 반환)
+    # U-4.18-β: SUBTYPE_MULTI 제거 - Subtype-only는 UNRESOLVED 처리
     # ==========================================================================
     resolution_state = coverage_resolution.status if coverage_resolution else "RESOLVED"
     resolved_coverage_code = coverage_resolution.resolved_coverage_code if coverage_resolution else None
-
-    # STEP 4.1: SUBTYPE_MULTI 상태 - subtype 비교 결과 포함하여 반환
-    if resolution_state == "SUBTYPE_MULTI":
-        merged_debug["resolution_gate"] = "subtype_multi_allowed"
-        merged_debug["resolution_gate_reason"] = "multi_subtype_comparison"
-
-        # 멀티 Subtype 비교용 요약 문구 생성
-        display_names = get_display_names()
-        insurer_display = display_names.get("insurer_names", {})
-        insurer_names = [insurer_display.get(ic, ic) for ic in final_insurers]
-        insurer_str = ", ".join(insurer_names)
-
-        # subtype_comparison에서 subtype 이름 추출
-        subtype_names = []
-        if subtype_comparison and subtype_comparison.subtypes:
-            for code in subtype_comparison.subtypes:
-                defn = get_subtype_definition(code)
-                if defn:
-                    subtype_names.append(defn.name)
-
-        subtype_str = " 및 ".join(subtype_names) if subtype_names else "경계성 종양 및 제자리암"
-
-        multi_subtype_summary = (
-            f"{insurer_str}의 {subtype_str} 보장 기준을 비교했습니다.\n"
-            f"두 subtype은 동일 담보가 아니며, 보장 정의와 지급 조건이 다를 수 있습니다."
-        )
-
-        return CompareResponseModel(
-            resolution_state=resolution_state,
-            resolved_coverage_code=None,  # STEP 4.1: 단일 coverage_code 확정 금지
-            comparison_mode="SUBTYPE",  # STEP 4.12-γ: Subtype 모드 강제
-            subtype_targets=subtype_targets,  # STEP 4.12-γ
-            compare_axis=None,  # 멀티 subtype에서는 compare_axis 불필요
-            policy_axis=None,
-            coverage_compare_result=None,
-            diff_summary=None,
-            slots=None,
-            subtype_comparison=subtype_comparison,  # STEP 4.1: subtype 비교 결과 제공!
-            resolved_coverage_codes=None,
-            primary_coverage_code=None,
-            primary_coverage_name=None,
-            related_coverage_codes=[],
-            user_summary=multi_subtype_summary,  # 멀티 subtype 요약 문구
-            anchor=None,  # STEP 4.1: anchor 생성 금지 (Resolution Lock 금지)
-            recovery_message=recovery_message,
-            coverage_resolution=coverage_resolution,
-            debug=merged_debug,
-        )
 
     # STEP 3.7-δ-β: RESOLVED가 아니면 (UNRESOLVED, INVALID) 결과 데이터 null 반환
     if resolution_state != "RESOLVED":
@@ -1754,21 +1708,39 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         resolution_debug: dict[str, Any] | None = None
 
         if is_multi_subtype:
-            # STEP 4.1: 멀티 Subtype 입력 - Resolution Lock 금지
-            # similarity gap 기반 RESOLVED, perfect_match 기반 RESOLVED 모두 금지
+            # U-4.18-β: Subtype-only 질의는 UNRESOLVED 처리
+            # Subtype은 Coverage에 종속되며 독립적으로 비교 불가
+            failure_messages = get_failure_messages()
+            subtype_unresolved_msg = failure_messages.get(
+                "subtype_needs_coverage",
+                "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+            )
+
+            # 암 도메인 대표 담보를 suggested로 제공
+            domain_coverages = get_domain_representative_coverages()
+            cancer_info = domain_coverages.get("CANCER", {})
+            suggested = [
+                SuggestedCoverageResponse(
+                    coverage_code=cov["code"],
+                    coverage_name=cov["name"],
+                    similarity=0.0,
+                )
+                for cov in cancer_info.get("coverages", [])[:get_max_recommendations()]
+            ]
+
             coverage_resolution = CoverageResolutionResponse(
-                status="SUBTYPE_MULTI",
-                resolved_coverage_code=None,  # 단일 coverage_code 확정 금지
-                message=None,
-                suggested_coverages=[],
+                status="UNRESOLVED",
+                resolved_coverage_code=None,
+                message=subtype_unresolved_msg,
+                suggested_coverages=suggested,
                 detected_domain="CANCER",  # 경계성종양/제자리암은 암 계열
             )
             resolution_debug = {
-                "status": "SUBTYPE_MULTI",
-                "reason": "multi_subtype_detected",
+                "status": "UNRESOLVED",
+                "reason": "subtype_only_query",
                 "subtypes": [s.code for s in extracted_subtypes],
                 "subtype_names": [s.name for s in extracted_subtypes],
-                "resolution_lock_blocked": True,
+                "subtype_needs_parent_coverage": True,
             }
         elif is_coverage_locked:
             # STEP 3.9: 담보가 고정된 경우 resolution 평가 완전 스킵

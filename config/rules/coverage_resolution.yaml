@@ -36,6 +36,8 @@ failure_messages:
   clarify_domain: "{domain} 관련 담보로 보입니다. 어떤 담보를 원하시나요?"
   # 도메인 추정 불가
   clarify_general: "담보명을 좀 더 구체적으로 입력해 주세요."
+  # U-4.18-β: Subtype-only 질의 (경계성 종양, 제자리암 등 상위 담보 없이 입력)
+  subtype_needs_coverage: "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
 
 # 도메인별 대표 담보 (재질문 시 안내용)
 domain_representative_coverages:

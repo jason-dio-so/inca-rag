@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (STEP 4.12-γ: Subtype 비교 모드 분리 및 Coverage Lock Override)
+> 최종 업데이트: 2025-12-22 (U-4.18-β: Subtype Coverage 종속 원칙 강제)
 
 ---
 
@@ -94,7 +94,8 @@
 | **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
 | **U-4.17** | **Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시** | **기능/UI** | ✅ 완료 |
 | **U-4.18** | **Partial Failure & Source Boundary 안정화** | **안정성/UI** | ✅ 완료 |
-| **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ✅ 완료 |
+| **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ⚠️ 수정됨 (U-4.18-β) |
+| **U-4.18-β** | **Subtype Coverage 종속 원칙 강제** | **기능/UI** | ✅ 완료 |
 
 ---
 
@@ -102,7 +103,115 @@
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
 
+## U-4.18-β: Subtype Coverage 종속 원칙 강제 (2025-12-22)
+
+### 목적
+STEP 4.12-γ의 SUBTYPE_MULTI 독립 상태를 제거하고, Subtype이 Coverage에 종속되도록 원칙 강제
+
+### 문제 분석 (STEP 4.12-γ의 문제)
+
+**As-Is (STEP 4.12-γ 구현)**:
+- "경계성 종양 / 제자리암" 질의 → `resolution_state: SUBTYPE_MULTI`
+- Subtype이 독립적으로 비교 가능한 것처럼 처리
+- Coverage 확정 없이 Subtype 탭 활성화
+
+**To-Be (U-4.18-β 수정)**:
+- "경계성 종양 / 제자리암" 질의 → `resolution_state: UNRESOLVED`
+- Subtype은 Coverage에 종속된 하위 개념
+- Coverage 확정 전에는 어떤 비교 UI도 노출 금지
+
+### 핵심 원칙
+
+1. **Coverage(담보) 확정이 모든 비교의 전제조건**
+   - `resolution_state !== "RESOLVED"` → 우측 패널 전체 차단
+   - Subtype-only 질의는 상위 담보 없이 비교 불가
+
+2. **Subtype은 Coverage의 하위 개념**
+   - 경계성 종양, 제자리암은 "암" 계열의 세부 분류
+   - 상위 담보(암진단비 등)가 확정되어야 Subtype 탭 활성화
+
+3. **UNRESOLVED 상태에서 안내 메시지 제공**
+   - "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+   - 암 도메인 대표 담보 추천 (암진단비, 유사암진단비, 재진단암진단비)
+
+### 구현
+
+**1. Backend: SUBTYPE_MULTI 제거**
+
+`api/compare.py`:
+```python
+# CoverageResolutionResponse
+status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]  # SUBTYPE_MULTI 제거
+
+# 멀티 Subtype 질의 처리
+if is_multi_subtype:
+    coverage_resolution = CoverageResolutionResponse(
+        status="UNRESOLVED",  # SUBTYPE_MULTI → UNRESOLVED
+        message="담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요.",
+        suggested_coverages=cancer_domain_coverages,
+    )
+```
+
+**2. Frontend: SUBTYPE_MULTI 핸들링 제거**
+
+`ResultsPanel.tsx`:
+```typescript
+// 이전: if (resolutionState !== "RESOLVED" && !isSubtypeMulti)
+// 수정:
+if (resolutionState !== "RESOLVED") {
+  // 모든 비교 UI 차단
+}
+```
+
+**3. Subtype 탭 조건**
+
+```typescript
+// RESOLVED 상태에서만 Subtype 탭 표시
+{response.subtype_comparison?.is_multi_subtype && (
+  <TabsTrigger value="subtype">Subtype</TabsTrigger>
+)}
+```
+
+### 설정 변경
+
+`config/rules/coverage_resolution.yaml`:
+```yaml
+failure_messages:
+  subtype_needs_coverage: "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+```
+
+### 검증 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Subtype-only 질의 | "경계성 종양 / 제자리암" | resolution_state: UNRESOLVED ✅ |
+| 메시지 확인 | 위와 동일 | "담보를 인식하지 못했습니다..." ✅ |
+| 추천 담보 | 위와 동일 | 암진단비, 유사암진단비, 재진단암진단비 ✅ |
+| 정상 담보 질의 + lock | "암진단비" + locked | resolution_state: RESOLVED ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | SUBTYPE_MULTI 제거, Subtype-only → UNRESOLVED |
+| `config/rules/coverage_resolution.yaml` | subtype_needs_coverage 메시지 추가 |
+| `apps/web/src/lib/ui-gating.config.ts` | SUBTYPE_MULTI 제거, RESOLVED만 허용 |
+| `apps/web/src/lib/types.ts` | resolution_state에서 SUBTYPE_MULTI 제거 |
+| `apps/web/src/components/ResultsPanel.tsx` | isSubtypeMulti 핸들링 제거, RESOLVED 게이트 강화 |
+
+### DoD 체크리스트
+- [x] SUBTYPE_MULTI 상태 제거 (Backend)
+- [x] Subtype-only 질의 → UNRESOLVED 반환
+- [x] UNRESOLVED 메시지에 상위 담보 안내 포함
+- [x] Frontend에서 RESOLVED 외 모든 상태 UI 차단
+- [x] Subtype 탭은 RESOLVED + is_multi_subtype일 때만 활성화
+- [x] Docker 재빌드 및 테스트 통과
+
+---
+
 ## STEP 4.12-γ: Subtype 비교 모드 분리 및 Coverage Lock Override (2025-12-22)
+
+> ⚠️ **이 구현은 U-4.18-β에서 수정됨**: SUBTYPE_MULTI 독립 상태 제거
 
 ### 목적
 "경계성 종양/제자리암" Subtype 비교가 암진단비(A4200_1)로 자동 고정되어 금액 슬롯이 나오는 현상 차단
