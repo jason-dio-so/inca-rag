@@ -391,3 +391,77 @@ def get_max_recommendations() -> int:
     """추천 최대 개수 반환"""
     config = get_coverage_resolution_config()
     return config.get("max_recommendations", 5)
+
+
+# =============================================================================
+# STEP 4.12-γ: Subtype Config Loaders
+# =============================================================================
+
+def get_subtype_config() -> dict:
+    """
+    Subtype 설정 전체 반환
+
+    Returns:
+        {
+            "subtype_keyword_map": {...},
+            "subtype_display_names": {...},
+            "subtype_slots": [...],
+            ...
+        }
+    """
+    return _load_yaml("subtype_config.yaml")
+
+
+def get_subtype_keyword_map() -> dict[str, str]:
+    """
+    Subtype 키워드 -> Target 매핑 반환
+
+    Returns:
+        {"경계성": "borderline", "제자리암": "in_situ", ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_keyword_map", {})
+
+
+def get_subtype_display_names() -> dict[str, str]:
+    """
+    Subtype Target -> 표시명 매핑 반환
+
+    Returns:
+        {"borderline": "경계성종양", "in_situ": "제자리암(상피내암)", ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_display_names", {})
+
+
+def get_subtype_slot_definitions() -> list[dict]:
+    """
+    Subtype 슬롯 정의 리스트 반환
+
+    Returns:
+        [{"slot_key": "subtype_in_situ_covered", ...}, ...]
+    """
+    config = get_subtype_config()
+    return config.get("subtype_slots", [])
+
+
+def get_suppressed_slots_in_subtype() -> list[str]:
+    """
+    Subtype 모드에서 생성 금지되는 슬롯 키 리스트 반환
+
+    Returns:
+        ["payout_amount", "diagnosis_lump_sum_amount", ...]
+    """
+    config = get_subtype_config()
+    return config.get("suppressed_slots_in_subtype", [])
+
+
+def get_subtype_evidence_keywords() -> dict[str, list[str]]:
+    """
+    Subtype별 Evidence 검색 키워드 반환
+
+    Returns:
+        {"borderline": ["경계성종양", ...], "in_situ": ["제자리암", ...], ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_evidence_keywords", {})

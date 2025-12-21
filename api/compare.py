@@ -42,6 +42,10 @@ from api.config_loader import (
     get_failure_messages,
     get_domain_representative_coverages,
     get_max_recommendations,
+    # STEP 4.12-γ: Subtype Intent
+    get_subtype_keyword_map,
+    get_subtype_display_names,
+    get_suppressed_slots_in_subtype,
 )
 
 router = APIRouter(tags=["compare"])
@@ -99,7 +103,7 @@ class CompareRequest(BaseModel):
     # STEP 3.6: UI 이벤트 타입 (intent 변경 차단용)
     ui_event_type: str | None = Field(
         None,
-        description="UI 이벤트 타입 (coverage_button_click 등 - intent 변경 차단)"
+        description="UI 이벤트 타입 (coverage_button_click, SUBTYPE_QUERY 등)"
     )
     # STEP 3.9: Anchor Persistence - 담보 고정 요청
     locked_coverage_code: str | None = Field(
@@ -110,6 +114,11 @@ class CompareRequest(BaseModel):
     locked_coverage_codes: list[str] | None = Field(
         None,
         description="고정할 담보 코드 목록 (복수 subtype 비교 시 사용)"
+    )
+    # STEP 4.12-γ: Subtype 쿼리 지원
+    subtype_targets: list[str] | None = Field(
+        None,
+        description="Subtype 대상 (borderline, in_situ 등 - UI에서 명시적 전달 시)"
     )
 
     model_config = {
@@ -315,6 +324,10 @@ class CompareResponseModel(BaseModel):
     # STEP 4.1: SUBTYPE_MULTI 추가
     resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID", "SUBTYPE_MULTI"]
     resolved_coverage_code: str | None = None
+    # STEP 4.12-γ: Comparison Mode (COVERAGE: 금액 비교, SUBTYPE: 유사암/제자리암 정의 비교)
+    comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE"
+    # STEP 4.12-γ: Subtype Targets (borderline, in_situ 등)
+    subtype_targets: list[str] | None = None
     # 결과 필드들 (resolution_state != RESOLVED 시 null/empty)
     compare_axis: list[CompareAxisItemResponse] | None = None
     policy_axis: list[PolicyAxisItemResponse] | None = None
@@ -481,6 +494,58 @@ def _detect_follow_up_query_type(
     # 그 외에는 신규 질의로 처리 (안전한 기본값)
     debug_info["reason"] = "fallback_to_new"
     return "new", debug_info
+
+
+# =============================================================================
+# STEP 4.12-γ: Subtype Intent Detection
+# =============================================================================
+
+def _detect_subtype_intent(
+    query: str,
+    ui_event_type: str | None = None,
+    request_subtype_targets: list[str] | None = None,
+) -> tuple[bool, list[str], str]:
+    """
+    Subtype 질의 Intent 감지
+
+    Args:
+        query: 사용자 질의
+        ui_event_type: UI 이벤트 타입 (SUBTYPE_QUERY 등)
+        request_subtype_targets: Request에서 전달된 subtype_targets
+
+    Returns:
+        (is_subtype_intent, detected_targets, trigger_source)
+        - is_subtype_intent: True if subtype query detected
+        - detected_targets: ["borderline", "in_situ", ...]
+        - trigger_source: "keyword" | "ui_event" | "request" | "none"
+    """
+    detected_targets: list[str] = []
+
+    # 1. UI 이벤트 기반 트리거 (최우선)
+    if ui_event_type == "SUBTYPE_QUERY":
+        if request_subtype_targets:
+            return True, request_subtype_targets, "ui_event"
+        else:
+            # UI 이벤트가 있지만 targets가 없으면 keyword 기반으로 보완
+            pass
+
+    # 2. Request에서 명시적 subtype_targets 전달
+    if request_subtype_targets and len(request_subtype_targets) > 0:
+        return True, request_subtype_targets, "request"
+
+    # 3. Keyword 기반 트리거 (subtype_config.yaml 사용)
+    subtype_keyword_map = get_subtype_keyword_map()
+    query_lower = query.lower()
+
+    for keyword, target in subtype_keyword_map.items():
+        if keyword.lower() in query_lower:
+            if target not in detected_targets:
+                detected_targets.append(target)
+
+    if detected_targets:
+        return True, detected_targets, "keyword"
+
+    return False, [], "none"
 
 
 # =============================================================================
@@ -1281,6 +1346,10 @@ def _convert_response(
     resolution_debug: dict[str, Any] | None = None,
     # STEP 4.1: Subtype Comparison
     subtype_comparison: SubtypeComparisonResponse | None = None,
+    # STEP 4.12-γ: Subtype Mode
+    comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE",
+    subtype_targets: list[str] | None = None,
+    is_subtype_intent: bool = False,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -1366,6 +1435,8 @@ def _convert_response(
         return CompareResponseModel(
             resolution_state=resolution_state,
             resolved_coverage_code=None,  # STEP 4.1: 단일 coverage_code 확정 금지
+            comparison_mode="SUBTYPE",  # STEP 4.12-γ: Subtype 모드 강제
+            subtype_targets=subtype_targets,  # STEP 4.12-γ
             compare_axis=None,  # 멀티 subtype에서는 compare_axis 불필요
             policy_axis=None,
             coverage_compare_result=None,
@@ -1391,6 +1462,8 @@ def _convert_response(
         return CompareResponseModel(
             resolution_state=resolution_state,
             resolved_coverage_code=resolved_coverage_code,
+            comparison_mode=comparison_mode,  # STEP 4.12-γ
+            subtype_targets=subtype_targets,  # STEP 4.12-γ
             compare_axis=None,
             policy_axis=None,
             coverage_compare_result=None,
@@ -1427,9 +1500,44 @@ def _convert_response(
             intent=resolved_intent,  # STEP 3.6: intent 포함
         )
 
+    # ==========================================================================
+    # STEP 4.12-γ: Subtype Mode에서 슬롯 필터링 및 요약 변경
+    # ==========================================================================
+    final_slots = converted_slots
+    final_user_summary = user_summary
+
+    if is_subtype_intent:
+        # Subtype 모드에서 금지된 슬롯 필터링
+        suppressed_slot_keys = get_suppressed_slots_in_subtype()
+        final_slots = [
+            slot for slot in converted_slots
+            if slot.slot_key not in suppressed_slot_keys
+        ]
+
+        # Subtype 모드 전용 user_summary 생성
+        display_names = get_display_names()
+        insurer_display = display_names.get("insurer_names", {})
+        insurer_names = [insurer_display.get(ic, ic) for ic in final_insurers]
+        insurer_str = ", ".join(insurer_names)
+
+        # subtype_targets에서 표시명 추출
+        subtype_display = get_subtype_display_names()
+        target_names = [subtype_display.get(t, t) for t in (subtype_targets or [])]
+        target_str = ", ".join(target_names) if target_names else "유사암/제자리암/경계성종양"
+
+        final_user_summary = (
+            f"{insurer_str}의 {target_str} 보장 여부 및 감액 기준을 비교했습니다. "
+            f"금액 비교가 아닌 정의/조건 중심의 비교입니다."
+        )
+
+        merged_debug["subtype_mode_applied"] = True
+        merged_debug["suppressed_slots"] = suppressed_slot_keys
+
     return CompareResponseModel(
         resolution_state=resolution_state,
         resolved_coverage_code=resolved_coverage_code,
+        comparison_mode=comparison_mode,  # STEP 4.12-γ
+        subtype_targets=subtype_targets,  # STEP 4.12-γ
         compare_axis=[
             CompareAxisItemResponse(
                 insurer_code=item.insurer_code,
@@ -1486,8 +1594,8 @@ def _convert_response(
             )
             for item in result.diff_summary
         ],
-        # U-4.8: Comparison Slots
-        slots=converted_slots,
+        # U-4.8: Comparison Slots (STEP 4.12-γ: Subtype 모드에서 필터링됨)
+        slots=final_slots,
         # STEP 4.1: Subtype Comparison
         subtype_comparison=subtype_comparison,
         # resolved_coverage_codes: top-level 승격
@@ -1496,7 +1604,7 @@ def _convert_response(
         primary_coverage_code=primary_code,
         primary_coverage_name=primary_name,
         related_coverage_codes=related_codes,
-        user_summary=user_summary,
+        user_summary=final_user_summary,  # STEP 4.12-γ: Subtype 모드에서 변경됨
         # STEP 2.9: Query Anchor
         anchor=new_anchor,
         # STEP 3.5: Insurer Auto-Recovery 메시지
@@ -1570,8 +1678,26 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         )
         anchor_debug["query_type"] = query_type
 
+        # =======================================================================
+        # STEP 4.12-γ: Subtype Intent Detection (Coverage Lock보다 먼저!)
+        # =======================================================================
+        is_subtype_intent, detected_subtype_targets, subtype_trigger = _detect_subtype_intent(
+            query=request.query,
+            ui_event_type=request.ui_event_type,
+            request_subtype_targets=request.subtype_targets,
+        )
+
+        # STEP 4.12-γ: comparison_mode 결정
+        comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "SUBTYPE" if is_subtype_intent else "COVERAGE"
+
+        # Debug info for subtype intent
+        anchor_debug["subtype_intent"] = is_subtype_intent
+        anchor_debug["subtype_targets"] = detected_subtype_targets
+        anchor_debug["subtype_trigger"] = subtype_trigger
+        anchor_debug["comparison_mode"] = comparison_mode
+
         # STEP 3.9 + 4.5: locked_coverage_code(s) 우선 적용
-        # locked_coverage_codes 또는 locked_coverage_code가 있으면 coverage resolver를 완전히 스킵
+        # STEP 4.12-γ: Subtype 모드에서는 coverage lock 무시
         coverage_codes_to_use = request.coverage_codes
         is_coverage_locked = False
 
@@ -1582,7 +1708,14 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         elif request.locked_coverage_code:
             effective_locked_codes = [request.locked_coverage_code]
 
-        if effective_locked_codes:
+        # STEP 4.12-γ: Subtype 모드에서는 coverage lock 강제 해제
+        if is_subtype_intent and effective_locked_codes:
+            # 기존 locked_codes를 debug에 기록하고 무시
+            anchor_debug["previous_locked_codes"] = effective_locked_codes
+            anchor_debug["coverage_locked"] = False
+            anchor_debug["coverage_lock_overridden"] = True
+            effective_locked_codes = None  # Lock 해제
+        elif effective_locked_codes:
             # STEP 4.5: 담보 고정 - resolver 스킵
             coverage_codes_to_use = effective_locked_codes
             anchor_debug["locked_coverage_codes"] = effective_locked_codes
@@ -1704,6 +1837,10 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             resolution_debug=resolution_debug,
             # STEP 4.1: Subtype Comparison
             subtype_comparison=subtype_comparison_resp,
+            # STEP 4.12-γ: Subtype Mode
+            comparison_mode=comparison_mode,
+            subtype_targets=detected_subtype_targets if is_subtype_intent else None,
+            is_subtype_intent=is_subtype_intent,
         )
     except HTTPException:
         raise

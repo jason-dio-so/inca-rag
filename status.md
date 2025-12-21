@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18: Partial Failure & Source Boundary 안정화)
+> 최종 업데이트: 2025-12-22 (STEP 4.12-γ: Subtype 비교 모드 분리 및 Coverage Lock Override)
 
 ---
 
@@ -94,12 +94,147 @@
 | **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
 | **U-4.17** | **Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시** | **기능/UI** | ✅ 완료 |
 | **U-4.18** | **Partial Failure & Source Boundary 안정화** | **안정성/UI** | ✅ 완료 |
+| **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.12-γ: Subtype 비교 모드 분리 및 Coverage Lock Override (2025-12-22)
+
+### 목적
+"경계성 종양/제자리암" Subtype 비교가 암진단비(A4200_1)로 자동 고정되어 금액 슬롯이 나오는 현상 차단
+
+### 문제 분석
+
+**As-Is (문제 상황)**:
+- 사용자가 "경계성 종양 / 제자리암" 비교를 요청
+- 시스템이 암진단비(유사암 제외) A4200_1로 자동 coverage lock
+- 결과: payout_amount 금액 비교 슬롯이 생성됨
+- 실제로 원하는 것: 유사암 포함/제외, 지급비율, 정의/판정문구 비교
+
+**To-Be (수정 후)**:
+- Subtype 질의는 `comparison_mode = "SUBTYPE"`로 강제
+- Coverage lock이 있어도 subtype_intent가 감지되면 lock override
+- payout_amount 등 금액 슬롯 생성 금지
+- 정의/조건 중심의 비교 결과 제공
+
+### 핵심 원칙
+
+1. **Subtype 질의는 Coverage Lock보다 우선한다**
+   - locked_coverage_codes가 있어도 subtype_intent 감지 시 무시
+
+2. **Subtype 모드에서 금액 슬롯 생성 금지**
+   - payout_amount, diagnosis_lump_sum_amount 등 suppressed_slots_in_subtype 필터링
+
+3. **comparison_mode 필드로 모드 구분**
+   - "COVERAGE": 기존 금액 비교 모드
+   - "SUBTYPE": 유사암/제자리암 정의 비교 모드
+
+### 구현
+
+**1. Subtype Intent Detection**
+
+`api/compare.py`:
+```python
+def _detect_subtype_intent(
+    query: str,
+    ui_event_type: str | None = None,
+    request_subtype_targets: list[str] | None = None,
+) -> tuple[bool, list[str], str]:
+    # 1. UI 이벤트 기반 트리거 (SUBTYPE_QUERY)
+    # 2. Request에서 명시적 subtype_targets 전달
+    # 3. Keyword 기반 트리거 (subtype_config.yaml 사용)
+```
+
+**2. Coverage Lock Override**
+
+```python
+# Subtype 모드에서는 coverage lock 강제 해제
+if is_subtype_intent and effective_locked_codes:
+    anchor_debug["previous_locked_codes"] = effective_locked_codes
+    anchor_debug["coverage_lock_overridden"] = True
+    effective_locked_codes = None  # Lock 해제
+```
+
+**3. Response Contract 변경**
+
+```python
+class CompareResponseModel(BaseModel):
+    # STEP 4.12-γ: Comparison Mode
+    comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE"
+    subtype_targets: list[str] | None = None
+```
+
+**4. Slot Suppression**
+
+```python
+if is_subtype_intent:
+    suppressed_slot_keys = get_suppressed_slots_in_subtype()
+    final_slots = [
+        slot for slot in converted_slots
+        if slot.slot_key not in suppressed_slot_keys
+    ]
+```
+
+**5. User Summary 변경**
+
+Subtype 모드에서는 금액 비교 문구 대신:
+```
+"{보험사}의 {subtype} 보장 여부 및 감액 기준을 비교했습니다.
+금액 비교가 아닌 정의/조건 중심의 비교입니다."
+```
+
+### 설정 파일
+
+**config/subtype_config.yaml**:
+```yaml
+subtype_keyword_map:
+  경계성: borderline
+  경계성종양: borderline
+  제자리암: in_situ
+  상피내암: in_situ
+  유사암: similar_cancer
+  소액암: minor_cancer
+
+suppressed_slots_in_subtype:
+  - payout_amount
+  - diagnosis_lump_sum_amount
+  - payout_condition_summary
+
+subtype_display_names:
+  borderline: 경계성종양
+  in_situ: 제자리암(상피내암)
+  similar_cancer: 유사암
+  minor_cancer: 소액암
+```
+
+### 검증 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Keyword trigger | "경계성 종양 제자리암 비교" | is_intent=True, targets=[borderline, in_situ] ✅ |
+| UI event trigger | ui_event_type="SUBTYPE_QUERY" | is_intent=True, trigger="ui_event" ✅ |
+| Normal query | "암진단비 비교" | is_intent=False, trigger="none" ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | _detect_subtype_intent() 추가, coverage lock override, comparison_mode 필드 |
+| `api/config_loader.py` | get_subtype_keyword_map(), get_suppressed_slots_in_subtype() 추가 |
+| `config/subtype_config.yaml` | subtype 설정 (keyword_map, suppressed_slots, display_names) |
+
+### DoD 체크리스트
+- [x] subtype 키워드/ui_event로 들어온 요청은 comparison_mode="SUBTYPE"
+- [x] Subtype 모드에서 payout_amount 슬롯 생성 억제
+- [x] Subtype 모드에서 coverage lock override
+- [x] user_summary에 금액 비교 문구 없음
+- [x] 회귀: 일반 "암진단비(유사암 제외)" 비교는 기존과 동일
+
+---
 
 ## U-4.18: Partial Failure & Source Boundary 안정화 (2025-12-22)
 
