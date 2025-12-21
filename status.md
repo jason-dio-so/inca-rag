@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18-γ: Evidence Source Boundary & Anti-Comparison UX)
+> 최종 업데이트: 2025-12-22 (U-4.18-δ: Slots Anti-Overreach UX)
 
 ---
 
@@ -97,6 +97,7 @@
 | **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ⚠️ 수정됨 (U-4.18-β) |
 | **U-4.18-β** | **Subtype Coverage 종속 원칙 강제** | **기능/UI** | ✅ 완료 |
 | **U-4.18-γ** | **Evidence Source Boundary & Anti-Comparison UX** | **UI** | ✅ 완료 |
+| **U-4.18-δ** | **Slots Anti-Overreach UX (역할 제한)** | **UI** | ✅ 완료 |
 
 ---
 
@@ -283,6 +284,80 @@ function getSourceLevel(docType: string): SourceLevel {
 - [x] Score 표시 제거
 - [x] Docker 재빌드 성공
 - [x] status.md 업데이트
+
+---
+
+## U-4.18-δ: Slots Anti-Overreach UX (2025-12-22)
+
+### 목적
+Slots 탭이 Evidence 역할을 침범하지 않도록 역할 제한 강화
+
+### 핵심 원칙
+
+1. **Slots 역할 제한**
+   - 비교 항목의 존재 여부
+   - 정량 값 (금액, 횟수 등)
+   - 차이 발생 사실 요약
+
+2. **Slots 금지 사항**
+   - 조건 상세 나열 ❌
+   - 예외 조항 설명 ❌
+   - 약관 문구 직접 인용 ❌
+   - Evidence 요약/재서술 ❌
+
+3. **길이 제한**
+   - 최대 120자 또는 2줄
+   - 초과 시: "일부 조건 요약 (자세한 내용은 Evidence에서 확인)"
+
+### 구현
+
+**1. Overreach 탐지 및 차단**
+
+`SlotsTable.tsx`:
+```typescript
+function truncateSlotValue(value: string | null): { text: string; truncated: boolean } {
+  // 조항 번호, 복수 숫자, 상세 조건 패턴 탐지
+  const hasArticleNumber = /제\s*\d+\s*조|조항|약관/i.test(value);
+  const multipleNumbers = (value.match(/\d+/g) || []).length >= 3;
+  const hasDetailedCondition = /계약일로부터|경과\s*시|소액암|50%|90일/i.test(value);
+
+  if (hasArticleNumber || multipleNumbers || hasDetailedCondition || value.length > 120) {
+    return { text: SLOT_OVERFLOW_FALLBACK, truncated: true };
+  }
+  return { text: value, truncated: false };
+}
+```
+
+**2. Source Hint 표시**
+
+```typescript
+function SourceHint({ sourceLevel }: { sourceLevel?: string }) {
+  const label = SOURCE_HINT_LABELS[level] || "근거 부족";
+  return <span className="text-[10px] text-muted-foreground">({label})</span>;
+}
+```
+
+**3. Evidence 유도 안내 (Slots 하단)**
+
+```typescript
+<div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+  ※ Slots는 비교를 위한 요약 정보입니다.
+  세부 조건 및 근거 문구는 Evidence 탭에서 확인하세요.
+</div>
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/components/SlotsTable.tsx` | truncateSlotValue(), SourceHint, Evidence 유도 안내 |
+
+### DoD 체크리스트
+- [x] Slots에서 상세 조건 해석 불가
+- [x] 120자/2줄 초과 시 자동 치환
+- [x] Source Hint 표시 (비교 문서 기준/약관 기준/근거 부족)
+- [x] Evidence 유도 안내 문구 추가
+- [x] Build 성공
 
 ---
 

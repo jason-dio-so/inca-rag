@@ -16,7 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Info, CheckCircle, XCircle, AlertCircle, Bot, Cpu } from "lucide-react";
+import { Info, CheckCircle, XCircle, AlertCircle, Bot, Cpu, FileText } from "lucide-react";
 
 // Slot types (from API)
 interface SlotEvidenceRef {
@@ -87,6 +87,43 @@ const LLM_REASON_LABELS: Record<string, string> = {
   cost_guard: "cost",
   not_needed: "not_needed",
 };
+
+// =============================================================================
+// U-4.18-δ: Slots Anti-Overreach Configuration
+// =============================================================================
+
+/** Maximum character length for slot values (120 chars or ~2 lines) */
+const SLOT_VALUE_MAX_LENGTH = 120;
+
+/** Fallback text when value exceeds max length */
+const SLOT_OVERFLOW_FALLBACK = "일부 조건 요약\n(자세한 내용은 Evidence에서 확인)";
+
+/** Source hint labels */
+const SOURCE_HINT_LABELS: Record<string, string> = {
+  COMPARABLE_DOC: "비교 문서 기준",
+  POLICY_ONLY: "약관 기준",
+  UNKNOWN: "근거 부족",
+};
+
+/**
+ * U-4.18-δ: Truncate slot value if it exceeds max length
+ * Also checks for overreach patterns (article numbers, detailed conditions)
+ */
+function truncateSlotValue(value: string | null): { text: string; truncated: boolean } {
+  if (!value) return { text: "", truncated: false };
+
+  // Check for overreach patterns (article numbers, multiple numbers, detailed conditions)
+  const hasArticleNumber = /제\s*\d+\s*조|조항|약관/i.test(value);
+  const multipleNumbers = (value.match(/\d+/g) || []).length >= 3;
+  const hasDetailedCondition = /계약일로부터|경과\s*시|소액암|50%|90일/i.test(value);
+
+  // If overreach detected or exceeds length, truncate
+  if (hasArticleNumber || multipleNumbers || hasDetailedCondition || value.length > SLOT_VALUE_MAX_LENGTH) {
+    return { text: SLOT_OVERFLOW_FALLBACK, truncated: true };
+  }
+
+  return { text: value, truncated: false };
+}
 
 function LLMBadge({ trace }: { trace?: LLMTrace | null }) {
   if (!trace) return null;
@@ -181,15 +218,27 @@ function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
           </Tooltip>
         </TooltipProvider>
         <LLMBadge trace={iv.trace} />
+        {/* U-4.18-δ: Source Hint */}
+        <SourceHint sourceLevel={sourceLevel} />
       </div>
     );
   }
+
+  // U-4.18-δ: Apply truncation to prevent overreach
+  const { text: displayValue, truncated } = truncateSlotValue(iv.value);
 
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-1">
         {CONFIDENCE_ICONS[iv.confidence]}
-        <span className="text-sm font-medium">{iv.value}</span>
+        <span className={`text-sm ${truncated ? "text-muted-foreground italic" : "font-medium"}`}>
+          {displayValue.split("\n").map((line, i) => (
+            <span key={i}>
+              {line}
+              {i < displayValue.split("\n").length - 1 && <br />}
+            </span>
+          ))}
+        </span>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         {iv.evidence_refs.length > 0 && (
@@ -198,10 +247,27 @@ function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
           </span>
         )}
         <LLMBadge trace={iv.trace} />
-        {/* U-4.18: Source Level Badge */}
+        {/* U-4.18: Source Level Badge (약관만 표시) */}
         <SourceLevelBadge sourceLevel={sourceLevel} />
       </div>
+      {/* U-4.18-δ: Source Hint (항상 표시) */}
+      <SourceHint sourceLevel={sourceLevel} />
     </div>
+  );
+}
+
+/**
+ * U-4.18-δ: Source Hint Component
+ * Shows source level hint below each slot item
+ */
+function SourceHint({ sourceLevel }: { sourceLevel?: string }) {
+  const level = sourceLevel || "UNKNOWN";
+  const label = SOURCE_HINT_LABELS[level] || SOURCE_HINT_LABELS.UNKNOWN;
+
+  return (
+    <span className="text-[10px] text-muted-foreground">
+      ({label})
+    </span>
   );
 }
 
@@ -335,6 +401,20 @@ export function SlotsTable({ slots, singleInsurer }: SlotsTableProps) {
         </Card>
       )}
 
+      {/* U-4.18-δ: Slots → Evidence 유도 안내 */}
+      <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+        <div className="flex items-start gap-2">
+          <FileText className="h-4 w-4 text-gray-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-gray-700">
+            <p className="text-xs">
+              ※ Slots는 비교를 위한 요약 정보입니다.
+              <br />
+              세부 조건 및 근거 문구는 <span className="font-medium">Evidence 탭</span>에서 확인하세요.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* A2 Policy Notice */}
       <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
         <div className="flex items-start gap-2">
@@ -342,7 +422,7 @@ export function SlotsTable({ slots, singleInsurer }: SlotsTableProps) {
           <div className="text-sm text-blue-800">
             <p className="font-medium">A2 정책</p>
             <p className="text-xs mt-1">
-              비교 항목(comparable=true)은 가입설계서/상품요약서/사업방법서에서 추출되며,
+              비교 항목은 가입설계서/상품요약서/사업방법서에서 추출되며,
               정의/참고 항목은 약관에서 참조용으로만 제공됩니다.
             </p>
           </div>
