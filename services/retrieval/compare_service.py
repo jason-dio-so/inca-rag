@@ -959,7 +959,8 @@ def get_compare_axis(
                         SELECT DISTINCT
                             ca.coverage_code,
                             cs.coverage_name,
-                            ca.raw_name
+                            ca.raw_name,
+                            ca.raw_name_norm  -- U-5.0-A: 공백 제거 정규화 이름
                         FROM coverage_alias ca
                         JOIN insurer i ON ca.insurer_id = i.insurer_id
                         LEFT JOIN coverage_standard cs ON cs.coverage_code = ca.coverage_code
@@ -989,7 +990,9 @@ def get_compare_axis(
                         CROSS JOIN alias_patterns ap
                         WHERE i.insurer_code = %(insurer_code)s
                           AND c.doc_type = ANY(%(doc_types)s::text[])
-                          AND c.content ILIKE CONCAT(chr(37), ap.raw_name, chr(37))
+                          -- U-5.0-A: 공백 무시 매칭 (raw_name_norm 사용)
+                          AND REGEXP_REPLACE(LOWER(c.content), '[[:space:]]', '', 'g')
+                              LIKE CONCAT(chr(37), ap.raw_name_norm, chr(37))
                           AND {plan_condition}
                     ),
                     ranked AS (
