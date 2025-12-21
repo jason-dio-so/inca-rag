@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-20 (STEP 4.9: Single-Insurer Locked Coverage Detail View)
+> 최종 업데이트: 2025-12-21 (STEP 5: LLM Assist 도입)
 
 ---
 
@@ -87,12 +87,111 @@
 | **STEP 4.7-β** | **단일 회사 특정 담보 조회 결과 생성 보장** | **기능** | ✅ 완료 |
 | **STEP 4.7-γ** | **Single-Insurer Locked Coverage E2E 검증** | **검증** | ✅ 완료 |
 | **STEP 4.9** | **Single-Insurer Locked Coverage Detail View** | **UI** | ✅ 완료 |
+| **STEP 5** | **LLM Assist 도입 (Query Assist + Evidence Summary)** | **기능/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 5: LLM Assist 도입 (2025-12-21)
+
+### 목적
+LLM을 "보조(Assist)" 역할로만 도입하여 질의 정규화와 비판단 요약 기능 제공
+
+### 핵심 원칙
+
+1. **LLM 허용 역할**
+   - 질의 정규화 (JSON)
+   - intent / subtype / keyword 힌트
+   - evidence 문구의 비판단 요약
+
+2. **LLM 금지 역할**
+   - coverage_code 결정 또는 추천
+   - 지급 가능/불가능 판단
+   - 금액 비교, "어디가 더 유리"
+   - 최종 비교 결론 문장 생성
+
+3. **비침투 원칙**
+   - `/compare` API는 LLM 없이도 100% 동일하게 동작
+   - LLM 실패/타임아웃 시: compare 정상, assist 결과만 실패
+
+### 신규 API
+
+| Endpoint | Method | 설명 |
+|----------|--------|------|
+| `/assist/query` | POST | Query Assist - 질의 정규화/힌트 |
+| `/assist/summary` | POST | Evidence Summary - 비판단 요약 |
+
+### 구현
+
+**Backend: `services/llm/`**
+- `schemas.py`: Pydantic 스키마 (Request/Response)
+- `guardrails.py`: 금지어 탐지, 출력 검증
+- `client.py`: LLM provider wrapper (OpenAI)
+- `query_assist.py`: Query Assist 로직
+- `evidence_summary.py`: Evidence Summary 로직
+
+**Frontend**
+- `QueryAssistHint.tsx`: AI 힌트 카드 (Apply/Ignore 버튼)
+- `EvidenceSummaryPanel.tsx`: Evidence 요약 패널
+- `ChatPanel.tsx`: Sparkles 버튼으로 Query Assist 호출
+- `EvidencePanel.tsx`: Evidence Summary 통합
+
+### UI 동작
+
+**Query Assist**
+1. 질의 입력 후 Sparkles(✨) 버튼 클릭
+2. 힌트 카드 표시 (정규화된 질의, 키워드, subtype 등)
+3. **Apply 클릭** → 정규화된 질의로 검색
+4. **Ignore 클릭** → 원본 질의로 검색
+5. 자동 적용 **금지**
+
+**Evidence Summary**
+1. Evidence 탭 열람 시 요약 패널 표시
+2. "⚠️ 비판단 요약(근거 기반)" 라벨 필수
+3. 항상 원문 evidence와 함께 노출
+
+### 테스트 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Query Assist | "경계성 종양과 제자리암 비교" | subtypes: [CIS_CARCINOMA, BORDERLINE_TUMOR], intents: [compare, coverage_lookup] ✅ |
+| Evidence Summary | 2개 약관 발췌 | 2개 요약 bullets, 1개 limitation ✅ |
+| Guardrails | "지급됩니다. 유리합니다." | violations 감지, 출력 차단 ✅ |
+
+### 환경 변수
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| ASSIST_LLM_ENABLED | 0 | Assist LLM 활성화 (0=규칙기반) |
+| ASSIST_LLM_MODEL | gpt-4o-mini | LLM 모델 |
+| ASSIST_LLM_TIMEOUT | 10 | 타임아웃 (초) |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/llm/__init__.py` | 신규 - 모듈 진입점 |
+| `services/llm/schemas.py` | 신규 - Pydantic 스키마 |
+| `services/llm/guardrails.py` | 신규 - 금지어 탐지 |
+| `services/llm/client.py` | 신규 - LLM 클라이언트 |
+| `services/llm/query_assist.py` | 신규 - Query Assist |
+| `services/llm/evidence_summary.py` | 신규 - Evidence Summary |
+| `api/assist.py` | 신규 - Assist API 라우터 |
+| `api/main.py` | assist 라우터 등록 |
+| `apps/web/src/components/QueryAssistHint.tsx` | 신규 - 힌트 카드 |
+| `apps/web/src/components/EvidenceSummaryPanel.tsx` | 신규 - 요약 패널 |
+| `apps/web/src/components/ChatPanel.tsx` | Query Assist 통합 |
+| `apps/web/src/components/EvidencePanel.tsx` | Evidence Summary 통합 |
+| `apps/web/src/lib/types.ts` | Assist 타입 추가 |
+| `apps/web/src/lib/api.ts` | Assist API 함수 추가 |
+
+### 산출물
+- Audit 문서: `docs/audit/step_5_llm_assist_contract_20251221.md`
+
+---
 
 ## STEP 4.9: Single-Insurer Locked Coverage Detail View (2025-12-20)
 

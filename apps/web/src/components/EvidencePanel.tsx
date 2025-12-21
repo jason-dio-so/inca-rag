@@ -3,6 +3,7 @@
 /**
  * STEP 3.8: Evidence Panel with View State Isolation
  * STEP 4.0: Evidence Priority Ordering (P1/P2/P3)
+ * STEP 5: Evidence Summary Integration (비판단 요약)
  *
  * Evidence/Policy 상세보기는 ViewContext를 통해 처리되며,
  * Query State(messages, currentResponse, anchor)에 영향을 주지 않습니다.
@@ -12,6 +13,7 @@
  * - Query State 변경 없음
  * - View State만 업데이트
  * - STEP 4.0: P1(결정근거) → P2(해석근거) → P3(보조근거) 순서 정렬
+ * - STEP 5: Evidence Summary는 비판단 요약만 제공
  */
 
 import { useState, useCallback, useMemo } from "react";
@@ -29,7 +31,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef } from "@/lib/types";
+import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef, EvidenceItem } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
 import { Copy, Check, Eye, ChevronDown, Star, FileText } from "lucide-react";
 import { useViewContext } from "@/contexts/ViewContext";
@@ -40,6 +42,7 @@ import {
   PRIORITY_STYLES,
   EvidencePriority,
 } from "@/lib/evidence-priority.config";
+import { EvidenceSummaryPanel } from "./EvidenceSummaryPanel";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -136,6 +139,38 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
     );
   }
 
+  // STEP 5: Evidence Summary를 위한 데이터 준비
+  // 대표 근거들을 EvidenceItem 형식으로 변환
+  const evidenceItemsForSummary: EvidenceItem[] = useMemo(() => {
+    const items: EvidenceItem[] = [];
+
+    insurerList.forEach((insurer) => {
+      const allEvidence = groupedByInsurer.get(insurer) || [];
+      const repSet = buildRepresentativeEvidenceSet(slots, insurer);
+
+      // 대표 근거만 요약에 포함 (없으면 처음 2개)
+      const representativeEvidence = allEvidence.filter((ev) => {
+        const key = `${ev.document_id}-${ev.page_start ?? 0}`;
+        return repSet.has(key);
+      });
+
+      const evidenceToSummarize = representativeEvidence.length > 0
+        ? representativeEvidence.slice(0, 3)
+        : allEvidence.slice(0, 2);
+
+      evidenceToSummarize.forEach((ev) => {
+        items.push({
+          insurer_code: insurer,
+          doc_type: ev.doc_type,
+          page: ev.page_start ?? undefined,
+          excerpt: ev.preview?.slice(0, 500) || "",
+        });
+      });
+    });
+
+    return items;
+  }, [insurerList, groupedByInsurer, slots]);
+
   const handleCopy = async (evidence: Evidence) => {
     const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
     const success = await copyToClipboard(ref);
@@ -168,6 +203,14 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
     <div className="space-y-2">
       {/* STEP 3.8: PdfPageViewer는 이제 DocumentViewerLayer (page.tsx)에서 관리됨 */}
       {/* ViewContext.openDocument()를 통해 View State만 변경하고, Query State는 불변 */}
+
+      {/* STEP 5: Evidence Summary Panel (비판단 요약) */}
+      {!isPolicyMode && evidenceItemsForSummary.length > 0 && (
+        <EvidenceSummaryPanel
+          evidenceItems={evidenceItemsForSummary}
+          isLoading={false}
+        />
+      )}
 
       {/* U-4.9: Evidence Tab Clarification Notice */}
       {!isPolicyMode && (

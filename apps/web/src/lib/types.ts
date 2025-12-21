@@ -190,3 +190,52 @@ export interface ChatMessage {
 
 // DebugInfo는 API에서 { [key: string]: unknown } 으로 정의됨
 export type DebugInfo = CompareResponse["debug"];
+
+// =============================================================================
+// STEP 5: LLM Assist Types
+// =============================================================================
+
+export interface AssistStatus {
+  status: "SUCCESS" | "FAILED";
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface QueryAssistContext {
+  has_anchor?: boolean;
+  locked_coverage_codes?: string[] | null;
+}
+
+export interface QueryAssistRequest {
+  query: string;
+  insurers?: string[];
+  context?: QueryAssistContext;
+}
+
+export interface QueryAssistResponse {
+  normalized_query: string;
+  detected_intents: string[];
+  detected_subtypes: string[];
+  keywords: string[];
+  confidence: number;
+  notes: string;
+  assist_status: AssistStatus;
+}
+
+export interface EvidenceItem {
+  insurer_code: string;
+  doc_type: string;
+  page?: number | null;
+  excerpt: string;
+}
+
+export interface EvidenceSummaryRequest {
+  evidence: EvidenceItem[];
+  task?: "summarize_without_judgement";
+}
+
+export interface EvidenceSummaryResponse {
+  summary_bullets: string[];
+  limitations: string[];
+  assist_status: AssistStatus;
+}

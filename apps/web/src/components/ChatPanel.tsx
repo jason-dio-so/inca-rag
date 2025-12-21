@@ -2,12 +2,14 @@
 
 /**
  * STEP 3.7-γ: ChatPanel with Coverage Guide Isolation
+ * STEP 5: Query Assist Integration
  *
  * Chat 영역은 "대화"로서의 역할만 수행
  * 담보 선택 가이드는 CoverageGuidePanel로 분리되어 표시
+ * Query Assist 힌트는 선택적 적용 (자동 적용 금지)
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -19,10 +21,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChatMessage, CompareRequestWithIntent, SuggestedCoverage } from "@/lib/types";
-import { ChevronDown, ChevronUp, Send } from "lucide-react";
+import { ChatMessage, CompareRequestWithIntent, SuggestedCoverage, QueryAssistResponse } from "@/lib/types";
+import { ChevronDown, ChevronUp, Send, Sparkles } from "lucide-react";
 import { CoverageGuidePanel } from "./CoverageGuidePanel";
 import { CoverageGuideState } from "@/lib/conversation-hygiene.config";
+import { QueryAssistHint } from "./QueryAssistHint";
+import { queryAssist } from "@/lib/api";
 
 const ALL_INSURERS = [
   "SAMSUNG",
@@ -86,6 +90,11 @@ export function ChatPanel({
   const [policyKeywords, setPolicyKeywords] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  // STEP 5: Query Assist state
+  const [assistResponse, setAssistResponse] = useState<QueryAssistResponse | null>(null);
+  const [isAssistLoading, setIsAssistLoading] = useState(false);
+  const [showAssistHint, setShowAssistHint] = useState(false);
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -107,6 +116,68 @@ export function ChatPanel({
       : [...selectedInsurers, insurer];
     onInsurersChange(newInsurers);
   };
+
+  // STEP 5: Query Assist - AI 힌트 요청
+  const handleRequestAssist = useCallback(async () => {
+    if (!query.trim() || isAssistLoading) return;
+
+    setIsAssistLoading(true);
+    setShowAssistHint(false);
+
+    try {
+      const response = await queryAssist({
+        query: query.trim(),
+        insurers: selectedInsurers,
+        context: {
+          has_anchor: !!lockedCoverage,
+          locked_coverage_codes: lockedCoverage ? [lockedCoverage.code] : null,
+        },
+      });
+
+      if (response) {
+        setAssistResponse(response);
+        setShowAssistHint(true);
+      }
+    } catch (error) {
+      console.warn("Query assist error:", error);
+    } finally {
+      setIsAssistLoading(false);
+    }
+  }, [query, selectedInsurers, lockedCoverage, isAssistLoading]);
+
+  // STEP 5: Apply assist hint
+  const handleApplyAssist = useCallback((normalizedQuery: string, keywords: string[]) => {
+    // 정규화된 질의로 교체 후 검색
+    setQuery(normalizedQuery);
+    setShowAssistHint(false);
+
+    // 자동으로 검색 실행
+    const request: CompareRequestWithIntent = {
+      insurers: selectedInsurers,
+      query: normalizedQuery,
+      top_k_per_insurer: topK,
+    };
+
+    if (age) {
+      request.age = parseInt(age, 10);
+    }
+    if (gender) {
+      request.gender = gender;
+    }
+    if (keywords.length > 0) {
+      request.policy_keywords = keywords;
+    }
+
+    onSendMessage(request);
+    setQuery("");
+  }, [selectedInsurers, topK, age, gender, onSendMessage]);
+
+  // STEP 5: Ignore assist hint
+  const handleIgnoreAssist = useCallback(() => {
+    setShowAssistHint(false);
+    // 원본 질의로 검색 진행
+    handleSend();
+  }, []);
 
   const handleSend = () => {
     // STEP 3.5: insurer 0개도 허용 (서버에서 auto-recovery 적용)
@@ -145,6 +216,9 @@ export function ChatPanel({
 
     onSendMessage(request);
     setQuery("");
+    // STEP 5: 검색 시 assist 힌트 초기화
+    setShowAssistHint(false);
+    setAssistResponse(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -354,6 +428,17 @@ export function ChatPanel({
           </div>
         )}
 
+        {/* STEP 5: Query Assist Hint Card */}
+        {showAssistHint && assistResponse && (
+          <QueryAssistHint
+            assistResponse={assistResponse}
+            originalQuery={query}
+            onApply={handleApplyAssist}
+            onIgnore={handleIgnoreAssist}
+            isLoading={isLoading}
+          />
+        )}
+
         {/* Message Input */}
         <div className="flex gap-2">
           <Textarea
@@ -365,6 +450,16 @@ export function ChatPanel({
             className="min-h-[60px] resize-none"
             disabled={isLoading}
           />
+          {/* STEP 5: AI 힌트 버튼 */}
+          <Button
+            variant="outline"
+            onClick={handleRequestAssist}
+            disabled={!query.trim() || isLoading || isAssistLoading}
+            className="px-3"
+            title="AI 힌트"
+          >
+            <Sparkles className={`h-4 w-4 ${isAssistLoading ? "animate-pulse" : ""}`} />
+          </Button>
           <Button
             onClick={handleSend}
             disabled={!query.trim() || isLoading}

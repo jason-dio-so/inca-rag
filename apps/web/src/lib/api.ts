@@ -1,4 +1,11 @@
-import { CompareRequestWithIntent, CompareResponseWithSlots } from "./types";
+import {
+  CompareRequestWithIntent,
+  CompareResponseWithSlots,
+  QueryAssistRequest,
+  QueryAssistResponse,
+  EvidenceSummaryRequest,
+  EvidenceSummaryResponse,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 const TIMEOUT_MS = 20000;
@@ -51,6 +58,10 @@ export async function compare(request: CompareRequestWithIntent): Promise<Compar
     if (request.locked_coverage_code) {
       body.locked_coverage_code = request.locked_coverage_code;
     }
+    // STEP 4.5: locked_coverage_codes for multi-subtype support
+    if (request.locked_coverage_codes && request.locked_coverage_codes.length > 0) {
+      body.locked_coverage_codes = request.locked_coverage_codes;
+    }
 
     const response = await fetch(`${API_BASE}/compare`, {
       method: "POST",
@@ -99,5 +110,87 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+// =============================================================================
+// STEP 5: LLM Assist API
+// =============================================================================
+
+const ASSIST_TIMEOUT_MS = 10000;
+
+/**
+ * Query Assist - 질의 정규화/힌트 제공
+ *
+ * 핵심 원칙:
+ * - 자동 반영 금지 (사용자 Apply 필수)
+ * - soft-fail: 실패해도 undefined 반환, 시스템 정상 동작
+ */
+export async function queryAssist(
+  request: QueryAssistRequest
+): Promise<QueryAssistResponse | undefined> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_BASE}/assist/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.warn(`Query assist failed: ${response.status}`);
+      return undefined;
+    }
+
+    return await response.json();
+  } catch (error) {
+    // Soft-fail: 에러 시 undefined 반환
+    console.warn("Query assist error:", error);
+    return undefined;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Evidence Summary - 비판단 요약
+ *
+ * 핵심 원칙:
+ * - 판단 없는 요약만 제공
+ * - soft-fail: 실패해도 undefined 반환, 시스템 정상 동작
+ */
+export async function evidenceSummary(
+  request: EvidenceSummaryRequest
+): Promise<EvidenceSummaryResponse | undefined> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_BASE}/assist/summary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.warn(`Evidence summary failed: ${response.status}`);
+      return undefined;
+    }
+
+    return await response.json();
+  } catch (error) {
+    // Soft-fail: 에러 시 undefined 반환
+    console.warn("Evidence summary error:", error);
+    return undefined;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
