@@ -144,16 +144,13 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* STEP 2.5: 대표 담보 헤더 */}
+      {/* STEP 4.9-β: 대표 담보 헤더 - display name만 표시 (coverage_code 노출 금지) */}
       {hasPrimaryCoverage && (
         <div className="px-4 py-3 border-b bg-muted/30">
           <div className="flex items-center gap-2">
             <Badge variant="default" className="text-sm">
               {response.primary_coverage_name}
             </Badge>
-            <span className="text-xs text-muted-foreground">
-              ({response.primary_coverage_code})
-            </span>
           </div>
         </div>
       )}

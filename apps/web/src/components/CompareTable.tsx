@@ -101,13 +101,9 @@ export function CompareTable({ data }: CompareTableProps) {
           <tbody>
             {data.map((item, idx) => (
               <tr key={idx} className="border-b">
+                {/* STEP 4.9-β: coverage_code 노출 금지, display name만 표시 */}
                 <td className="p-3 font-medium">
-                  <div>{item.coverage_name || item.coverage_code}</div>
-                  {item.coverage_name && (
-                    <div className="text-xs text-muted-foreground">
-                      {item.coverage_code}
-                    </div>
-                  )}
+                  <div>{item.coverage_name || "담보"}</div>
                 </td>
                 {insurerList.map((insurer) => {
                   // insurers is a list, find by insurer_code

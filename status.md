@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-21 (STEP 5: LLM Assist 도입)
+> 최종 업데이트: 2025-12-21 (STEP 4.9-β: UX 규약 고정)
 
 ---
 
@@ -88,12 +88,51 @@
 | **STEP 4.7-γ** | **Single-Insurer Locked Coverage E2E 검증** | **검증** | ✅ 완료 |
 | **STEP 4.9** | **Single-Insurer Locked Coverage Detail View** | **UI** | ✅ 완료 |
 | **STEP 5** | **LLM Assist 도입 (Query Assist + Evidence Summary)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.9-β** | **Diff / Compare / Evidence 공통 UX 규약 고정** | **UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.9-β: Diff / Compare / Evidence 공통 UX 규약 고정 (2025-12-21)
+
+### 목적
+엔진 언어 → 사용자 언어 번역 규약 고정
+
+### 핵심 원칙
+
+1. **내부 개념 노출 금지**
+   - `coverage_code`, `__amount_fallback__`, axis key 절대 노출 금지
+   - 이러한 정보는 Debug/Audit 영역에서만 확인 가능
+
+2. **사용자 인식 단위는 오직 "담보"**
+   - 모든 탭에서 display name만 사용
+   - fallback 여부는 UI 판단에 영향 없음
+
+### 변경 사항
+
+| 영역 | Before | After |
+|------|--------|-------|
+| Diff 탭 제목 | `<Badge>{coverage_code}</Badge>` | display name만 표시 |
+| Diff 차이없음 | "상세 차이점 정보 없음" | "보험사 간 차이가 없습니다" |
+| Compare 담보명 | coverage_code 보조 텍스트 | display name만 표시 |
+| ResultsPanel 헤더 | `(coverage_code)` 표시 | display name만 표시 |
+| fallback 표현 | `__amount_fallback__` | footnote (※ 금액 근거...) |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/components/DiffSummary.tsx` | coverage_code Badge 제거, 차이없음 문구 변경 |
+| `apps/web/src/components/CompareTable.tsx` | coverage_code 보조 텍스트 제거 |
+| `apps/web/src/components/ResultsPanel.tsx` | 헤더에서 coverage_code 제거 |
+
+### 산출물
+- Audit 문서: `docs/audit/step_4_9_beta_ux_convention_20251221.md`
+
+---
 
 ## STEP 5: LLM Assist 도입 (2025-12-21)
 

@@ -91,16 +91,18 @@ export function DiffSummary({ data }: DiffSummaryProps) {
       <SummaryTextSection summaries={summaryTexts} />
       {data.map((item, idx) => {
         const bullets = item.bullets || [];
-        const displayName = item.coverage_name || item.coverage_code || "항목";
+        // STEP 4.9-β: coverage_code는 사용자에게 노출하지 않음 (display name만 사용)
+        const displayName = item.coverage_name || "담보";
+        // STEP 4.9-β: __amount_fallback__ 항목은 UI에서 숨김 (fallback 여부 노출 금지)
+        const isAmountFallback = item.coverage_code === "__amount_fallback__";
 
         return (
           <Card key={idx}>
             <CardContent className="p-4">
               <div className="space-y-2">
-                {/* Coverage Header */}
+                {/* STEP 4.9-β: Coverage Header - display name만 표시 */}
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{item.coverage_code}</Badge>
-                  <span className="font-medium">{displayName}</span>
+                  <span className="font-medium text-base">{displayName}</span>
                 </div>
 
                 {/* Bullets */}
@@ -140,9 +142,18 @@ export function DiffSummary({ data }: DiffSummaryProps) {
                     })}
                   </ul>
                 ) : (
-                  <p className="text-sm text-muted-foreground ml-2">
-                    상세 차이점 정보 없음
-                  </p>
+                  <div className="ml-2">
+                    {/* STEP 4.9-β: 의미가 명확한 문구로 대체 */}
+                    <p className="text-sm text-muted-foreground">
+                      보험사 간 차이가 없습니다
+                    </p>
+                    {/* STEP 4.9-β: fallback 발생 시 보조 설명으로만 간접 표현 */}
+                    {isAmountFallback && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        ※ 금액 근거 기준으로 산출되었습니다.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </CardContent>
