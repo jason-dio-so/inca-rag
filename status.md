@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-21 (STEP 4.10: Coverage Alias 확장 - 담보명 표준화 보강)
+> 최종 업데이트: 2025-12-21 (STEP 4.10-γ: 전 보험사 Coverage Alias 전수 검증)
 
 ---
 
@@ -91,12 +91,78 @@
 | **STEP 4.9-β** | **Diff / Compare / Evidence 공통 UX 규약 고정** | **UI** | ✅ 완료 |
 | **STEP 4.9-β-1** | **좌/우 독립 스크롤 UX 고정 (Layout Fix)** | **UI** | ✅ 완료 |
 | **STEP 4.10** | **Coverage Alias 확장 - 담보명 표준화 보강** | **기능** | ✅ 완료 |
+| **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.10-γ: 전 보험사 Coverage Alias 전수 검증 (2025-12-21)
+
+### 목적
+모든 보험사에 대해 A9630_1(다빈치로봇암수술비) 담보의 axis 생성 가능 여부 검증
+
+### 1차 검증 결과
+
+| insurer_code | axis_len | result | 비고 |
+|--------------|----------|--------|------|
+| DB | 8 | ✅ GREEN | - |
+| HANWHA | 4 | ✅ GREEN | - |
+| HEUNGKUK | 0 | ❌ RED | alias suffix 불일치 |
+| HYUNDAI | 10 | ✅ GREEN | - |
+| KB | 0 | ❌ RED | alias suffix 불일치 |
+| LOTTE | 4 | ✅ GREEN | - |
+| MERITZ | 10 | ✅ GREEN | - |
+| SAMSUNG | 0 | ❌ RED | alias prefix/공백 불일치 |
+
+### RED 케이스 원인 분석
+
+| 보험사 | 기존 alias | chunk 실제 표현 | 원인 |
+|--------|-----------|----------------|------|
+| HEUNGKUK | `(갱신형_10년)` suffix | suffix 없음 | alias 너무 구체적 |
+| KB | `【갱신계약】` suffix | suffix 없음 | alias 너무 구체적 |
+| SAMSUNG | `[갱신형]` prefix | prefix 없음 | alias prefix 불일치 |
+
+### alias 보강
+
+| 보험사 | 추가 alias 수 | 대표 예시 |
+|--------|--------------|----------|
+| HEUNGKUK | +5건 | `다빈치및레보아이로봇 암수술비(갑상선암 및 전립선암 제외)` |
+| KB | +5건 | `다빈치로봇 암수술비(갑상선암 및 전립선암 제외)` |
+| SAMSUNG | +5건 | `다빈치로봇 수술비(1년감액)` |
+
+### 2차 검증 결과 (보강 후)
+
+| insurer_code | axis_len | result | doc_type_counts |
+|--------------|----------|--------|-----------------|
+| DB | 8 | ✅ GREEN | 가입설계서:4, 상품요약서:2, 사업방법서:2 |
+| HANWHA | 4 | ✅ GREEN | 사업방법서:3, 상품요약서:1 |
+| HEUNGKUK | 10 | ✅ GREEN | 가입설계서:6, 상품요약서:3, 사업방법서:1 |
+| HYUNDAI | 10 | ✅ GREEN | 가입설계서:4, 상품요약서:6 |
+| KB | 10 | ✅ GREEN | 가입설계서:6, 상품요약서:4 |
+| LOTTE | 4 | ✅ GREEN | 가입설계서:4 |
+| MERITZ | 10 | ✅ GREEN | 가입설계서:2, 상품요약서:3, 사업방법서:5 |
+| SAMSUNG | 10 | ✅ GREEN | 가입설계서:5, 상품요약서:5 |
+
+### 결론
+- **8개 보험사 전체 GREEN**
+- alias_text_match 전략으로 모든 보험사에서 axis 생성 성공
+- A9630_1 총 alias: 34건 (기존 19건 + 추가 15건)
+
+### DoD 체크리스트
+- [x] 모든 insurer_code에 대해 GREEN 분류 완료
+- [x] RED 케이스 3건 alias 보강
+- [x] 보강 후 전체 GREEN 확인
+- [x] coverage_locked == true 확인
+- [x] __amount_fallback__ 노출 없음 확인
+- [x] audit 문서 생성
+
+### 산출물
+- Audit 문서: `docs/audit/step_4_10_gamma_all_insurer_axis_audit.md`
+
+---
 
 ## STEP 4.10: Coverage Alias 확장 - 담보명 표준화 보강 (2025-12-21)
 
