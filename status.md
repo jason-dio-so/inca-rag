@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-21 (STEP 4.9-β: UX 규약 고정)
+> 최종 업데이트: 2025-12-21 (STEP 4.9-β-1: 좌/우 독립 스크롤 UX 고정)
 
 ---
 
@@ -89,12 +89,46 @@
 | **STEP 4.9** | **Single-Insurer Locked Coverage Detail View** | **UI** | ✅ 완료 |
 | **STEP 5** | **LLM Assist 도입 (Query Assist + Evidence Summary)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.9-β** | **Diff / Compare / Evidence 공통 UX 규약 고정** | **UI** | ✅ 완료 |
+| **STEP 4.9-β-1** | **좌/우 독립 스크롤 UX 고정 (Layout Fix)** | **UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.9-β-1: 좌/우 독립 스크롤 UX 고정 (2025-12-21)
+
+### 목적
+좌측/우측 패널의 스크롤 책임을 명확히 분리하여 실사용 가능한 UX 확보
+
+### 문제점 (As-Is)
+- 좌측(Chat) 영역: 콘텐츠 증가 시 스크롤 불가
+- 우측(Results) 영역: Evidence 카드가 화면 하단을 넘어도 스크롤 불가
+- 원인: `overflow-hidden` 사용, 스크롤 책임자 부재
+
+### 해결 (To-Be)
+- 최상위: `overflow-hidden` (이중 스크롤 방지)
+- 좌측: header(shrink-0) + 메시지(flex-1 overflow-y-auto) + footer(shrink-0)
+- 우측: header(shrink-0) + tabs(shrink-0) + content(flex-1 overflow-y-auto)
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/app/page.tsx` | 좌/우 패널 스크롤 구조 수정, `min-h-0` 추가 |
+| `apps/web/src/components/ChatPanel.tsx` | 메시지 영역 스크롤, 입력창 고정 |
+| `apps/web/src/components/ResultsPanel.tsx` | 탭 고정, 콘텐츠 영역 스크롤 |
+
+### 검증 결과
+
+| 시나리오 | 결과 |
+|----------|------|
+| 좌측 메시지 20개+ | ✅ 입력창 고정, 메시지만 스크롤 |
+| 우측 Evidence 카드 15개+ | ✅ 헤더/탭 고정, 콘텐츠만 스크롤 |
+| 전체 화면 스크롤 발생 | ❌ 없음 (정상) |
+
+---
 
 ## STEP 4.9-β: Diff / Compare / Evidence 공통 UX 규약 고정 (2025-12-21)
 

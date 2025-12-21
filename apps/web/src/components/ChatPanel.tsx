@@ -229,9 +229,10 @@ export function ChatPanel({
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Messages Area - STEP 2.5: 스크롤 버그 수정 */}
-      <div className="flex-1 overflow-hidden" ref={scrollContainerRef}>
+    // STEP 4.9-β-1: ChatPanel 레이아웃 - 메시지 영역만 스크롤, 입력창 고정
+    <div className="flex flex-col h-full">
+      {/* STEP 4.9-β-1: 메시지 영역 - flex-1 overflow-y-auto (스크롤 책임자) */}
+      <div className="flex-1 min-h-0 overflow-y-auto" ref={scrollContainerRef}>
         <ScrollArea className="h-full">
           <div className="p-4 space-y-4">
             {messages.length === 0 && (
@@ -284,8 +285,8 @@ export function ChatPanel({
         </ScrollArea>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t bg-background p-4 space-y-3">
+      {/* STEP 4.9-β-1: 입력 영역 - shrink-0 (항상 하단 고정) */}
+      <div className="shrink-0 border-t bg-background p-4 space-y-3">
         {/* Advanced Options */}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger asChild>

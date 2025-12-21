@@ -143,10 +143,12 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
   const hasRelatedCoverages = relatedCoverageData.length > 0;
 
   return (
+    // STEP 4.9-β-1: ResultsPanel은 부모에서 스크롤 처리, 내부는 자연스럽게 확장
     <div className="h-full flex flex-col">
       {/* STEP 4.9-β: 대표 담보 헤더 - display name만 표시 (coverage_code 노출 금지) */}
+      {/* STEP 4.9-β-1: shrink-0으로 헤더 고정 */}
       {hasPrimaryCoverage && (
-        <div className="px-4 py-3 border-b bg-muted/30">
+        <div className="shrink-0 px-4 py-3 border-b bg-muted/30">
           <div className="flex items-center gap-2">
             <Badge variant="default" className="text-sm">
               {response.primary_coverage_name}
@@ -155,8 +157,9 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
         </div>
       )}
 
-      <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col">
-        <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
+      <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col min-h-0">
+        {/* STEP 4.9-β-1: 탭 목록 고정 */}
+        <TabsList className="shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0">
           {/* U-4.8: Slots tab (first if available) */}
           {response.slots && response.slots.length > 0 && (
             <TabsTrigger
@@ -201,7 +204,8 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           )}
         </TabsList>
 
-        <ScrollArea className="flex-1">
+        {/* STEP 4.9-β-1: 콘텐츠 영역 - flex-1 min-h-0으로 스크롤 영역 확보 */}
+        <ScrollArea className="flex-1 min-h-0">
           {/* U-4.8: Slots content */}
           {response.slots && response.slots.length > 0 && (
             <TabsContent value="slots" className="m-0 p-4">

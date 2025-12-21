@@ -424,7 +424,8 @@ function HomeContent() {
   }, [uiMode, memoizedResponse, selectedInsurers, lockedCoverages]);
 
   return (
-    <div className="flex h-screen bg-background">
+    // STEP 4.9-β-1: 최상위 컨테이너는 overflow-hidden (이중 스크롤 방지)
+    <div className="flex h-screen bg-background overflow-hidden">
       {/* Deep-link URL 파라미터 처리 (STEP 3.8: View State만 변경) */}
       <Suspense fallback={null}>
         <DeepLinkHandler />
@@ -434,8 +435,10 @@ function HomeContent() {
       <DocumentViewerLayer />
 
       {/* Left: Chat Panel (Query State 표시) */}
+      {/* STEP 4.9-β-1: 좌측 패널 - header 고정, 내부 flex-col로 스크롤 책임 전달 */}
       <div className="w-1/2 flex flex-col border-r">
-        <header className="p-4 border-b">
+        {/* 헤더: shrink-0 (고정) */}
+        <header className="shrink-0 p-4 border-b">
           <div className="flex items-center gap-4">
             <Image
               src="/incar_logo.png"
@@ -452,7 +455,8 @@ function HomeContent() {
             </div>
           </div>
         </header>
-        <div className="flex-1 overflow-hidden">
+        {/* STEP 4.9-β-1: ChatPanel이 flex-1로 나머지 공간 차지, 내부에서 스크롤 처리 */}
+        <div className="flex-1 min-h-0">
           <ChatPanel
             messages={messages}
             onSendMessage={handleSendMessage}
@@ -469,14 +473,16 @@ function HomeContent() {
       </div>
 
       {/* Right: Results Panel (Query State 표시, View State 격리) */}
-      {/* STEP 4.9: UI Mode에 따라 다른 뷰 렌더링 */}
+      {/* STEP 4.9-β-1: 우측 패널 - header 고정, 콘텐츠 영역만 스크롤 */}
       <div className="w-1/2 flex flex-col">
-        <header className="p-4 border-b">
+        {/* 헤더: shrink-0 (고정) */}
+        <header className="shrink-0 p-4 border-b">
           <h2 className="text-lg font-semibold">
             {uiMode === "SINGLE_DETAIL" ? "담보 상세" : "비교 결과"}
           </h2>
         </header>
-        <div className="flex-1 overflow-hidden">
+        {/* STEP 4.9-β-1: 콘텐츠 영역 - flex-1 overflow-y-auto (스크롤 책임자) */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {uiMode === "SINGLE_DETAIL" && singleDetailInfo && memoizedResponse ? (
             <SingleCoverageDetailView
               response={memoizedResponse as CompareResponseWithSubtype}
