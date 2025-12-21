@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-21 (STEP 4.9-β-1: 좌/우 독립 스크롤 UX 고정)
+> 최종 업데이트: 2025-12-21 (STEP 4.10: Coverage Alias 확장 - 담보명 표준화 보강)
 
 ---
 
@@ -90,12 +90,73 @@
 | **STEP 5** | **LLM Assist 도입 (Query Assist + Evidence Summary)** | **기능/UI** | ✅ 완료 |
 | **STEP 4.9-β** | **Diff / Compare / Evidence 공통 UX 규약 고정** | **UI** | ✅ 완료 |
 | **STEP 4.9-β-1** | **좌/우 독립 스크롤 UX 고정 (Layout Fix)** | **UI** | ✅ 완료 |
+| **STEP 4.10** | **Coverage Alias 확장 - 담보명 표준화 보강** | **기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## STEP 4.10: Coverage Alias 확장 - 담보명 표준화 보강 (2025-12-21)
+
+### 목적
+보험사별 담보명 불일치로 인한 False Negative (미보장 오판) 해결
+
+### 문제점 (As-Is)
+- 질의: "현대해상, DB손해보험의 다빈치로봇암수술비 비교"
+- 시스템 응답: ❌ "현대해상은(는) 해당 담보가 확인되지 않습니다"
+- 약관 기준 실제: ✅ 현대해상 보장 (로봇암수술 - 다빈치/레보아이)
+
+### 원인 분석
+| 보험사 | 약관상 담보명 |
+|------|-------------|
+| DB손해보험 | 다빈치로봇암수술비 |
+| 현대해상 | 로봇암수술(다빈치및레보아이) |
+
+- coverage_alias에 현대해상 표현 누락
+- chunk 검색 시 coverage_code 태그가 아닌 담보명 텍스트 매칭 필요
+
+### 해결 (To-Be)
+1. **compare_axis 검색 로직 확장 (STEP 4.10 핵심)**
+   - 기존: `chunk.meta->entities->coverage_code` 태그 기반 검색 → 결과 없음
+   - 확장: `coverage_alias.raw_name`을 사용한 content ILIKE 텍스트 매칭
+
+2. **coverage_alias 확장**
+   - HYUNDAI A9630_1 alias 5건 추가:
+     - 로봇암수술(다빈치및레보아이)(연간1회한)(갱신형)담보
+     - 로봇암수술(다빈치및레보아이)(연간1회한)
+     - 다빈치로봇암수술
+     - 레보아이로봇암수술
+     - 등
+
+3. **coverage_standard 명칭 표준화**
+   - A9630_1: "다빈치로봇암수술비" → "로봇/다빈치 암수술비"
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | get_compare_axis() alias 기반 ILIKE 검색 로직 추가 |
+| DB: coverage_alias | HYUNDAI A9630_1 alias 5건 추가 |
+| DB: coverage_standard | A9630_1 coverage_name 표준화 |
+
+### 검증 결과
+
+| 시나리오 | 이전 | 이후 |
+|----------|------|------|
+| DB+HYUNDAI 다빈치로봇암수술비 | ❌ HYUNDAI 미보장 | ✅ 모든 보험사 보장 |
+| compare_axis counts (HYUNDAI) | 0건 | 12건 |
+| A9630_1 evidence | 없음 | 10건 |
+
+### DoD 체크리스트
+- [x] coverage_alias에 현대해상 표현 추가
+- [x] 동일 질의에서 현대해상 보장 판정 성공
+- [x] 기존 삼성/한화/롯데 결과 영향 없음
+- [x] status.md STEP 4.10 완료 반영
+- [x] 관련 커밋 생성
+
+---
 
 ## STEP 4.9-β-1: 좌/우 독립 스크롤 UX 고정 (2025-12-21)
 

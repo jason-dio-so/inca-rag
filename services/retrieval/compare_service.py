@@ -893,6 +893,10 @@ def get_compare_axis(
     """
     Compare Axis 검색: 담보(coverage_code) 기반 근거 수집
 
+    STEP 4.10: coverage_alias 기반 텍스트 매칭으로 확장
+    - 기존: chunk.meta->entities->coverage_code 태그 기반 검색
+    - 확장: coverage_alias.raw_name을 사용한 content 텍스트 매칭
+
     Args:
         conn: DB 연결
         insurers: 보험사 코드 리스트
@@ -915,44 +919,84 @@ def get_compare_axis(
             # Step I: plan_id 조건 생성
             plan_id = plan_ids.get(insurer_code) if plan_ids else None
             if plan_id is not None:
-                plan_condition = "(c.plan_id = %s OR c.plan_id IS NULL)"
+                plan_condition = "(c.plan_id = %(plan_id)s OR c.plan_id IS NULL)"
                 plan_params = (plan_id,)
             else:
                 plan_condition = "c.plan_id IS NULL"
                 plan_params = ()
 
             if coverage_codes:
+                # STEP 4.10: coverage_alias 기반 텍스트 매칭
+                # 1. 먼저 해당 보험사의 alias raw_name 목록 조회
+                # 2. chunk content에서 해당 raw_name 포함 여부로 검색
+                # Note: CONCAT 사용으로 psycopg3 % 이스케이프 문제 해결
                 query = f"""
-                    WITH ranked AS (
+                    WITH alias_patterns AS (
+                        -- 해당 coverage_codes에 대한 alias raw_name 조회
+                        SELECT DISTINCT
+                            ca.coverage_code,
+                            cs.coverage_name,
+                            ca.raw_name
+                        FROM coverage_alias ca
+                        JOIN insurer i ON ca.insurer_id = i.insurer_id
+                        LEFT JOIN coverage_standard cs ON cs.coverage_code = ca.coverage_code
+                        WHERE i.insurer_code = %(insurer_code)s
+                          AND ca.coverage_code = ANY(%(coverage_codes)s::text[])
+                    ),
+                    matched_chunks AS (
+                        -- alias raw_name을 포함하는 chunk 검색
                         SELECT
                             c.chunk_id,
                             c.document_id,
                             c.doc_type,
                             c.page_start,
                             LEFT(c.content, 1000) AS preview,
-                            c.meta->'entities'->>'coverage_code' AS coverage_code,
-                            c.meta->'entities'->>'coverage_name' AS coverage_name,
+                            ap.coverage_code,
+                            ap.coverage_name,
                             i.insurer_code,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY c.meta->'entities'->>'coverage_code'
-                                ORDER BY c.chunk_id
-                            ) AS rn
+                            -- doc_type 우선순위
+                            CASE c.doc_type
+                                WHEN '가입설계서' THEN 3
+                                WHEN '상품요약서' THEN 2
+                                WHEN '사업방법서' THEN 1
+                                ELSE 0
+                            END AS doc_priority
                         FROM chunk c
                         JOIN insurer i ON c.insurer_id = i.insurer_id
-                        WHERE i.insurer_code = %s
-                          AND c.doc_type = ANY(%s::text[])
-                          AND c.meta->'entities'->>'coverage_code' IS NOT NULL
-                          AND c.meta->'entities'->>'coverage_code' = ANY(%s::text[])
+                        CROSS JOIN alias_patterns ap
+                        WHERE i.insurer_code = %(insurer_code)s
+                          AND c.doc_type = ANY(%(doc_types)s::text[])
+                          AND c.content ILIKE CONCAT(chr(37), ap.raw_name, chr(37))
                           AND {plan_condition}
+                    ),
+                    ranked AS (
+                        SELECT *,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY coverage_code
+                                ORDER BY doc_priority DESC, chunk_id
+                            ) AS rn
+                        FROM matched_chunks
                     )
-                    SELECT *
+                    SELECT chunk_id, document_id, doc_type, page_start, preview,
+                           coverage_code, coverage_name, insurer_code
                     FROM ranked
-                    WHERE rn <= %s
+                    WHERE rn <= %(top_k)s
                     ORDER BY coverage_code, rn
                 """
-                params = (insurer_code, compare_doc_types, coverage_codes) + plan_params + (top_k_per_insurer,)
-                cur.execute(query, params)
+                # Named parameters for clarity and to avoid % escaping issues
+                params_dict = {
+                    "insurer_code": insurer_code,
+                    "coverage_codes": coverage_codes,
+                    "doc_types": compare_doc_types,
+                    "top_k": top_k_per_insurer,
+                }
+                # Add plan_id if needed
+                if plan_id is not None:
+                    params_dict["plan_id"] = plan_id
+
+                cur.execute(query, params_dict)
             else:
+                # coverage_codes 없으면 기존 로직 유지 (전체 검색)
                 query = f"""
                     WITH ranked AS (
                         SELECT
