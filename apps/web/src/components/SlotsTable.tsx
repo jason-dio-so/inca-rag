@@ -139,7 +139,27 @@ function LLMBadge({ trace }: { trace?: LLMTrace | null }) {
   );
 }
 
+// U-4.18: Source Level Badge
+function SourceLevelBadge({ sourceLevel }: { sourceLevel?: string }) {
+  if (sourceLevel === "POLICY_ONLY") {
+    return (
+      <Badge
+        variant="outline"
+        className="text-[10px] px-1 py-0 h-4 bg-amber-50 text-amber-700 border-amber-200"
+      >
+        ⚠️ 약관 기준
+      </Badge>
+    );
+  }
+  return null;
+}
+
 function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
+  // U-4.18: source_level 기반 렌더링
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sourceLevel = (iv as any).source_level as string | undefined;
+
+  // UNKNOWN source_level with not_found
   if (iv.confidence === "not_found" || !iv.value) {
     return (
       <div className="space-y-1">
@@ -148,7 +168,9 @@ function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
             <TooltipTrigger asChild>
               <div className="flex items-center gap-1 text-gray-400">
                 {CONFIDENCE_ICONS.not_found}
-                <span className="text-sm">미확인</span>
+                <span className="text-sm">
+                  {sourceLevel === "UNKNOWN" ? "근거 부족" : "미확인"}
+                </span>
               </div>
             </TooltipTrigger>
             {iv.reason && (
@@ -169,13 +191,15 @@ function SlotValueCell({ iv }: { iv: SlotInsurerValue }) {
         {CONFIDENCE_ICONS[iv.confidence]}
         <span className="text-sm font-medium">{iv.value}</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {iv.evidence_refs.length > 0 && (
           <span className="text-xs text-muted-foreground">
             {iv.evidence_refs.length}개 근거
           </span>
         )}
         <LLMBadge trace={iv.trace} />
+        {/* U-4.18: Source Level Badge */}
+        <SourceLevelBadge sourceLevel={sourceLevel} />
       </div>
     </div>
   );

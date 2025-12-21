@@ -132,6 +132,16 @@ function HomeContent() {
   const [currentAnchor, setCurrentAnchor] = useState<QueryAnchor | null>(null);
 
   // ===========================================================================
+  // U-4.18: Global API Health State
+  // - API 실패 시 "불완전 상태"로 전환
+  // - 부분 결과 표시 금지
+  // ===========================================================================
+  const [apiHealth, setApiHealth] = useState<{
+    isHealthy: boolean;
+    errorMessage: string | null;
+  }>({ isHealthy: true, errorMessage: null });
+
+  // ===========================================================================
   // STEP 3.7-γ: Coverage Guide State (UI State, NOT Chat State)
   // - 담보 미확정 안내는 ChatMessage가 아님
   // - 항상 1개만 존재 (새 질의 시 교체)
@@ -245,6 +255,8 @@ function HomeContent() {
       // Lock 위반이 아닌 경우에만 response 업데이트
       if (!isLockViolated) {
         setCurrentResponse(response);
+        // U-4.18: API 성공 시 건강 상태로 전환
+        setApiHealth({ isHealthy: true, errorMessage: null });
       } else {
         console.log("[Resolution Lock] Lock violation - keeping previous response");
       }
@@ -311,6 +323,10 @@ function HomeContent() {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "알 수 없는 오류";
+
+      // U-4.18: API 실패 시 불완전 상태로 전환 + 기존 결과 제거
+      setApiHealth({ isHealthy: false, errorMessage });
+      setCurrentResponse(null);
 
       // 에러 발생 시 assistant 메시지로 표시 (이것은 대화의 일부)
       const errorAssistantMessage: ChatMessage = {
@@ -483,7 +499,22 @@ function HomeContent() {
         </header>
         {/* STEP 4.9-β-1: 콘텐츠 영역 - flex-1 overflow-y-auto (스크롤 책임자) */}
         <div className="flex-1 min-h-0 overflow-y-auto">
-          {uiMode === "SINGLE_DETAIL" && singleDetailInfo && memoizedResponse ? (
+          {/* U-4.18: API 불완전 상태 시 결과 표시 차단 */}
+          {!apiHealth.isHealthy ? (
+            <div className="p-6">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <h3 className="text-red-800 font-medium mb-2">
+                  일부 데이터를 불러오지 못했습니다
+                </h3>
+                <p className="text-red-700 text-sm mb-3">
+                  비교 결과의 신뢰성을 보장할 수 없어 표시를 중단합니다.
+                </p>
+                <p className="text-red-600 text-xs">
+                  잠시 후 다시 시도해주세요.
+                </p>
+              </div>
+            </div>
+          ) : uiMode === "SINGLE_DETAIL" && singleDetailInfo && memoizedResponse ? (
             <SingleCoverageDetailView
               response={memoizedResponse as CompareResponseWithSubtype}
               insurerCode={singleDetailInfo.insurerCode}

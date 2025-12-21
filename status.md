@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.17: Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시)
+> 최종 업데이트: 2025-12-22 (U-4.18: Partial Failure & Source Boundary 안정화)
 
 ---
 
@@ -93,12 +93,132 @@
 | **STEP 4.10** | **Coverage Alias 확장 - 담보명 표준화 보강** | **기능** | ✅ 완료 |
 | **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
 | **U-4.17** | **Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시** | **기능/UI** | ✅ 완료 |
+| **U-4.18** | **Partial Failure & Source Boundary 안정화** | **안정성/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## U-4.18: Partial Failure & Source Boundary 안정화 (2025-12-22)
+
+### 목적
+1. Partial Failure를 사용자에게 안전하게 격리
+2. Slot/Compare 결과의 출처 경계(source_level)를 명시적으로 고정
+3. "보여주면 안 되는 상태"를 절대 화면에 노출하지 않도록 차단
+
+### 핵심 원칙
+
+1. **Partial Failure는 "결과"가 아니다**
+   - API 실패 시 부분 결과 표시 금지
+   - 명시적 상태 UI로 전환
+
+2. **Source는 절대 섞이지 않는다**
+   - `source_level`: COMPARABLE_DOC | POLICY_ONLY | UNKNOWN
+   - MIXED 상태 금지, source_level 없는 결과 렌더링 금지
+
+3. **Compare 탭은 COMPARABLE_DOC 전용**
+   - 약관 기반 정의/해석 비교 금지
+   - source_level ≠ COMPARABLE_DOC → "비교 불가" 표시
+
+### 구현
+
+**1. Backend: source_level 필드 추가**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class InsurerCompareCell:
+    # ...
+    source_level: str = "UNKNOWN"  # "COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN"
+```
+
+`services/extraction/slot_extractor.py`:
+```python
+@dataclass
+class SlotInsurerValue:
+    # ...
+    source_level: Literal["COMPARABLE_DOC", "POLICY_ONLY", "UNKNOWN"] = "UNKNOWN"
+```
+
+**2. Frontend: Global API Health Gate**
+
+`apps/web/src/app/page.tsx`:
+```typescript
+const [apiHealth, setApiHealth] = useState<{
+  isHealthy: boolean;
+  errorMessage: string | null;
+}>({ isHealthy: true, errorMessage: null });
+
+// API 실패 시 결과 표시 차단
+{!apiHealth.isHealthy ? (
+  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+    <h3>일부 데이터를 불러오지 못했습니다</h3>
+    <p>비교 결과의 신뢰성을 보장할 수 없어 표시를 중단합니다.</p>
+  </div>
+) : (
+  <ResultsPanel ... />
+)}
+```
+
+**3. Frontend: Compare 탭 source_level 렌더링**
+
+`apps/web/src/components/CompareTable.tsx`:
+```typescript
+if (sourceLevel === "POLICY_ONLY") {
+  return <td>비교 불가 (동일 기준 문서 없음)</td>;
+}
+if (sourceLevel === "UNKNOWN") {
+  return <td>근거 부족</td>;
+}
+// COMPARABLE_DOC만 정상 표시
+```
+
+**4. Frontend: Slots 탭 source_level 렌더링**
+
+`apps/web/src/components/SlotsTable.tsx`:
+```typescript
+function SourceLevelBadge({ sourceLevel }) {
+  if (sourceLevel === "POLICY_ONLY") {
+    return <Badge>⚠️ 약관 기준</Badge>;
+  }
+  return null;
+}
+```
+
+**5. API Error Message 정제**
+
+`apps/web/src/lib/api.ts`:
+```typescript
+function sanitizeErrorMessage(message: string): string {
+  if (message.includes("<html") || message.includes("<!DOCTYPE")) {
+    return "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  }
+  return message.replace(/<[^>]*>/g, "").trim();
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | InsurerCompareCell에 source_level 추가 |
+| `services/extraction/slot_extractor.py` | SlotInsurerValue에 source_level 추가 |
+| `api/compare.py` | InsurerCompareCellResponse, SlotInsurerValueResponse에 source_level 추가 |
+| `apps/web/src/app/page.tsx` | Global API Health Gate 구현 |
+| `apps/web/src/lib/api.ts` | Error message sanitization |
+| `apps/web/src/components/CompareTable.tsx` | source_level 기반 렌더링 |
+| `apps/web/src/components/SlotsTable.tsx` | source_level 배지 표시 |
+
+### DoD 체크리스트
+- [x] API 실패 시 "보여주면 안 되는 상태" 노출 없음
+- [x] source_level 없는 결과 없음 (기본값 UNKNOWN)
+- [x] Compare 탭은 COMPARABLE_DOC 전용
+- [x] 약관 기반 정보는 명확히 분리됨 (POLICY_ONLY 배지)
+- [x] HTML 에러 메시지 직접 노출 차단
+
+---
 
 ## U-4.17: Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시 (2025-12-22)
 

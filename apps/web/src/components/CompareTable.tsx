@@ -118,22 +118,34 @@ export function CompareTable({ data }: CompareTableProps) {
                     );
                   }
 
-                  // U-4.17: NO_COMPARABLE_EVIDENCE 상태 처리
+                  // U-4.18: source_level 기반 렌더링 규칙
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const compareStatus = (insurerData as any).compare_status as string | undefined;
-                  if (compareStatus === "NO_COMPARABLE_EVIDENCE") {
+                  const sourceLevel = (insurerData as any).source_level as string | undefined;
+
+                  // COMPARABLE_DOC이 아닌 경우 비교 불가 표시
+                  if (sourceLevel === "POLICY_ONLY") {
                     return (
                       <td key={insurer} className="p-3 text-center">
                         <div className="text-sm text-amber-600 bg-amber-50 rounded px-2 py-1">
-                          비교 가능한 자료 없음
+                          비교 불가
                           <br />
-                          <span className="text-xs text-muted-foreground">(약관만 존재)</span>
+                          <span className="text-xs text-muted-foreground">(동일 기준 문서 없음)</span>
                         </div>
                       </td>
                     );
                   }
 
-                  // A2 Policy: Filter out 약관 from best_evidence
+                  if (sourceLevel === "UNKNOWN" || !sourceLevel) {
+                    return (
+                      <td key={insurer} className="p-3 text-center">
+                        <div className="text-sm text-gray-500 bg-gray-50 rounded px-2 py-1">
+                          근거 부족
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  // COMPARABLE_DOC: A2 Policy - Filter out 약관 from best_evidence
                   const filteredEvidence = filterNonPolicy(
                     insurerData.best_evidence || []
                   );

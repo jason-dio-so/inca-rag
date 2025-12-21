@@ -180,6 +180,8 @@ class InsurerCompareCellResponse(BaseModel):
     best_evidence: list[EvidenceResponse]
     # U-4.17: 비교 가능 상태 ("COMPARABLE" | "NO_COMPARABLE_EVIDENCE")
     compare_status: str = "COMPARABLE"
+    # U-4.18: Source Level ("COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN")
+    source_level: str = "UNKNOWN"
 
 
 class CoverageCompareRowResponse(BaseModel):
@@ -266,6 +268,8 @@ class SlotInsurerValueResponse(BaseModel):
     reason: str | None = None  # not_found일 때 이유
     evidence_refs: list[SlotEvidenceRefResponse] = []
     trace: LLMTraceResponse | None = None  # LLM usage trace
+    # U-4.18: Source Level
+    source_level: Literal["COMPARABLE_DOC", "POLICY_ONLY", "UNKNOWN"] = "UNKNOWN"
 
 
 class ComparisonSlotResponse(BaseModel):
@@ -1251,6 +1255,7 @@ def _convert_slots(slots: list) -> list[ComparisonSlotResponse]:
                         llm_reason=iv.trace.llm_reason,
                         model=iv.trace.model,
                     ) if iv.trace else None,
+                    source_level=getattr(iv, 'source_level', 'UNKNOWN'),  # U-4.18
                 )
                 for iv in slot.insurers
             ],
@@ -1453,6 +1458,7 @@ def _convert_response(
                         doc_type_counts=cell.doc_type_counts,
                         best_evidence=[_convert_evidence(e) for e in cell.best_evidence],
                         compare_status=cell.compare_status,  # U-4.17
+                        source_level=cell.source_level,  # U-4.18
                     )
                     for cell in row.insurers
                 ],

@@ -458,6 +458,11 @@ class InsurerCompareCell:
     resolved_amount: ResolvedAmount | None = None  # H-1.8: 대표 금액
     # U-4.17: 비교 가능 상태 ("COMPARABLE" | "NO_COMPARABLE_EVIDENCE")
     compare_status: str = "COMPARABLE"
+    # U-4.18: Source Level ("COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN")
+    # - COMPARABLE_DOC: 가입설계서/상품요약서/사업방법서 기반
+    # - POLICY_ONLY: 약관 단독
+    # - UNKNOWN: evidence 부족
+    source_level: str = "UNKNOWN"
 
 
 @dataclass
@@ -1288,14 +1293,25 @@ def build_coverage_compare_result(
                 resolved_amount = _resolve_amount_from_evidence(best_evidence)
 
                 # U-4.17: compare_status 결정
+                # U-4.18: source_level 결정
                 # - best_evidence가 비어있지만 약관에 데이터가 있으면 NO_COMPARABLE_EVIDENCE
                 # - Compare는 가입설계서/상품요약서/사업방법서만 사용 (약관 제외)
                 compare_status = "COMPARABLE"
-                if not best_evidence:
-                    # 약관에 데이터가 있는지 확인
-                    has_policy_evidence = "약관" in evidence_by_doc_type
-                    if has_policy_evidence:
-                        compare_status = "NO_COMPARABLE_EVIDENCE"
+                source_level = "UNKNOWN"
+                has_policy_evidence = "약관" in evidence_by_doc_type
+
+                if best_evidence:
+                    # 비교 가능 문서(가입설계서/상품요약서/사업방법서) 기반
+                    compare_status = "COMPARABLE"
+                    source_level = "COMPARABLE_DOC"
+                elif has_policy_evidence:
+                    # 약관만 존재
+                    compare_status = "NO_COMPARABLE_EVIDENCE"
+                    source_level = "POLICY_ONLY"
+                else:
+                    # evidence 없음
+                    compare_status = "NO_COMPARABLE_EVIDENCE"
+                    source_level = "UNKNOWN"
 
                 cells.append(
                     InsurerCompareCell(
@@ -1304,6 +1320,7 @@ def build_coverage_compare_result(
                         best_evidence=best_evidence,
                         resolved_amount=resolved_amount,
                         compare_status=compare_status,
+                        source_level=source_level,
                     )
                 )
             else:
@@ -1315,6 +1332,7 @@ def build_coverage_compare_result(
                         best_evidence=[],
                         resolved_amount=None,
                         compare_status="NO_COMPARABLE_EVIDENCE",
+                        source_level="UNKNOWN",
                     )
                 )
 
@@ -1542,12 +1560,14 @@ async def refine_amount_with_llm_if_needed(
             source_document_id=target_evidence.document_id,
         )
 
-        # cell 업데이트
+        # cell 업데이트 (U-4.17/U-4.18: compare_status, source_level 유지)
         updated_cell = InsurerCompareCell(
             insurer_code=cell.insurer_code,
             doc_type_counts=cell.doc_type_counts,
             best_evidence=cell.best_evidence,
             resolved_amount=new_resolved_amount,
+            compare_status=cell.compare_status,
+            source_level=cell.source_level,
         )
 
         debug_info["upgraded"] = True

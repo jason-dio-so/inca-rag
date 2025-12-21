@@ -10,12 +10,27 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 const TIMEOUT_MS = 20000;
 
+// U-4.18: Sanitize error messages to remove HTML/nginx responses
+function sanitizeErrorMessage(message: string): string {
+  // Check if message contains HTML
+  if (message.includes("<html") || message.includes("<!DOCTYPE") || message.includes("<body")) {
+    return "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  }
+  // Remove any remaining HTML tags
+  const stripped = message.replace(/<[^>]*>/g, "").trim();
+  if (stripped.length === 0) {
+    return "서버 오류가 발생했습니다.";
+  }
+  return stripped;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
     public status?: number
   ) {
-    super(message);
+    // U-4.18: Sanitize message to remove HTML
+    super(sanitizeErrorMessage(message));
     this.name = "ApiError";
   }
 }
