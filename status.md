@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18-β: Subtype Coverage 종속 원칙 강제)
+> 최종 업데이트: 2025-12-22 (U-4.18-γ: Evidence Source Boundary & Anti-Comparison UX)
 
 ---
 
@@ -96,6 +96,7 @@
 | **U-4.18** | **Partial Failure & Source Boundary 안정화** | **안정성/UI** | ✅ 완료 |
 | **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ⚠️ 수정됨 (U-4.18-β) |
 | **U-4.18-β** | **Subtype Coverage 종속 원칙 강제** | **기능/UI** | ✅ 완료 |
+| **U-4.18-γ** | **Evidence Source Boundary & Anti-Comparison UX** | **UI** | ✅ 완료 |
 
 ---
 
@@ -206,6 +207,82 @@ failure_messages:
 - [x] Frontend에서 RESOLVED 외 모든 상태 UI 차단
 - [x] Subtype 탭은 RESOLVED + is_multi_subtype일 때만 활성화
 - [x] Docker 재빌드 및 테스트 통과
+
+---
+
+## U-4.18-γ: Evidence Source Boundary & Anti-Comparison UX (2025-12-22)
+
+### 목적
+Evidence 탭이 "비교 결과"로 오인되지 않도록 시각적 경계 강화 및 Anti-Comparison UX 적용
+
+### 핵심 원칙
+
+1. **Evidence ≠ Compare**
+   - Evidence는 "근거 목록 열람" 용도
+   - 비교/판단은 Compare 탭에서만 수행
+   - Evidence에서 금액 비교 유도 금지
+
+2. **Source Level 시각화**
+   - 모든 Evidence 항목에 source_level 배지 표시
+   - COMPARABLE_DOC: 가입설계서, 상품요약서, 사업방법서 (비교 가능 문서)
+   - POLICY_ONLY: 약관 (참조용)
+   - UNKNOWN: 출처 불명
+
+3. **Anti-Comparison UX**
+   - 좌/우 배치 금지 (수직 리스트만 허용)
+   - 금액 강조(bold) 금지
+   - 보험사 간 교차참조 금지
+   - Score 표시 제거
+
+### 구현
+
+**1. Source Level 배지**
+
+`EvidencePanel.tsx`:
+```typescript
+type SourceLevel = "COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN";
+
+const SOURCE_LEVEL_CONFIG: Record<SourceLevel, {...}> = {
+  COMPARABLE_DOC: { label: "비교 문서 근거", bgColor: "bg-blue-50", ... },
+  POLICY_ONLY: { label: "약관 근거", bgColor: "bg-amber-50", ... },
+  UNKNOWN: { label: "출처 불명", bgColor: "bg-gray-50", ... },
+};
+
+function getSourceLevel(docType: string): SourceLevel {
+  const comparableDocs = ["가입설계서", "상품요약서", "사업방법서"];
+  if (comparableDocs.includes(docType)) return "COMPARABLE_DOC";
+  if (docType === "약관") return "POLICY_ONLY";
+  return "UNKNOWN";
+}
+```
+
+**2. 고정 경고 배너**
+
+```typescript
+<div className="mb-4 p-4 bg-amber-50 border-2 border-amber-300 rounded-lg sticky top-0 z-10">
+  <AlertTriangle className="h-5 w-5 text-amber-600" />
+  <p className="font-semibold">⚠️ 이 화면은 비교 결과가 아닙니다.</p>
+  <p>Evidence는 각 보험사의 관련 문서에서 발췌된 '근거 목록'...</p>
+</div>
+```
+
+**3. Anti-Comparison UX**
+- Score 표시 제거 (opacity 및 텍스트 삭제)
+- 금액 부분 일반 텍스트 처리 (강조 제거)
+- 수직 리스트 레이아웃 유지
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `apps/web/src/components/EvidencePanel.tsx` | source_level 배지, 경고 배너, Anti-Comparison UX |
+
+### DoD 체크리스트
+- [x] source_level 배지 구현 (COMPARABLE_DOC, POLICY_ONLY, UNKNOWN)
+- [x] 고정 경고 배너 추가 (닫기 불가)
+- [x] Score 표시 제거
+- [x] Docker 재빌드 성공
+- [x] status.md 업데이트
 
 ---
 
