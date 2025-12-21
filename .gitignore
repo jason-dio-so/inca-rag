@@ -42,3 +42,7 @@ logs/
 
 # Local config
 *.local
+
+# Database backups
+backup_*.sql
+*.sql.gz
