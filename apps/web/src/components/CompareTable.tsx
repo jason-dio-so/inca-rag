@@ -118,6 +118,21 @@ export function CompareTable({ data }: CompareTableProps) {
                     );
                   }
 
+                  // U-4.17: NO_COMPARABLE_EVIDENCE 상태 처리
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const compareStatus = (insurerData as any).compare_status as string | undefined;
+                  if (compareStatus === "NO_COMPARABLE_EVIDENCE") {
+                    return (
+                      <td key={insurer} className="p-3 text-center">
+                        <div className="text-sm text-amber-600 bg-amber-50 rounded px-2 py-1">
+                          비교 가능한 자료 없음
+                          <br />
+                          <span className="text-xs text-muted-foreground">(약관만 존재)</span>
+                        </div>
+                      </td>
+                    );
+                  }
+
                   // A2 Policy: Filter out 약관 from best_evidence
                   const filteredEvidence = filterNonPolicy(
                     insurerData.best_evidence || []

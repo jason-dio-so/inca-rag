@@ -456,6 +456,8 @@ class InsurerCompareCell:
     doc_type_counts: dict[str, int] = field(default_factory=dict)
     best_evidence: list[Evidence] = field(default_factory=list)
     resolved_amount: ResolvedAmount | None = None  # H-1.8: 대표 금액
+    # U-4.17: 비교 가능 상태 ("COMPARABLE" | "NO_COMPARABLE_EVIDENCE")
+    compare_status: str = "COMPARABLE"
 
 
 @dataclass
@@ -1285,12 +1287,23 @@ def build_coverage_compare_result(
                 # H-1.8: resolved_amount 선택
                 resolved_amount = _resolve_amount_from_evidence(best_evidence)
 
+                # U-4.17: compare_status 결정
+                # - best_evidence가 비어있지만 약관에 데이터가 있으면 NO_COMPARABLE_EVIDENCE
+                # - Compare는 가입설계서/상품요약서/사업방법서만 사용 (약관 제외)
+                compare_status = "COMPARABLE"
+                if not best_evidence:
+                    # 약관에 데이터가 있는지 확인
+                    has_policy_evidence = "약관" in evidence_by_doc_type
+                    if has_policy_evidence:
+                        compare_status = "NO_COMPARABLE_EVIDENCE"
+
                 cells.append(
                     InsurerCompareCell(
                         insurer_code=insurer_code,
                         doc_type_counts=item.doc_type_counts.copy(),
                         best_evidence=best_evidence,
                         resolved_amount=resolved_amount,
+                        compare_status=compare_status,
                     )
                 )
             else:
@@ -1301,6 +1314,7 @@ def build_coverage_compare_result(
                         doc_type_counts={},
                         best_evidence=[],
                         resolved_amount=None,
+                        compare_status="NO_COMPARABLE_EVIDENCE",
                     )
                 )
 

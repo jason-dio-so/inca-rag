@@ -218,41 +218,43 @@ export function SlotsTable({ slots, singleInsurer }: SlotsTableProps) {
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[150px]">항목</TableHead>
-                  {insurers.map((ic) => (
-                    <TableHead key={ic} className="text-center">
-                      {INSURER_NAMES[ic] || ic}
-                    </TableHead>
-                  ))}
-                  {/* STEP 4.9: 단일 보험사에서는 diff_summary 열 불필요 */}
-                  {!singleInsurer && (
-                    <TableHead className="w-[200px]">차이 요약</TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {comparableSlots.map((slot) => (
-                  <TableRow key={slot.slot_key}>
-                    <TableCell className="font-medium">{slot.label}</TableCell>
-                    {filterInsurers(slot.insurers).map((iv) => (
-                      <TableCell key={iv.insurer_code} className="text-center">
-                        <SlotValueCell iv={iv} />
-                      </TableCell>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/50">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-medium whitespace-nowrap">항목</th>
+                    {insurers.map((ic) => (
+                      <th key={ic} className="px-4 py-2 text-center font-medium whitespace-nowrap">
+                        {INSURER_NAMES[ic] || ic}
+                      </th>
                     ))}
-                    {/* STEP 4.9: 단일 보험사에서는 diff_summary 불필요 */}
+                    {/* STEP 4.9: 단일 보험사에서는 diff_summary 열 불필요 */}
                     {!singleInsurer && (
-                      <TableCell className="text-xs text-muted-foreground">
-                        {slot.diff_summary || "-"}
-                      </TableCell>
+                      <th className="px-4 py-2 text-left font-medium whitespace-nowrap">차이 요약</th>
                     )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparableSlots.map((slot) => (
+                    <tr key={slot.slot_key} className="border-b">
+                      <td className="px-4 py-2 font-medium">{slot.label}</td>
+                      {filterInsurers(slot.insurers).map((iv) => (
+                        <td key={iv.insurer_code} className="px-4 py-2 text-center">
+                          <SlotValueCell iv={iv} />
+                        </td>
+                      ))}
+                      {/* STEP 4.9: 단일 보험사에서는 diff_summary 불필요 */}
+                      {!singleInsurer && (
+                        <td className="px-4 py-2 text-xs text-muted-foreground">
+                          {slot.diff_summary || "-"}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </CardContent>
         </Card>
       )}

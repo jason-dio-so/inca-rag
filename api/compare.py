@@ -178,6 +178,8 @@ class InsurerCompareCellResponse(BaseModel):
     insurer_code: str
     doc_type_counts: dict[str, int]
     best_evidence: list[EvidenceResponse]
+    # U-4.17: 비교 가능 상태 ("COMPARABLE" | "NO_COMPARABLE_EVIDENCE")
+    compare_status: str = "COMPARABLE"
 
 
 class CoverageCompareRowResponse(BaseModel):
@@ -1450,6 +1452,7 @@ def _convert_response(
                         insurer_code=cell.insurer_code,
                         doc_type_counts=cell.doc_type_counts,
                         best_evidence=[_convert_evidence(e) for e in cell.best_evidence],
+                        compare_status=cell.compare_status,  # U-4.17
                     )
                     for cell in row.insurers
                 ],

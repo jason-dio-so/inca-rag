@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-21 (STEP 4.10-γ: 전 보험사 Coverage Alias 전수 검증)
+> 최종 업데이트: 2025-12-22 (U-4.17: Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시)
 
 ---
 
@@ -92,12 +92,102 @@
 | **STEP 4.9-β-1** | **좌/우 독립 스크롤 UX 고정 (Layout Fix)** | **UI** | ✅ 완료 |
 | **STEP 4.10** | **Coverage Alias 확장 - 담보명 표준화 보강** | **기능** | ✅ 완료 |
 | **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
+| **U-4.17** | **Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시** | **기능/UI** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## U-4.17: Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시 (2025-12-22)
+
+### 목적
+Compare 탭에서 특정 보험사가 비교 가능 문서(가입설계서/상품요약서/사업방법서)가 없고 약관만 있는 경우 이를 명시적으로 표시
+
+### 문제 분석
+
+**As-Is (문제 상황)**:
+- Summary 탭에서는 삼성 데이터가 정상 표시됨
+- Compare 탭에서는 삼성 컬럼이 비어 있음 (왜 비었는지 설명 없음)
+- 원인: A2 정책에 의해 약관 데이터는 Compare 탭에서 필터링됨
+
+**To-Be (수정 후)**:
+- Compare 탭에서 비교 가능 문서가 없는 경우 "비교 가능한 자료 없음 (약관만 존재)" 문구 표시
+- 컬럼을 삭제하지 않고 상태 설명 제공
+
+### 구현
+
+**1. Backend: compare_status 필드 추가**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class InsurerCompareCell:
+    insurer_code: str
+    doc_type_counts: dict[str, int] = field(default_factory=dict)
+    best_evidence: list[Evidence] = field(default_factory=list)
+    resolved_amount: ResolvedAmount | None = None
+    # U-4.17: 비교 가능 상태
+    compare_status: str = "COMPARABLE"  # "COMPARABLE" | "NO_COMPARABLE_EVIDENCE"
+```
+
+**2. Backend: compare_status 판정 로직**
+
+```python
+# best_evidence가 비어있지만 약관에 데이터가 있으면 NO_COMPARABLE_EVIDENCE
+compare_status = "COMPARABLE"
+if not best_evidence:
+    has_policy_evidence = "약관" in evidence_by_doc_type
+    if has_policy_evidence:
+        compare_status = "NO_COMPARABLE_EVIDENCE"
+```
+
+**3. API: InsurerCompareCellResponse 확장**
+
+`api/compare.py`:
+```python
+class InsurerCompareCellResponse(BaseModel):
+    insurer_code: str
+    doc_type_counts: dict[str, int]
+    best_evidence: list[EvidenceResponse]
+    compare_status: str = "COMPARABLE"  # U-4.17
+```
+
+**4. Frontend: CompareTable.tsx 렌더링 분기**
+
+```typescript
+// U-4.17: NO_COMPARABLE_EVIDENCE 상태 처리
+const compareStatus = (insurerData as any).compare_status as string | undefined;
+if (compareStatus === "NO_COMPARABLE_EVIDENCE") {
+  return (
+    <td key={insurer} className="p-3 text-center">
+      <div className="text-sm text-amber-600 bg-amber-50 rounded px-2 py-1">
+        비교 가능한 자료 없음
+        <br />
+        <span className="text-xs text-muted-foreground">(약관만 존재)</span>
+      </div>
+    </td>
+  );
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | InsurerCompareCell에 compare_status 필드 추가, 판정 로직 구현 |
+| `api/compare.py` | InsurerCompareCellResponse에 compare_status 필드 추가 |
+| `apps/web/src/components/CompareTable.tsx` | NO_COMPARABLE_EVIDENCE 상태 UI 렌더링 |
+
+### DoD 체크리스트
+- [x] compare_status 필드 Backend 추가
+- [x] API 응답에 compare_status 포함
+- [x] Frontend에서 NO_COMPARABLE_EVIDENCE 상태 렌더링
+- [x] Docker 컨테이너 재빌드 및 테스트
+- [x] status.md 업데이트
+
+---
 
 ## STEP 4.10-γ: 전 보험사 Coverage Alias 전수 검증 (2025-12-21)
 
