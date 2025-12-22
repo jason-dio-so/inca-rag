@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-5.0-A: Coverage Name Mapping Table 기반 Resolution)
+> 최종 업데이트: 2025-12-22 (U-4.18-Ω: All Insurers Coverage Code Backfill)
 
 ---
 
@@ -99,12 +99,65 @@
 | **U-4.18-γ** | **Evidence Source Boundary & Anti-Comparison UX** | **UI** | ✅ 완료 |
 | **U-4.18-δ** | **Slots Anti-Overreach UX (역할 제한)** | **UI** | ✅ 완료 |
 | **U-5.0-A** | **Coverage Name Mapping Table 기반 Resolution** | **아키텍처** | ✅ 완료 |
+| **U-4.18-Ω** | **All Insurers Coverage Code Backfill** | **데이터/안정성** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## U-4.18-Ω: All Insurers Coverage Code Backfill (2025-12-22)
+
+### 목적
+모든 보험사의 비교 가능 문서(가입설계서/상품요약서/사업방법서)에서 coverage_code 태깅 누락 문제를 해결하여 Compare false-negative("근거 부족") 제거
+
+### 문제 분석
+- 비교 가능 문서에 담보 관련 텍스트가 존재하는데
+- chunk 단위에 `coverage_code`가 태깅되지 않아
+- Compare 탭에서 "근거 부족"으로 오인 표시되는 사례 발생
+
+### 작업 내용
+
+**1. 신정원 기준 검증**
+- coverage_alias.coverage_code → coverage_standard 매핑 전수 검증
+- 모든 284개 alias가 28개 신정원 기준 코드에 정상 매핑 확인
+
+**2. 오염 탐지 및 보완**
+- 짧은 alias(6글자 이하)의 과도 매칭 문제 탐지
+  - 예: "질병사망"(4글자), "상해수술비"(5글자) 등
+- 최소 alias 길이 7글자 필터링 적용 (47개 alias 제외)
+
+**3. Backfill 실행**
+- 대상: 8개 보험사, 1,569개 chunk
+- 결과: 624개 chunk 태깅 완료 (39.8%)
+  - SAMSUNG: 95개 (59.0%)
+  - MERITZ: 84개 (28.0%)
+  - LOTTE: 135개 (56.3%)
+  - KB: 80개 (61.1%)
+  - DB: 65개 (40.1%)
+  - HANWHA: 73개 (24.3%)
+  - HEUNGKUK: 66개 (66.7%)
+  - HYUNDAI: 26개 (14.8%)
+
+### 구현
+
+**tools/backfill_comparable_doc_coverage.py**
+- coverage_standard 기반 canonical 검증
+- 최소 alias 길이 필터링 (MIN_ALIAS_LENGTH=7)
+- 보험사별 coverage_alias 기반 매칭
+- match_source='backfill_alias' 태깅
+
+### 검증
+- Compare API 정상 동작 확인
+- SAMSUNG/MERITZ evidence 정상 표시
+- false-negative("근거 부족") 해소 확인
+
+### 파일 변경
+- `tools/backfill_comparable_doc_coverage.py` (신규)
+- `status.md` (업데이트)
+
+---
 
 ## U-4.18-β: Subtype Coverage 종속 원칙 강제 (2025-12-22)
 
