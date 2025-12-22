@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18-Ω: All Insurers Coverage Code Backfill)
+> 최종 업데이트: 2025-12-22 (U-4.18-Ω-VERIFY: v1.0 Compare 안정성 최종 점검 완료)
 
 ---
 
@@ -100,12 +100,59 @@
 | **U-4.18-δ** | **Slots Anti-Overreach UX (역할 제한)** | **UI** | ✅ 완료 |
 | **U-5.0-A** | **Coverage Name Mapping Table 기반 Resolution** | **아키텍처** | ✅ 완료 |
 | **U-4.18-Ω** | **All Insurers Coverage Code Backfill** | **데이터/안정성** | ✅ 완료 |
+| **U-4.18-Ω-VERIFY** | **v1.0 Compare 안정성 최종 점검** | **검증** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## U-4.18-Ω-VERIFY: v1.0 Compare 안정성 최종 점검 (2025-12-22)
+
+### 목적
+U-4.18-Ω backfill 완료 후 Compare 결과의 신뢰성을 v1.0 출시 수준으로 봉인
+
+### 점검 결과
+
+**1. coverage_code 분포 이상치 탐지**
+
+| 보험사 | Top1 Code | Top1 Count | Total | Top1 % | 판정 |
+|--------|-----------|------------|-------|--------|------|
+| HYUNDAI | A9630_1 | 21 | 26 | 80.8% | ⚠️ 정상 (다빈치 문서 다수) |
+| KB | A9617_1 | 41 | 80 | 51.3% | ⚠️ 정상 (항암치료비 문서 다수) |
+| HANWHA | A6100_1 | 26 | 73 | 35.6% | ✅ OK |
+| 기타 | - | - | - | <30% | ✅ OK |
+
+- HYUNDAI/KB 경고는 **문서 특성**(해당 담보 관련 문서 비중 높음)으로 확인
+- 오염 증거 없음, 실제 키워드 존재 확인 완료
+
+**2. 미태깅 chunk 핵심 담보 누락 샘플링**
+
+- 30개 샘플 검토
+- 대부분 정상 미태깅 (alias 미등록 변형, 목록 형태, 일반 문맥)
+- 공백 차이로 인한 미매칭 2건 발견 (v2.0 개선 대상)
+  - "암 진단비(유사암 제외)" vs "암진단비(유사암제외)"
+- **치명적 false-negative 없음**
+
+**3. Compare "근거 부족" false-negative 검증**
+
+- 주요 담보 10개 테스트 (A4200_1, A9630_1, A9617_1 등)
+- 모든 케이스에서 evidence > 0 확인
+- **false-negative 0건**
+
+### v2.0 개선 후보
+- 공백 무시 정규화 매칭 (normalize_coverage_name 개선)
+- alias 추가 등록 (Ⅱ 포함/미포함 변형)
+
+### DoD 충족
+- ✅ 분포 이상치 없음 또는 합리적 설명 가능
+- ✅ 미태깅 chunk 치명적 false-negative 없음
+- ✅ Compare "근거 부족" false-negative 0건
+- ✅ 코드/데이터 변경 없이 검증 완료
+- ✅ **v1.0 Compare 신뢰성 봉인 선언 가능**
+
+---
 
 ## U-4.18-Ω: All Insurers Coverage Code Backfill (2025-12-22)
 
