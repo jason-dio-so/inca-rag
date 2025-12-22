@@ -230,5 +230,81 @@ Claude가 수행하는 모든 작업에 대해
 
 ---
 
+## 12. 신정원(통일담보명/통일코드) 절대 준수 원칙
+
+### 12.1 Canonical Truth 선언 (최상위 규칙)
+
+- **신정원 통일담보명 / 통일코드만이 유일한 Canonical Coverage 기준이다.**
+- 시스템 내 `coverage_code`는 반드시 신정원 통일코드여야 한다.
+- 보험사 고유 담보명, 약관 표현, 문서 내 표기, LLM 추론 결과는 Canonical 기준이 될 수 없다.
+
+### 12.2 Coverage Code 정합성 규칙 (강제)
+
+다음 중 하나라도 만족하지 못하면 해당 coverage_code는 **무효(invalid)** 로 간주한다.
+
+- coverage_code가 신정원 통일코드 테이블(coverage_standard)에 존재하지 않음
+- coverage_code ↔ 통일담보명 매핑이 1:1로 명확하지 않음
+- 동일 coverage_code가 서로 다른 의미의 통일담보명으로 매핑됨
+
+무효 coverage_code는:
+- Compare 계산 ❌
+- Slots 표시 ❌
+- Subtype 판별 ❌
+- Evidence 판단 ❌
+
+### 12.3 coverage_alias 사용 제한
+
+- coverage_alias는 **"보험사별 표현 → 신정원 통일코드"로 수렴시키기 위한 보조 수단**이다.
+- coverage_alias 자체가 의미 기준이 되어서는 안 된다.
+- coverage_alias.coverage_code는 반드시 신정원 기준 canonical이어야 한다.
+
+**금지 사항:**
+- alias를 근거로 새로운 coverage_code 생성 ❌
+- alias 텍스트만 맞는다고 coverage_code 부여 ❌
+- 신정원 테이블에 없는 code를 alias에 사용 ❌
+
+### 12.4 Backfill / Ingestion / Compare 공통 적용
+
+**(1) Backfill**
+- chunk에 coverage_code를 부여할 때, 해당 code가 신정원 기준 canonical인지 먼저 검증
+- 검증 불가 시 태깅하지 않고 NULL 유지
+
+**(2) Ingestion**
+- 향후 ingestion 단계에서도 동일 원칙 적용
+- 문서 의미 고정은 "신정원 기준"으로만 수행
+
+**(3) Compare**
+- coverage_code가 신정원 기준으로 확정된 chunk만 Compare 계산에 사용
+- 데이터가 있어도 canonical 검증을 통과하지 못하면 "비교 불가"로 처리
+
+### 12.5 LLM 사용 제한
+
+LLM 허용 용도:
+- 담보명 후보 추출
+- 사용자 질의 해석 보조
+
+LLM 금지 용도:
+- coverage_code 추론 ❌
+- 통일담보명 판단 ❌
+- 신정원 코드 대체 생성 ❌
+
+### 12.6 충돌 발생 시 우선순위
+
+1️⃣ 신정원 통일코드 / 통일담보명 (coverage_standard)
+2️⃣ coverage_name_map
+3️⃣ coverage_alias
+4️⃣ 보험사 문서 텍스트
+5️⃣ LLM 추론 결과
+
+상위 규칙과 충돌하는 하위 결과는 **즉시 폐기**한다.
+
+### 12.7 메타 규칙
+
+- 본 규칙은 "설계 지침"이 아니라 **불변 전제(axiom)** 이다.
+- 이후 어떤 STEP, 어떤 기능, 어떤 개선에서도 본 규칙을 재논의하거나 완화하지 않는다.
+- "담보 의미가 흔들린다"는 문제가 발생하면, 가장 먼저 이 규칙 위반 여부를 점검한다.
+
+---
+
 ### 본 문서는 프로젝트 헌법(Constitution)으로 간주한다.
 ### 본 문서에 위배되는 구현은 허용되지 않는다.
