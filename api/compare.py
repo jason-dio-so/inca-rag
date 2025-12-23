@@ -51,6 +51,9 @@ from api.config_loader import (
     get_allowed_anchors_for_subtype,
     get_anchor_basis_for_subtype,
     get_safe_resolution_config,
+    # V1.5-PRECHECK: 오매칭 방지
+    get_anchor_exclusion_keywords,
+    get_explanation_context_keywords,
 )
 
 router = APIRouter(tags=["compare"])
@@ -1722,8 +1725,17 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
         extracted_subtypes = extract_subtypes_from_query(request.query) if is_multi_subtype else []
 
         # V1.5: Subtype-only 질의 감지 (1개 이상 subtype이 있고, anchor map에 매칭되는 경우)
+        # V1.5-PRECHECK: anchor 담보 키워드가 있으면 find_subtype_by_keyword에서 None 반환
         v1_5_subtype_id, v1_5_subtype_entry = find_subtype_by_keyword(request.query)
         is_subtype_only_query = v1_5_subtype_id is not None
+
+        # V1.5-PRECHECK: 설명/조건 문맥 키워드가 있으면 SAFE_RESOLVED 금지
+        if is_subtype_only_query:
+            query_lower = request.query.lower()
+            explanation_keywords = get_explanation_context_keywords()
+            has_explanation_context = any(kw.lower() in query_lower for kw in explanation_keywords)
+        else:
+            has_explanation_context = False
 
         # is_multi_subtype이 False여도 v1.5 subtype-only면 extracted_subtypes 가져오기
         if is_subtype_only_query and not extracted_subtypes:
@@ -1771,11 +1783,15 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             min_evidence_count = safe_resolution_config.get("min_evidence_count", 1)
 
             # V1.5: SAFE_RESOLVED 조건 체크
-            # 조건: allowed_anchor가 정확히 1개 + evidence 존재
+            # 조건: allowed_anchor가 정확히 1개 + evidence 존재 + 설명 문맥 아님
             use_safe_resolved = False
-            if safe_resolution_enabled and len(allowed_anchors) == 1:
+            evidence_count = 0
+
+            # V1.5-PRECHECK: 설명/조건 문맥이면 SAFE_RESOLVED 금지
+            if has_explanation_context:
+                use_safe_resolved = False
+            elif safe_resolution_enabled and len(allowed_anchors) == 1:
                 # Evidence 개수 체크 (compare_axis + policy_axis)
-                evidence_count = 0
                 for item in result.compare_axis:
                     evidence_count += len(item.evidence)
                 for item in result.policy_axis:

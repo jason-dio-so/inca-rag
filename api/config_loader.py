@@ -525,6 +525,7 @@ def get_safe_resolution_config() -> dict:
 def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]:
     """
     V1.5: 질의에서 subtype 키워드를 찾아 해당 subtype entry 반환
+    V1.5-PRECHECK: anchor 담보 키워드가 있으면 subtype-only로 판정하지 않음
 
     Args:
         query: 사용자 질의
@@ -535,6 +536,14 @@ def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]:
         subtype_entry: 해당 subtype의 설정 dict
     """
     query_lower = query.lower()
+
+    # V1.5-PRECHECK: anchor 담보 키워드가 있으면 subtype-only 아님
+    config = get_subtype_anchor_map_config()
+    anchor_exclusion_keywords = config.get("anchor_exclusion_keywords", [])
+    for kw in anchor_exclusion_keywords:
+        if kw.lower() in query_lower:
+            return None, None  # anchor 키워드가 있으면 subtype-only 아님
+
     entries = get_subtype_anchor_entries()
 
     # 키워드 길이 내림차순으로 모든 키워드 수집 (긴 것 우선 매칭)
@@ -581,3 +590,29 @@ def get_anchor_basis_for_subtype(subtype_id: str) -> str | None:
     entries = get_subtype_anchor_entries()
     entry = entries.get(subtype_id, {})
     return entry.get("anchor_basis")
+
+
+def get_anchor_exclusion_keywords() -> list[str]:
+    """
+    V1.5-PRECHECK: Anchor 담보 키워드 목록 반환
+
+    이 키워드가 질의에 포함되면 subtype-only가 아닌 것으로 판정
+
+    Returns:
+        ["암진단비", "유사암진단비", ...] 등
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("anchor_exclusion_keywords", [])
+
+
+def get_explanation_context_keywords() -> list[str]:
+    """
+    V1.5-PRECHECK: 설명/조건 문맥 키워드 목록 반환
+
+    이 키워드가 포함되면 정보 질의로 판단하여 SAFE_RESOLVED 하지 않음
+
+    Returns:
+        ["제외", "않는", "뜻", ...] 등
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("explanation_context_keywords", [])
