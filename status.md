@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.6.3-β: Split Synthetic Chunk 안정화 핫픽스)
+> 최종 업데이트: 2025-12-23 (V1.6.3-β-2: 마감 패치)
 
 ---
 
@@ -109,12 +109,65 @@
 | **V1.6.2** | **SAMSUNG A4210 Synthetic Chunk (Amount Bridge 완성)** | **데이터** | ✅ 완료 |
 | **V1.6.3** | **Split Synthetic Chunk (Mixed Coverage Chunk 구조적 해결)** | **데이터/기능** | ✅ 완료 |
 | **V1.6.3-β** | **Split Synthetic Chunk 안정화 핫픽스** | **안정성** | ✅ 완료 |
+| **V1.6.3-β-2** | **Split Synthetic Chunk 마감 패치 (count-context + meta finalize)** | **안정성** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.3-β-2: Split Synthetic Chunk 마감 패치 (2025-12-23)
+
+### 목적
+V1.6.3-β 마감 품질 확정. 3가지 추가 완결:
+1. **count-context 필터 실제 적용** - 횟수/한도 숫자 오추출 차단
+2. **synthetic meta 스키마 운영 기준 고정** - synthetic_method 키 추가
+3. **synthetic 오염 방지 범위 완비** - 벡터 검색 및 policy_axis에도 필터 적용
+
+### 핵심 변경
+
+**tools/backfill_split_synthetic_chunks.py:**
+```python
+# V1.6.3-β-2: count-context(횟수/한도) 필터 - 실제 적용
+if check_count_context(window_text):
+    coverage_line.reject_reason = "count_context"
+    continue
+
+# V1.6.3-β-2: Meta 구조 운영 기준 고정
+meta = {
+    "synthetic_type": "split",  # 운영 기준 키 (불변)
+    "synthetic_method": "v1_6_3_beta_2_split",  # 호환성 키 추가
+    "entities": {
+        "amount": {
+            "method": "v1_6_3_beta_2_split",  # 통일
+        }
+    }
+}
+```
+
+**services/retrieval/compare_service.py:**
+- `get_compare_axis_vector()`: synthetic 제외 필터 추가
+- `get_policy_axis()`: synthetic 제외 필터 추가 (방어적)
+
+### 실행 결과
+
+| 항목 | V1.6.3-β | V1.6.3-β-2 |
+|------|----------|------------|
+| Eligible | 278 | 163 |
+| Rejected (count_context 신규) | - | 387 |
+| 신규 생성 | 129 | 0 (idempotent) |
+
+### DoD 체크리스트
+
+- [x] count-context 필터 적용 (reject_reason=count_context 확인)
+- [x] synthetic meta 스키마 고정 (synthetic_method 추가)
+- [x] compare_service 전체 경로 synthetic 필터 완비
+- [x] Idempotent 재실행 검증 (created=0)
+- [x] Amount Bridge 핵심 케이스 FOUND 유지 (SAMSUNG/LOTTE)
+- [x] 핵심 compare API 테스트 50 passed
+
+---
 
 ## V1.6.3-β: Split Synthetic Chunk 안정화 핫픽스 (2025-12-23)
 

@@ -590,6 +590,8 @@ def get_compare_axis_vector(
                   AND c.doc_type = ANY(%s::text[])
                   AND c.embedding IS NOT NULL
                   AND {plan_condition}
+                  -- V1.6.3-β-2: synthetic chunk 오염 방지 (비교축에서 제외)
+                  AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                 ORDER BY c.embedding <=> %s::vector
                 LIMIT %s
             """
@@ -1134,6 +1136,8 @@ def get_policy_axis(
                     WHERE i.insurer_code = %s
                       AND c.doc_type = ANY(%s::text[])
                       AND c.content ILIKE %s
+                      -- V1.6.3-β-2: synthetic chunk 오염 방지 (방어적 적용)
+                      AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                     ORDER BY c.page_start
                     LIMIT %s
                 """

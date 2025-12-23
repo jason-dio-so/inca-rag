@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-V1.6.3-β Split Synthetic Chunk Backfill (안정화 핫픽스)
+V1.6.3-β-2 Split Synthetic Chunk Backfill (마감 패치)
 
 Mixed Coverage Chunk(하나의 chunk에 여러 담보 혼합)를 구조적으로 분해하여
 담보별 synthetic chunk를 생성하는 스크립트.
+
+V1.6.3-β-2 핵심 변경 (마감 패치):
+1. count-context 필터 실제 적용 (횟수/한도 숫자 오추출 차단)
+2. synthetic meta 스키마 운영 기준 고정 (synthetic_method 추가)
+3. amount.method = "v1_6_3_beta_2_split" 통일
 
 V1.6.3-β 핵심 변경:
 1. coverage_standard 자동 INSERT 금지 (coverage_alias 매핑만 허용)
@@ -276,6 +281,12 @@ def extract_coverage_lines(content: str, insurer_id: int, doc_type: str, conn) -
             coverage_lines.append(coverage_line)
             continue
 
+        # V1.6.3-β-2: count-context(횟수/한도) 필터 - 실제 적용
+        if check_count_context(window_text):
+            coverage_line.reject_reason = "count_context"
+            coverage_lines.append(coverage_line)
+            continue
+
         # V1.6.3-β: 최소 금액 필터
         if amount_result.amount_value < MIN_AMOUNT_THRESHOLD:
             coverage_line.reject_reason = f"amount_too_small ({amount_result.amount_value})"
@@ -483,16 +494,17 @@ def insert_synthetic_chunk(
         result.status = "skipped_existing"
         return result
 
-    # V1.6.3-β: Synthetic chunk content
+    # V1.6.3-β-2: Synthetic chunk content (버전 표기 업데이트)
     content = f"""[SYNTHETIC]
 {coverage_line.raw_line}
 
-[V1.6.3-β Split: source_chunk_id={candidate.chunk_id}]"""
+[V1.6.3-β-2 Split: source_chunk_id={candidate.chunk_id}]"""
 
-    # V1.6.3-β: Meta 구조 보강 (provenance)
+    # V1.6.3-β-2: Meta 구조 운영 기준 고정
     meta = {
         "is_synthetic": True,
-        "synthetic_type": "split",  # V1.6.3-β
+        "synthetic_type": "split",  # 운영 기준 키 (불변)
+        "synthetic_method": "v1_6_3_beta_2_split",  # V1.6.3-β-2: 호환성 키 추가
         "synthetic_source_chunk_id": candidate.chunk_id,
         "source_document_id": candidate.document_id,
         "source_doc_type": candidate.doc_type,
@@ -504,7 +516,7 @@ def insert_synthetic_chunk(
             "amount": {
                 "amount_value": coverage_line.amount_value,
                 "amount_text": coverage_line.amount_text,
-                "method": "v1_6_3_beta_split",  # V1.6.3-β
+                "method": "v1_6_3_beta_2_split",  # V1.6.3-β-2: 통일
                 "confidence": coverage_line.confidence or "medium",
             },
         },
@@ -739,7 +751,7 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"[V1.6.3-β Split Synthetic Chunk Backfill (안정화 핫픽스)]")
+    print(f"[V1.6.3-β-2 Split Synthetic Chunk Backfill (마감 패치)]")
     print(f"  mode: {'scan' if args.scan else 'dry-run' if args.dry_run else 'execute'}")
     print(f"  insurer: {args.insurer or 'ALL'}")
     print(f"  doc_types: {args.doc_types}")
