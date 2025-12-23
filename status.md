@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.6: Amount Bridge — Subtype SAFE_RESOLVED → Amount Compare)
+> 최종 업데이트: 2025-12-23 (V1.6.2: SAMSUNG A4210 Synthetic Chunk — Amount Bridge 완성)
 
 ---
 
@@ -106,12 +106,127 @@
 | **V1.5-REVERIFY** | **전 보험사 최종 봉인 검증** | **검증** | ✅ 완료 |
 | **V1.6** | **Amount Bridge (SAFE_RESOLVED + 금액 의도 → 금액 비교)** | **기능** | ✅ 완료 |
 | **V1.6.1** | **Amount Tagging Backfill (chunk.meta.entities.amount)** | **데이터** | ✅ 완료 |
+| **V1.6.2** | **SAMSUNG A4210 Synthetic Chunk (Amount Bridge 완성)** | **데이터** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.2: SAMSUNG A4210 Synthetic Chunk (2025-12-23)
+
+### 목적
+SAMSUNG Amount Bridge NOT_FOUND 문제 해결. 유사암진단비(A4210) 600만원 정보를 synthetic chunk로 생성하여 Amount Bridge 완성.
+
+### 문제 분석 (V1.6.1 이후)
+- V1.6.1 backfill 후 LOTTE, MERITZ 등은 FOUND
+- SAMSUNG은 여전히 NOT_FOUND
+- 원인: SAMSUNG에 A4210으로 태깅된 chunk 없음
+
+### Document Evidence 분석
+
+**chunk_id=3 (SAMSUNG 가입설계서) 내용:**
+```
+유사암 진단비(기타피부암)(1년50%)     600만원
+유사암 진단비(갑상선암)(1년50%)       600만원
+유사암 진단비(대장점막내암)(1년50%)    600만원
+유사암 진단비(제자리암)(1년50%)       600만원
+유사암 진단비(경계성종양)(1년50%)      600만원
+```
+
+- 문서에 "유사암 진단비" 담보와 600만원 금액 명확히 존재
+- 현재 coverage_code 태깅: A4299_1 (잘못됨)
+- 해당 담보는 신정원 A4210(유사암진단비)에 해당
+
+### Case A 확정
+
+**SAMSUNG에 A4210(유사암진단비) 담보 실제 존재 확인**
+
+| 근거 | 내용 |
+|------|------|
+| 문서 | 가입설계서 "유사암 진단비(경계성종양/제자리암)(1년50%)" |
+| 금액 | 600만원 |
+| coverage_alias | 이미 등록됨 (alias_id=236~240) |
+
+### 해결 전략: Synthetic Chunk INSERT
+
+**핵심 원칙:**
+- 기존 chunk(chunk_id=1,3) 수정 금지 (multi-coverage 오염 방지)
+- A4210 전용 synthetic chunk 새로 INSERT
+- is_synthetic=true 태깅
+
+**INSERT SQL:**
+```sql
+INSERT INTO chunk (document_id, insurer_id, doc_type, content, meta, page_start, page_end)
+VALUES (
+    1,  -- document_id (source chunk과 동일)
+    5,  -- insurer_id (SAMSUNG)
+    '가입설계서',
+    '유사암 진단비(경계성종양)(1년50%) 600만원
+유사암 진단비(제자리암)(1년50%) 600만원
+...[V1.6.2 Synthetic: source_chunk_id=3]',
+    '{
+        "entities": {
+            "coverage_code": "A4210",
+            "amount": {
+                "amount_value": 6000000,
+                "amount_text": "600만원",
+                "confidence": "high",
+                "method": "v1.6.2_synthetic"
+            },
+            "source_chunk_id": 3,
+            "is_synthetic": true
+        }
+    }'::jsonb,
+    5, 5
+);
+-- 결과: chunk_id=10952 생성
+```
+
+### 검증 결과
+
+**Amount Bridge 테스트:**
+
+| 질의 | 보험사 | amount_status | amount_value |
+|------|--------|---------------|--------------|
+| 경계성 종양 보장금액 | SAMSUNG | FOUND | 600만원 ✅ |
+| 경계성 종양 보장금액 | LOTTE | FOUND | 2억원 ✅ |
+
+**V1.6 Amount Bridge 완전 동작 확인:**
+```json
+{
+  "amount_bridge": {
+    "enabled": true,
+    "anchor_code": "A4210",
+    "subtype_id": "borderline_tumor",
+    "insurers": [
+      { "insurer_code": "SAMSUNG", "amount_value": 6000000, "amount_status": "FOUND" },
+      { "insurer_code": "LOTTE", "amount_value": 200000000, "amount_status": "FOUND" }
+    ],
+    "bridge_note": "이 결과는 경계성 종양 기반으로 유사암진단비(A4210)을 비교축으로 사용했습니다."
+  }
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| DB: chunk 테이블 | SAMSUNG A4210 synthetic chunk INSERT (chunk_id=10952) |
+| `status.md` | V1.6.2 섹션 추가 |
+
+### DoD 체크리스트
+- [x] SAMSUNG 가입설계서에서 유사암 진단비 600만원 evidence 확인
+- [x] Case A 확정 (A4210 담보 실제 존재)
+- [x] Synthetic chunk INSERT (기존 chunk 수정 없음)
+- [x] is_synthetic=true 태깅
+- [x] Amount Bridge SAMSUNG FOUND 확인
+- [x] LOTTE, SAMSUNG 비교 정상 동작 확인
+- [x] status.md 업데이트
+- [x] 커밋
+
+---
 
 ## V1.6.1: Amount Tagging Backfill (2025-12-23)
 
