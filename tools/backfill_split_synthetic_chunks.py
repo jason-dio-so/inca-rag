@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-V1.6.3 Split Synthetic Chunk Backfill
+V1.6.3-β Split Synthetic Chunk Backfill (안정화 핫픽스)
 
 Mixed Coverage Chunk(하나의 chunk에 여러 담보 혼합)를 구조적으로 분해하여
 담보별 synthetic chunk를 생성하는 스크립트.
+
+V1.6.3-β 핵심 변경:
+1. coverage_standard 자동 INSERT 금지 (coverage_alias 매핑만 허용)
+2. amount_extractor 우선 사용 + payment-context 필터
+3. 이상치 금액 필터 (< 10만원 스킵)
+4. synthetic chunk meta 구조 보강 (provenance)
 
 핵심 원칙:
 - 기존 chunk 절대 수정 금지 (INSERT ONLY)
 - 신정원 canonical coverage_code만 사용
 - LLM 추론 금지, 규칙 기반만 사용
 - 매핑 실패 시 리포트만 생성
+- Fail closed: 애매하면 생성하지 말고 unmapped/rejected report로 남김
 
 사용법:
     python tools/backfill_split_synthetic_chunks.py --scan        # 후보 스캔만
@@ -47,7 +54,10 @@ class CoverageLine:
     coverage_code: str | None = None
     amount_value: int | None = None
     amount_text: str | None = None
-    mapping_source: str | None = None  # 'coverage_alias' | 'coverage_name_map' | None
+    confidence: str | None = None
+    mapping_source: str | None = None  # 'coverage_alias' | 'coverage_standard_candidate' | None
+    eligible_for_insert: bool = False  # V1.6.3-β: coverage_alias만 True
+    reject_reason: str | None = None  # V1.6.3-β: 거절 사유
 
 
 @dataclass
@@ -74,11 +84,18 @@ class SyntheticChunkResult:
     raw_name: str
     amount_value: int
     amount_text: str
+    mapping_source: str  # V1.6.3-β
+    eligible_for_insert: bool  # V1.6.3-β
+    reject_reason: str | None = None  # V1.6.3-β
     new_chunk_id: int | None = None
-    status: str = "pending"  # pending | created | skipped | error
+    status: str = "pending"  # pending | created | skipped_existing | rejected | error
 
 
-# 담보명 키워드 (담보 라인 식별용)
+# ============================================================================
+# V1.6.3-β: 핵심 상수 정의
+# ============================================================================
+
+# 담보명 키워드 (담보 라인 식별용) - 필수 포함
 COVERAGE_KEYWORDS = [
     "진단비", "수술비", "치료비", "입원비", "사망", "보험금", "보장",
     "일당", "간병비", "요양비",
@@ -94,11 +111,20 @@ COVERAGE_NAME_PATTERNS = [
     r'([가-힣\s]+(?:진단비|수술비|치료비|입원비|보험금|사망|보장))',
 ]
 
-# 금액 패턴
-AMOUNT_PATTERN = re.compile(
-    r'(\d{1,3}(?:,\d{3})*)\s*(만\s*원|천만\s*원|억\s*원|원)'
-    r'|(\d+)\s*(만\s*원|천만\s*원|억\s*원)'
-)
+# V1.6.3-β: 보험료/납입 문맥 금칙 키워드
+PAYMENT_CONTEXT_KEYWORDS = [
+    "보험료", "납입", "월납", "연납", "기본보험료", "적립", "환급",
+    "수수료", "부담금", "자기부담", "갱신보험료", "납입면제", "1회차",
+    "2회차", "회차별", "총보험료", "합계",
+]
+
+# V1.6.3-β: 횟수/한도 문맥 (금액이 아닌 숫자)
+COUNT_CONTEXT_KEYWORDS = [
+    "회한", "횟수", "지급횟수", "연간", "지급한도", "회당", "1회한", "연1회",
+]
+
+# V1.6.3-β: 최소 금액 임계값 (10만원 미만은 의심)
+MIN_AMOUNT_THRESHOLD = 100_000
 
 
 def get_db_connection():
@@ -134,6 +160,7 @@ def get_coverage_alias_map(conn, insurer_id: int) -> dict[str, str]:
 def get_coverage_standard_map(conn) -> dict[str, str]:
     """
     coverage_standard 매핑 조회 (canonical)
+    V1.6.3-β: 보고서 기록용으로만 사용, 자동 INSERT 금지
     Returns: {coverage_name: coverage_code}
     """
     query = """
@@ -157,14 +184,39 @@ def normalize_coverage_name(raw_name: str) -> str:
     return normalized.lower()
 
 
-def extract_coverage_lines(content: str, insurer_id: int, conn) -> list[CoverageLine]:
+def check_payment_context(window_text: str) -> bool:
     """
-    chunk content에서 담보 라인 추출
+    V1.6.3-β: 보험료/납입 문맥인지 확인
+    True면 금액 추출 스킵
+    """
+    window_lower = window_text.lower()
+    for keyword in PAYMENT_CONTEXT_KEYWORDS:
+        if keyword in window_lower:
+            return True
+    return False
 
-    전략:
-    1. 전체 content에서 담보명 패턴 찾기
-    2. 담보명 주변(±5줄)에서 금액 패턴 찾기
-    3. coverage_code 매핑
+
+def check_count_context(window_text: str) -> bool:
+    """
+    V1.6.3-β: 횟수/한도 문맥인지 확인
+    True면 금액 추출 스킵
+    """
+    window_lower = window_text.lower()
+    for keyword in COUNT_CONTEXT_KEYWORDS:
+        if keyword in window_lower:
+            return True
+    return False
+
+
+def extract_coverage_lines(content: str, insurer_id: int, doc_type: str, conn) -> list[CoverageLine]:
+    """
+    V1.6.3-β: chunk content에서 담보 라인 추출
+
+    핵심 변경:
+    1. coverage_alias 매핑만 eligible_for_insert=True
+    2. coverage_standard 매핑은 report-only
+    3. amount_extractor 우선 사용
+    4. payment-context 필터 적용
     """
     lines = content.split('\n')
     coverage_lines: list[CoverageLine] = []
@@ -172,9 +224,6 @@ def extract_coverage_lines(content: str, insurer_id: int, conn) -> list[Coverage
     # 보험사별 alias 맵 조회
     alias_map = get_coverage_alias_map(conn, insurer_id)
     standard_map = get_coverage_standard_map(conn)
-
-    # 금액 패턴
-    amount_pattern = re.compile(r'(\d{1,3}(?:,\d{3})*)\s*만\s*원|(\d+)\s*만\s*원|(\d+)\s*억\s*원')
 
     for i, line in enumerate(lines):
         line_stripped = line.strip()
@@ -192,69 +241,81 @@ def extract_coverage_lines(content: str, insurer_id: int, conn) -> list[Coverage
         if not raw_name:
             continue
 
-        # 담보명 키워드 확인 (너무 짧거나 관련 없는 것 제외)
+        # V1.6.3-β: 담보명 최소 길이 4글자
         if len(raw_name) < 4:
             continue
+
+        # V1.6.3-β: 담보 키워드 필수 포함
         if not any(kw in raw_name for kw in COVERAGE_KEYWORDS):
             continue
 
-        # 주변 라인(현재 라인 ~ +5줄)에서 금액 찾기
-        amount_value = None
-        amount_text = None
-        amount_line = None
+        # V1.6.3-β: 주변 윈도우 구성 (±5줄)
+        window_start = max(0, i - 5)
+        window_end = min(len(lines), i + 6)
+        window_text = "\n".join(lines[window_start:window_end])
 
-        for j in range(i, min(i + 6, len(lines))):
-            amount_match = amount_pattern.search(lines[j])
-            if amount_match:
-                # 금액 파싱
-                if amount_match.group(1):  # X,XXX만원
-                    num_str = amount_match.group(1).replace(",", "")
-                    amount_value = int(num_str) * 10000
-                    amount_text = amount_match.group(0)
-                elif amount_match.group(2):  # X만원
-                    amount_value = int(amount_match.group(2)) * 10000
-                    amount_text = amount_match.group(0)
-                elif amount_match.group(3):  # X억원
-                    amount_value = int(amount_match.group(3)) * 100000000
-                    amount_text = amount_match.group(0)
+        # V1.6.3-β: amount_extractor 사용
+        amount_result = extract_amount(window_text, doc_type=doc_type)
 
-                if amount_value:
-                    amount_line = lines[j].strip()
-                    break
-
-        if not amount_value:
-            continue
-
-        # 합쳐진 raw_line 생성
-        raw_line = f"{raw_name} {amount_text}"
-
+        # 기본 CoverageLine 생성
         coverage_line = CoverageLine(
             line_number=i,
-            raw_line=raw_line,
+            raw_line=line_stripped,
             raw_name=raw_name,
-            amount_value=amount_value,
-            amount_text=amount_text,
         )
 
-        # coverage_code 매핑 시도
+        # 금액 추출 실패
+        if amount_result.amount_value is None:
+            coverage_line.reject_reason = "amount_not_found"
+            coverage_lines.append(coverage_line)
+            continue
+
+        # V1.6.3-β: payment-context 필터
+        if check_payment_context(window_text):
+            coverage_line.reject_reason = "payment_context"
+            coverage_lines.append(coverage_line)
+            continue
+
+        # V1.6.3-β: 최소 금액 필터
+        if amount_result.amount_value < MIN_AMOUNT_THRESHOLD:
+            coverage_line.reject_reason = f"amount_too_small ({amount_result.amount_value})"
+            coverage_lines.append(coverage_line)
+            continue
+
+        # 금액 정보 저장
+        coverage_line.amount_value = amount_result.amount_value
+        coverage_line.amount_text = amount_result.amount_text
+        coverage_line.confidence = amount_result.confidence
+        coverage_line.raw_line = f"{raw_name} {amount_result.amount_text}"
+
+        # coverage_code 매핑
         normalized = normalize_coverage_name(raw_name)
 
-        # 1. coverage_alias에서 매칭 시도
+        # V1.6.3-β: 1순위 - coverage_alias (자동 INSERT 허용)
+        alias_matched = False
         for alias_norm, code in alias_map.items():
-            # 부분 매칭 (alias가 담보명에 포함되거나 담보명이 alias에 포함)
+            # 양방향 포함 체크
             if alias_norm in normalized or normalized in alias_norm:
                 coverage_line.coverage_code = code
                 coverage_line.mapping_source = "coverage_alias"
+                coverage_line.eligible_for_insert = True
+                alias_matched = True
                 break
 
-        # 2. coverage_standard에서 매칭 시도
-        if not coverage_line.coverage_code:
+        # V1.6.3-β: 2순위 - coverage_standard (report-only, INSERT 금지)
+        if not alias_matched:
             for std_name, code in standard_map.items():
                 std_normalized = normalize_coverage_name(std_name)
                 if std_normalized in normalized or normalized in std_normalized:
                     coverage_line.coverage_code = code
-                    coverage_line.mapping_source = "coverage_standard"
+                    coverage_line.mapping_source = "coverage_standard_candidate"
+                    coverage_line.eligible_for_insert = False  # INSERT 금지
+                    coverage_line.reject_reason = "coverage_standard_only"
                     break
+
+        # 매핑 완전 실패
+        if not coverage_line.coverage_code:
+            coverage_line.reject_reason = "no_coverage_mapping"
 
         coverage_lines.append(coverage_line)
 
@@ -302,7 +363,7 @@ def scan_mixed_chunks(
       )
       AND c.content ~ '\d+만\s*원'
       -- synthetic chunk 제외
-      AND (c.meta->'is_synthetic')::boolean IS NOT TRUE
+      AND (c.meta->>'is_synthetic')::boolean IS NOT TRUE
     """
 
     params: list = [doc_types]
@@ -335,29 +396,43 @@ def scan_mixed_chunks(
             current_coverage_code=row["current_coverage_code"],
         )
 
-        # 담보 라인 추출
+        # V1.6.3-β: 담보 라인 추출 (doc_type 전달)
         candidate.coverage_lines = extract_coverage_lines(
-            row["content"], row["insurer_id"], conn
+            row["content"], row["insurer_id"], row["doc_type"], conn
         )
 
-        # 매핑 성공한 라인이 1개 이상 있으면 후보로 추가
-        if any(line.coverage_code for line in candidate.coverage_lines):
+        # V1.6.3-β: eligible_for_insert인 라인이 1개 이상 있거나, 리포트용 라인이 있으면 후보로 추가
+        if candidate.coverage_lines:
             candidates.append(candidate)
 
     return candidates
 
 
-def check_existing_synthetic(conn, source_chunk_id: int, coverage_code: str) -> bool:
-    """기존 synthetic chunk 존재 여부 확인 (Idempotent)"""
+def check_existing_synthetic(
+    conn,
+    insurer_id: int,
+    document_id: int,
+    page_start: int | None,
+    coverage_code: str,
+    amount_value: int,
+) -> bool:
+    """
+    V1.6.3-β: 기존 synthetic chunk 존재 여부 확인 (Idempotent)
+    중복 키: (insurer_id, document_id, page_start, coverage_code, amount_value)
+    """
     query = """
     SELECT 1 FROM chunk
-    WHERE (meta->>'synthetic_source_chunk_id')::int = %s
+    WHERE insurer_id = %s
+      AND document_id = %s
+      AND (page_start = %s OR (%s IS NULL AND page_start IS NULL))
       AND meta->'entities'->>'coverage_code' = %s
+      AND (meta->'entities'->'amount'->>'amount_value')::int = %s
+      AND (meta->>'is_synthetic')::boolean = true
     LIMIT 1
     """
 
     with conn.cursor() as cur:
-        cur.execute(query, (source_chunk_id, coverage_code))
+        cur.execute(query, (insurer_id, document_id, page_start, page_start, coverage_code, amount_value))
         return cur.fetchone() is not None
 
 
@@ -368,50 +443,69 @@ def insert_synthetic_chunk(
     dry_run: bool = False,
 ) -> SyntheticChunkResult:
     """
-    Synthetic chunk INSERT
+    V1.6.3-β: Synthetic chunk INSERT
 
     원칙:
     - 기존 chunk 수정 금지
     - 1 담보 = 1 synthetic chunk
+    - coverage_alias 매핑만 INSERT 허용
     """
     result = SyntheticChunkResult(
         source_chunk_id=candidate.chunk_id,
         insurer_code=candidate.insurer_code,
-        coverage_code=coverage_line.coverage_code,
-        raw_name=coverage_line.raw_name,
-        amount_value=coverage_line.amount_value,
-        amount_text=coverage_line.amount_text,
+        coverage_code=coverage_line.coverage_code or "",
+        raw_name=coverage_line.raw_name or "",
+        amount_value=coverage_line.amount_value or 0,
+        amount_text=coverage_line.amount_text or "",
+        mapping_source=coverage_line.mapping_source or "none",
+        eligible_for_insert=coverage_line.eligible_for_insert,
+        reject_reason=coverage_line.reject_reason,
     )
+
+    # V1.6.3-β: INSERT 자격 체크
+    if not coverage_line.eligible_for_insert:
+        result.status = "rejected"
+        return result
 
     if dry_run:
         result.status = "dry_run"
         return result
 
-    # Idempotent 체크
-    if check_existing_synthetic(conn, candidate.chunk_id, coverage_line.coverage_code):
+    # Idempotent 체크 (V1.6.3-β: 더 정밀한 중복 키)
+    if check_existing_synthetic(
+        conn,
+        candidate.insurer_id,
+        candidate.document_id,
+        candidate.page_start,
+        coverage_line.coverage_code,
+        coverage_line.amount_value,
+    ):
         result.status = "skipped_existing"
         return result
 
-    # Synthetic chunk content
+    # V1.6.3-β: Synthetic chunk content
     content = f"""[SYNTHETIC]
 {coverage_line.raw_line}
 
-[V1.6.3 Split: source_chunk_id={candidate.chunk_id}]"""
+[V1.6.3-β Split: source_chunk_id={candidate.chunk_id}]"""
 
-    # Meta 구성
+    # V1.6.3-β: Meta 구조 보강 (provenance)
     meta = {
         "is_synthetic": True,
-        "synthetic_method": "split_line_v1",
+        "synthetic_type": "split",  # V1.6.3-β
         "synthetic_source_chunk_id": candidate.chunk_id,
+        "source_document_id": candidate.document_id,
+        "source_doc_type": candidate.doc_type,
+        "source_page_start": candidate.page_start,
         "raw_name": coverage_line.raw_name,
-        "raw_line_excerpt": coverage_line.raw_line[:200],
+        "raw_line_excerpt": coverage_line.raw_line[:200] if coverage_line.raw_line else "",
         "entities": {
             "coverage_code": coverage_line.coverage_code,
             "amount": {
                 "amount_value": coverage_line.amount_value,
                 "amount_text": coverage_line.amount_text,
-                "method": "v1.6.3_split",
-                "confidence": "high" if coverage_line.mapping_source == "coverage_alias" else "medium",
+                "method": "v1_6_3_beta_split",  # V1.6.3-β
+                "confidence": coverage_line.confidence or "medium",
             },
         },
     }
@@ -453,10 +547,10 @@ def run_backfill(
     batch_size: int = 100,
 ) -> tuple[list[MixedChunkCandidate], list[SyntheticChunkResult], list[CoverageLine]]:
     """
-    V1.6.3 Split Synthetic Chunk Backfill 실행
+    V1.6.3-β Split Synthetic Chunk Backfill 실행
 
     Returns:
-        (candidates, results, unmapped_lines)
+        (candidates, results, rejected_lines)
     """
     conn = get_db_connection()
 
@@ -473,15 +567,16 @@ def run_backfill(
         print("\n[STEP 2-4] Processing coverage lines...")
 
         results: list[SyntheticChunkResult] = []
-        unmapped_lines: list[CoverageLine] = []
+        rejected_lines: list[CoverageLine] = []
 
         created_count = 0
         skipped_count = 0
+        rejected_count = 0
 
         for i, candidate in enumerate(candidates):
             for line in candidate.coverage_lines:
-                if line.coverage_code:
-                    # 매핑 성공 → synthetic chunk 생성
+                if line.eligible_for_insert:
+                    # V1.6.3-β: INSERT 자격 있음
                     result = insert_synthetic_chunk(conn, candidate, line, dry_run)
                     results.append(result)
 
@@ -490,8 +585,24 @@ def run_backfill(
                     elif result.status.startswith("skipped"):
                         skipped_count += 1
                 else:
-                    # 매핑 실패 → 리포트용
-                    unmapped_lines.append(line)
+                    # V1.6.3-β: INSERT 자격 없음 → rejected report
+                    rejected_lines.append(line)
+                    rejected_count += 1
+
+                    # results에도 기록 (dry-run 리포트용)
+                    result = SyntheticChunkResult(
+                        source_chunk_id=candidate.chunk_id,
+                        insurer_code=candidate.insurer_code,
+                        coverage_code=line.coverage_code or "",
+                        raw_name=line.raw_name or "",
+                        amount_value=line.amount_value or 0,
+                        amount_text=line.amount_text or "",
+                        mapping_source=line.mapping_source or "none",
+                        eligible_for_insert=False,
+                        reject_reason=line.reject_reason,
+                        status="rejected",
+                    )
+                    results.append(result)
 
             # 배치 커밋
             if not dry_run and (i + 1) % batch_size == 0:
@@ -505,14 +616,16 @@ def run_backfill(
         # Summary
         print(f"\n[SUMMARY]")
         print(f"  Candidates scanned: {len(candidates)}")
-        print(f"  Coverage lines found: {len(results) + len(unmapped_lines)}")
-        print(f"  Mapped lines: {len(results)}")
-        print(f"  Unmapped lines: {len(unmapped_lines)}")
+        total_lines = sum(len(c.coverage_lines) for c in candidates)
+        print(f"  Total coverage lines: {total_lines}")
+        eligible_lines = sum(1 for c in candidates for line in c.coverage_lines if line.eligible_for_insert)
+        print(f"  Eligible for INSERT (coverage_alias): {eligible_lines}")
+        print(f"  Rejected (coverage_standard/no_mapping/etc): {rejected_count}")
         if not dry_run:
             print(f"  Synthetic chunks created: {created_count}")
             print(f"  Skipped (existing): {skipped_count}")
 
-        return candidates, results, unmapped_lines
+        return candidates, results, rejected_lines
 
     finally:
         conn.close()
@@ -524,32 +637,40 @@ def save_candidates_report(candidates: list[MixedChunkCandidate], output_path: s
         writer = csv.writer(f)
         writer.writerow([
             "chunk_id", "insurer_code", "document_id", "doc_type", "page_start",
-            "current_code", "coverage_lines_count", "mapped_lines_count", "raw_names"
+            "current_code", "total_lines", "eligible_lines", "rejected_lines", "raw_names"
         ])
 
         for c in candidates:
-            mapped_count = sum(1 for line in c.coverage_lines if line.coverage_code)
+            eligible_count = sum(1 for line in c.coverage_lines if line.eligible_for_insert)
+            rejected_count = len(c.coverage_lines) - eligible_count
             raw_names = "; ".join(line.raw_name for line in c.coverage_lines if line.raw_name)
 
             writer.writerow([
                 c.chunk_id, c.insurer_code, c.document_id, c.doc_type, c.page_start,
-                c.current_coverage_code, len(c.coverage_lines), mapped_count, raw_names[:200]
+                c.current_coverage_code, len(c.coverage_lines), eligible_count, rejected_count, raw_names[:200]
             ])
 
     print(f"  Saved: {output_path}")
 
 
-def save_unmapped_report(unmapped_lines: list[CoverageLine], output_path: str):
-    """unmapped_lines_report.csv 저장"""
+def save_rejected_report(rejected_lines: list[CoverageLine], output_path: str):
+    """V1.6.3-β: rejected_lines_report.csv 저장"""
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["line_number", "raw_name", "amount_text", "raw_line_excerpt"])
+        writer.writerow([
+            "line_number", "raw_name", "coverage_code", "mapping_source",
+            "amount_value", "amount_text", "reject_reason", "raw_line_excerpt"
+        ])
 
-        for line in unmapped_lines:
+        for line in rejected_lines:
             writer.writerow([
                 line.line_number,
                 line.raw_name,
+                line.coverage_code,
+                line.mapping_source,
+                line.amount_value,
                 line.amount_text,
+                line.reject_reason,
                 line.raw_line[:100] if line.raw_line else "",
             ])
 
@@ -557,18 +678,20 @@ def save_unmapped_report(unmapped_lines: list[CoverageLine], output_path: str):
 
 
 def save_results_report(results: list[SyntheticChunkResult], output_path: str):
-    """synthetic_chunks_created.csv 저장"""
+    """V1.6.3-β: synthetic_chunks_report.csv 저장"""
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "source_chunk_id", "insurer_code", "coverage_code", "raw_name",
-            "amount_value", "amount_text", "new_chunk_id", "status"
+            "amount_value", "amount_text", "mapping_source", "eligible_for_insert",
+            "reject_reason", "new_chunk_id", "status"
         ])
 
         for r in results:
             writer.writerow([
                 r.source_chunk_id, r.insurer_code, r.coverage_code, r.raw_name,
-                r.amount_value, r.amount_text, r.new_chunk_id, r.status
+                r.amount_value, r.amount_text, r.mapping_source, r.eligible_for_insert,
+                r.reject_reason, r.new_chunk_id, r.status
             ])
 
     print(f"  Saved: {output_path}")
@@ -576,7 +699,7 @@ def save_results_report(results: list[SyntheticChunkResult], output_path: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="V1.6.3 Split Synthetic Chunk Backfill - Mixed Coverage Chunk 분해"
+        description="V1.6.3-β Split Synthetic Chunk Backfill - Mixed Coverage Chunk 분해 (안정화 핫픽스)"
     )
     parser.add_argument(
         "--scan",
@@ -610,13 +733,13 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="artifacts/v1_6_3",
+        default="artifacts/v1_6_3_beta",  # V1.6.3-β
         help="리포트 출력 디렉토리",
     )
 
     args = parser.parse_args()
 
-    print(f"[V1.6.3 Split Synthetic Chunk Backfill]")
+    print(f"[V1.6.3-β Split Synthetic Chunk Backfill (안정화 핫픽스)]")
     print(f"  mode: {'scan' if args.scan else 'dry-run' if args.dry_run else 'execute'}")
     print(f"  insurer: {args.insurer or 'ALL'}")
     print(f"  doc_types: {args.doc_types}")
@@ -624,7 +747,7 @@ def main():
     print()
 
     # 실행
-    candidates, results, unmapped = run_backfill(
+    candidates, results, rejected = run_backfill(
         insurer_code=args.insurer,
         doc_types=args.doc_types,
         dry_run=args.dry_run,
@@ -641,16 +764,16 @@ def main():
         os.path.join(args.output_dir, f"mixed_chunk_candidates_{timestamp}.csv")
     )
 
-    if unmapped:
-        save_unmapped_report(
-            unmapped,
-            os.path.join(args.output_dir, f"unmapped_lines_report_{timestamp}.csv")
+    if rejected:
+        save_rejected_report(
+            rejected,
+            os.path.join(args.output_dir, f"rejected_lines_report_{timestamp}.csv")
         )
 
     if results:
         save_results_report(
             results,
-            os.path.join(args.output_dir, f"synthetic_chunks_created_{timestamp}.csv")
+            os.path.join(args.output_dir, f"synthetic_chunks_report_{timestamp}.csv")
         )
 
 

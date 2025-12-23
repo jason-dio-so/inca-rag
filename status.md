@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.6.3: Split Synthetic Chunk — Mixed Coverage Chunk 구조적 해결)
+> 최종 업데이트: 2025-12-23 (V1.6.3-β: Split Synthetic Chunk 안정화 핫픽스)
 
 ---
 
@@ -108,12 +108,90 @@
 | **V1.6.1** | **Amount Tagging Backfill (chunk.meta.entities.amount)** | **데이터** | ✅ 완료 |
 | **V1.6.2** | **SAMSUNG A4210 Synthetic Chunk (Amount Bridge 완성)** | **데이터** | ✅ 완료 |
 | **V1.6.3** | **Split Synthetic Chunk (Mixed Coverage Chunk 구조적 해결)** | **데이터/기능** | ✅ 완료 |
+| **V1.6.3-β** | **Split Synthetic Chunk 안정화 핫픽스** | **안정성** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.3-β: Split Synthetic Chunk 안정화 핫픽스 (2025-12-23)
+
+### 목적
+V1.6.3의 3가지 핵심 리스크 제거:
+1. **coverage_standard 부분매칭 오매칭 방지**: coverage_alias 매핑만 자동 INSERT 허용
+2. **단순 금액 regex 오추출 방지**: amount_extractor 우선 사용, payment-context 필터 적용
+3. **Synthetic chunk 비교축 오염 방지**: compare_axis에서 is_synthetic=true 제외
+
+### 핵심 원칙
+
+1. **coverage_alias ONLY INSERT** - coverage_standard 매핑은 report-only
+2. **amount_extractor 우선** - raw regex 대신 검증된 추출기 사용
+3. **payment-context 필터** - 보험료/납입 문맥 금액 제외
+4. **MIN_AMOUNT_THRESHOLD** - 10만원 미만 금액 스킵
+5. **Fail Closed** - 애매하면 생성하지 말고 reject report로 남김
+
+### 스크립트 변경 (tools/backfill_split_synthetic_chunks.py)
+
+```python
+# V1.6.3-β 핵심 변경
+@dataclass
+class CoverageLine:
+    mapping_source: str | None  # 'coverage_alias' | 'coverage_standard_candidate'
+    eligible_for_insert: bool   # coverage_alias만 True
+    reject_reason: str | None   # 거절 사유 추적
+
+# V1.6.3-β: 보험료/납입 문맥 필터
+PAYMENT_CONTEXT_KEYWORDS = ["보험료", "납입", "월납", "연납", ...]
+
+# V1.6.3-β: 최소 금액 임계값
+MIN_AMOUNT_THRESHOLD = 100_000  # 10만원
+```
+
+### Compare 오염 방지 (services/retrieval/compare_service.py)
+
+```sql
+-- V1.6.3-β: synthetic chunk 비교축 제외
+AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
+```
+
+### 실행 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk (후보) | 117개 |
+| 추출된 담보 라인 | 2971개 |
+| Eligible (coverage_alias) | 278개 (9.4%) |
+| Rejected | 2693개 (90.6%) |
+| Synthetic chunk 생성 | 129개 (신규) |
+| 중복 제외 (V1.6.3 기존) | 149개 |
+
+### Reject 사유 분포
+
+| reject_reason | 설명 |
+|---------------|------|
+| amount_not_found | 금액 미추출 |
+| no_coverage_mapping | coverage_alias 매핑 실패 |
+| amount_too_small | 10만원 미만 |
+| payment_context | 보험료/납입 문맥 |
+
+### 산출물
+
+| 파일 | 내용 |
+|------|------|
+| `artifacts/v1_6_3_beta/mixed_chunk_candidates_*.csv` | 후보 chunk 목록 |
+| `artifacts/v1_6_3_beta/rejected_lines_report_*.csv` | 거절된 라인 상세 |
+| `artifacts/v1_6_3_beta/synthetic_chunks_report_*.csv` | 생성 결과 |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `tools/backfill_split_synthetic_chunks.py` | V1.6.3-β 안정화 핫픽스 |
+| `services/retrieval/compare_service.py` | synthetic chunk 비교축 제외 |
+
+---
 
 ## V1.6.3: Split Synthetic Chunk (2025-12-23)
 

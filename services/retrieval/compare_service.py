@@ -994,6 +994,8 @@ def get_compare_axis(
                           AND REGEXP_REPLACE(LOWER(c.content), '[[:space:]]', '', 'g')
                               LIKE CONCAT(chr(37), ap.raw_name_norm, chr(37))
                           AND {plan_condition}
+                          -- V1.6.3-β: synthetic chunk 오염 방지 (비교축에서 제외)
+                          AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                     ),
                     ranked AS (
                         SELECT *,
@@ -1044,6 +1046,8 @@ def get_compare_axis(
                           AND c.doc_type = ANY(%s::text[])
                           AND c.meta->'entities'->>'coverage_code' IS NOT NULL
                           AND {plan_condition}
+                          -- V1.6.3-β: synthetic chunk 오염 방지 (비교축에서 제외)
+                          AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                     )
                     SELECT *
                     FROM ranked
