@@ -19,6 +19,7 @@ from services.extraction.subtype_extractor import (
     get_subtype_definition,
     SubtypeComparisonResult,
 )
+import re
 from api.config_loader import (
     get_coverage_domains,
     get_domain_keywords,
@@ -54,6 +55,15 @@ from api.config_loader import (
     # V1.5-PRECHECK: 오매칭 방지
     get_anchor_exclusion_keywords,
     get_explanation_context_keywords,
+    # V1.6: Amount Bridge
+    is_amount_bridge_enabled,
+    get_amount_bridge_allow_subtypes,
+    get_amount_bridge_anchor_code,
+    get_amount_intent_keywords,
+    get_amount_intent_regex_patterns,
+    get_condition_branch_config,
+    get_partial_failure_config,
+    get_amount_bridge_messages,
 )
 
 router = APIRouter(tags=["compare"])
@@ -274,6 +284,32 @@ class CoverageResolutionResponse(BaseModel):
 
 
 # =============================================================================
+# V1.6: Amount Bridge Response Models
+# =============================================================================
+
+class AmountBridgeInsurerResult(BaseModel):
+    """V1.6: 보험사별 금액 브릿지 결과"""
+    insurer_code: str
+    amount_value: int | None = None
+    amount_text: str | None = None
+    amount_status: Literal["FOUND", "NOT_FOUND", "BRANCH"] = "NOT_FOUND"
+    branch_message: str | None = None  # "성별에 따라 상이" 등
+    evidence_refs: list[EvidenceRefResponse] = []
+
+
+class AmountBridgeResponse(BaseModel):
+    """V1.6: Amount Bridge 결과"""
+    enabled: bool = False
+    anchor_code: str | None = None  # A4210
+    subtype_id: str | None = None  # borderline_tumor, carcinoma_in_situ
+    subtype_name: str | None = None  # 경계성종양, 제자리암
+    insurers: list[AmountBridgeInsurerResult] = []
+    partial_failure: bool = False
+    partial_failure_reasons: dict[str, str] = {}  # {insurer_code: reason}
+    bridge_note: str | None = None  # "이 결과는 경계성종양 기반으로 유사암진단비(A4210)을 비교축으로 사용했습니다."
+
+
+# =============================================================================
 # U-4.8: Comparison Slots
 # =============================================================================
 
@@ -374,6 +410,8 @@ class CompareResponseModel(BaseModel):
     recovery_message: str | None = None
     # STEP 3.7: Coverage Resolution 결과 (상세 정보)
     coverage_resolution: CoverageResolutionResponse | None = None
+    # V1.6: Amount Bridge 결과
+    amount_bridge: AmountBridgeResponse | None = None
     debug: dict[str, Any]
 
 
@@ -570,6 +608,262 @@ def _detect_subtype_intent(
         return True, detected_targets, "keyword"
 
     return False, [], "none"
+
+
+# =============================================================================
+# V1.6: Amount Intent Detection
+# =============================================================================
+
+def _detect_amount_intent(query: str) -> tuple[bool, dict[str, Any]]:
+    """
+    V1.6: 질의에서 금액 의도를 감지
+
+    조건:
+    - amount_intent_keywords 중 하나라도 포함
+    - 또는 amount_intent_regex_patterns 중 하나라도 매칭
+
+    Args:
+        query: 사용자 질의
+
+    Returns:
+        (is_amount_intent, debug_info)
+    """
+    debug_info: dict[str, Any] = {
+        "matched_keyword": None,
+        "matched_regex": None,
+    }
+
+    query_lower = query.lower()
+
+    # 키워드 기반 감지
+    keywords = get_amount_intent_keywords()
+    for keyword in keywords:
+        if keyword.lower() in query_lower:
+            debug_info["matched_keyword"] = keyword
+            return True, debug_info
+
+    # 정규식 기반 감지
+    patterns = get_amount_intent_regex_patterns()
+    for pattern in patterns:
+        try:
+            if re.search(pattern, query):
+                debug_info["matched_regex"] = pattern
+                return True, debug_info
+        except re.error:
+            continue
+
+    return False, debug_info
+
+
+def _check_amount_bridge_conditions(
+    is_subtype_only_query: bool,
+    subtype_id: str | None,
+    has_explanation_context: bool,
+    is_amount_intent: bool,
+) -> tuple[bool, dict[str, Any]]:
+    """
+    V1.6: Amount Bridge 활성화 조건 체크
+
+    조건:
+    - is_subtype_only_query == True
+    - subtype_id in allowed_subtypes (borderline_tumor, carcinoma_in_situ)
+    - has_explanation_context == False
+    - is_amount_intent == True
+    - bridge enabled in config
+
+    Returns:
+        (use_bridge, debug_info)
+    """
+    debug_info: dict[str, Any] = {
+        "bridge_enabled": is_amount_bridge_enabled(),
+        "is_subtype_only": is_subtype_only_query,
+        "subtype_id": subtype_id,
+        "has_explanation_context": has_explanation_context,
+        "is_amount_intent": is_amount_intent,
+        "allowed_subtypes": get_amount_bridge_allow_subtypes(),
+    }
+
+    # Bridge 비활성화 상태
+    if not is_amount_bridge_enabled():
+        debug_info["reason"] = "bridge_disabled"
+        return False, debug_info
+
+    # subtype-only가 아니면 브릿지 불가
+    if not is_subtype_only_query:
+        debug_info["reason"] = "not_subtype_only"
+        return False, debug_info
+
+    # 허용된 subtype인지 확인
+    allowed = get_amount_bridge_allow_subtypes()
+    if subtype_id not in allowed:
+        debug_info["reason"] = "subtype_not_allowed"
+        return False, debug_info
+
+    # 설명 문맥이면 브릿지 불가
+    if has_explanation_context:
+        debug_info["reason"] = "explanation_context"
+        return False, debug_info
+
+    # 금액 의도가 없으면 브릿지 불가
+    if not is_amount_intent:
+        debug_info["reason"] = "no_amount_intent"
+        return False, debug_info
+
+    debug_info["reason"] = "all_conditions_met"
+    return True, debug_info
+
+
+def _extract_amount_from_evidence(
+    evidence_list: list,
+    insurer_code: str,
+) -> tuple[int | None, str | None, list[EvidenceRefResponse], str | None]:
+    """
+    V1.6: Evidence에서 금액 추출
+
+    Returns:
+        (amount_value, amount_text, evidence_refs, branch_message)
+    """
+    amounts_found: list[tuple[int, str, int, int | None]] = []  # (value, text, doc_id, page)
+
+    for evidence in evidence_list:
+        if hasattr(evidence, 'amount') and evidence.amount:
+            if evidence.amount.amount_value:
+                amounts_found.append((
+                    evidence.amount.amount_value,
+                    evidence.amount.amount_text or str(evidence.amount.amount_value),
+                    evidence.document_id,
+                    evidence.page_start,
+                ))
+
+    if not amounts_found:
+        return None, None, [], None
+
+    # 금액이 모두 동일한지 확인
+    unique_values = set(a[0] for a in amounts_found)
+
+    if len(unique_values) == 1:
+        # 단일 금액
+        val, text, doc_id, page = amounts_found[0]
+        refs = [EvidenceRefResponse(
+            insurer_code=insurer_code,
+            document_id=doc_id,
+            page_start=page,
+        )]
+        return val, text, refs, None
+
+    # 금액이 다름 - 조건 분기 가능성
+    # LOTTE/DB 분기 메시지 확인
+    branch_config = get_condition_branch_config(insurer_code)
+    if branch_config.get("enabled"):
+        branch_msg = branch_config.get("branch_message", "조건에 따라 상이")
+
+        # 모든 evidence refs 수집
+        refs = [
+            EvidenceRefResponse(
+                insurer_code=insurer_code,
+                document_id=a[2],
+                page_start=a[3],
+            )
+            for a in amounts_found
+        ]
+
+        # 가장 높은 금액 반환 (참고용)
+        max_amount = max(amounts_found, key=lambda x: x[0])
+        return max_amount[0], max_amount[1], refs, branch_msg
+
+    # 일반 케이스: 첫 번째 금액 반환
+    val, text, doc_id, page = amounts_found[0]
+    refs = [EvidenceRefResponse(
+        insurer_code=insurer_code,
+        document_id=doc_id,
+        page_start=page,
+    )]
+    return val, text, refs, None
+
+
+def _build_amount_bridge_response(
+    result,
+    final_insurers: list[str],
+    subtype_id: str,
+    subtype_name: str,
+    anchor_code: str,
+) -> AmountBridgeResponse:
+    """
+    V1.6: Amount Bridge 응답 생성
+
+    Args:
+        result: compare() 결과
+        final_insurers: 보험사 코드 목록
+        subtype_id: "borderline_tumor" 등
+        subtype_name: "경계성종양" 등
+        anchor_code: "A4210"
+
+    Returns:
+        AmountBridgeResponse
+    """
+    # Evidence를 보험사별로 그룹화
+    evidence_by_insurer: dict[str, list] = {ic: [] for ic in final_insurers}
+
+    for item in result.compare_axis:
+        if item.insurer_code in evidence_by_insurer:
+            evidence_by_insurer[item.insurer_code].extend(item.evidence)
+
+    # 보험사별 금액 추출
+    insurer_results: list[AmountBridgeInsurerResult] = []
+    partial_failure_reasons: dict[str, str] = {}
+    has_partial_failure = False
+
+    for insurer_code in final_insurers:
+        evidence_list = evidence_by_insurer.get(insurer_code, [])
+
+        amount_value, amount_text, evidence_refs, branch_message = _extract_amount_from_evidence(
+            evidence_list, insurer_code
+        )
+
+        if amount_value is not None:
+            if branch_message:
+                status = "BRANCH"
+            else:
+                status = "FOUND"
+        else:
+            status = "NOT_FOUND"
+            has_partial_failure = True
+            partial_failure_config = get_partial_failure_config()
+            partial_failure_reasons[insurer_code] = partial_failure_config.get(
+                "not_found_message",
+                "해당 담보의 금액 정보를 찾을 수 없습니다"
+            )
+
+        insurer_results.append(AmountBridgeInsurerResult(
+            insurer_code=insurer_code,
+            amount_value=amount_value,
+            amount_text=amount_text,
+            amount_status=status,
+            branch_message=branch_message,
+            evidence_refs=evidence_refs,
+        ))
+
+    # Bridge Note 생성
+    messages = get_amount_bridge_messages()
+    display_names = get_display_names()
+    coverage_names = display_names.get("coverage_names", {})
+    coverage_name = coverage_names.get(anchor_code, anchor_code)
+
+    bridge_note = messages.get("bridge_note", "").format(
+        subtype=subtype_name,
+        coverage_name=coverage_name,
+    )
+
+    return AmountBridgeResponse(
+        enabled=True,
+        anchor_code=anchor_code,
+        subtype_id=subtype_id,
+        subtype_name=subtype_name,
+        insurers=insurer_results,
+        partial_failure=has_partial_failure,
+        partial_failure_reasons=partial_failure_reasons,
+        bridge_note=bridge_note,
+    )
 
 
 # =============================================================================
@@ -1374,6 +1668,8 @@ def _convert_response(
     comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE",
     subtype_targets: list[str] | None = None,
     is_subtype_intent: bool = False,
+    # V1.6: Amount Bridge
+    amount_bridge: AmountBridgeResponse | None = None,
 ) -> CompareResponseModel:
     """내부 결과를 API 응답 모델로 변환"""
     # STEP 2.5 + 2.7: 대표 담보 선택 (query 의도 기반)
@@ -1430,8 +1726,9 @@ def _convert_response(
     resolution_state = coverage_resolution.status if coverage_resolution else "RESOLVED"
     resolved_coverage_code = coverage_resolution.resolved_coverage_code if coverage_resolution else None
 
-    # STEP 3.7-δ-β: RESOLVED가 아니면 (UNRESOLVED, INVALID) 결과 데이터 null 반환
-    if resolution_state != "RESOLVED":
+    # STEP 3.7-δ-β: RESOLVED/SAFE_RESOLVED가 아니면 (UNRESOLVED, INVALID) 결과 데이터 null 반환
+    # V1.5: SAFE_RESOLVED도 데이터 반환 허용 (anchor 기반 안전 확정 상태)
+    if resolution_state not in ("RESOLVED", "SAFE_RESOLVED"):
         merged_debug["resolution_gate"] = "blocked"
         merged_debug["resolution_gate_reason"] = f"resolution_state={resolution_state}"
 
@@ -1454,11 +1751,12 @@ def _convert_response(
             anchor=None,
             recovery_message=recovery_message,
             coverage_resolution=coverage_resolution,
+            amount_bridge=None,  # V1.6: UNRESOLVED/INVALID 시 amount_bridge 없음
             debug=merged_debug,
         )
 
     # ==========================================================================
-    # RESOLVED 상태: 전체 데이터 반환
+    # RESOLVED/SAFE_RESOLVED 상태: 전체 데이터 반환
     # ==========================================================================
     anchor_blocked_by_resolution = False  # RESOLVED이므로 anchor 생성 허용
 
@@ -1587,6 +1885,8 @@ def _convert_response(
         recovery_message=recovery_message,
         # STEP 3.7: Coverage Resolution
         coverage_resolution=coverage_resolution,
+        # V1.6: Amount Bridge
+        amount_bridge=amount_bridge,
         debug=merged_debug,
     )
 
@@ -1970,6 +2270,42 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
                 is_multi_subtype=subtype_result.is_multi_subtype,
             )
 
+        # =======================================================================
+        # V1.6: Amount Bridge (SAFE_RESOLVED + 금액 의도 시 활성화)
+        # =======================================================================
+        amount_bridge_response: AmountBridgeResponse | None = None
+
+        # V1.6: 금액 의도 감지
+        is_amount_intent, amount_intent_debug = _detect_amount_intent(request.query)
+        anchor_debug["amount_intent"] = is_amount_intent
+        anchor_debug["amount_intent_debug"] = amount_intent_debug
+
+        # V1.6: Bridge 조건 체크
+        use_amount_bridge, bridge_debug = _check_amount_bridge_conditions(
+            is_subtype_only_query=is_subtype_only_query,
+            subtype_id=v1_5_subtype_id,
+            has_explanation_context=has_explanation_context,
+            is_amount_intent=is_amount_intent,
+        )
+        anchor_debug["amount_bridge_debug"] = bridge_debug
+
+        # V1.6: SAFE_RESOLVED + Bridge 조건 충족 시 amount_bridge 생성
+        if use_amount_bridge and coverage_resolution and coverage_resolution.status == "SAFE_RESOLVED":
+            subtype_display_name = extracted_subtypes[0].name if extracted_subtypes else "subtype"
+            anchor_code = get_amount_bridge_anchor_code()
+
+            amount_bridge_response = _build_amount_bridge_response(
+                result=result,
+                final_insurers=final_insurers,
+                subtype_id=v1_5_subtype_id or "unknown",
+                subtype_name=subtype_display_name,
+                anchor_code=anchor_code,
+            )
+
+            # user_summary 업데이트 (금액 비교 모드)
+            anchor_debug["amount_bridge_enabled"] = True
+            anchor_debug["amount_bridge_anchor"] = anchor_code
+
         return _convert_response(
             result,
             final_insurers,
@@ -1990,6 +2326,8 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
             comparison_mode=comparison_mode,
             subtype_targets=detected_subtype_targets if is_subtype_intent else None,
             is_subtype_intent=is_subtype_intent,
+            # V1.6: Amount Bridge
+            amount_bridge=amount_bridge_response,
         )
     except HTTPException:
         raise

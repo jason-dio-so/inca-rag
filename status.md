@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.5: Subtype Anchor Map & Safe Resolution UX)
+> 최종 업데이트: 2025-12-23 (V1.6: Amount Bridge — Subtype SAFE_RESOLVED → Amount Compare)
 
 ---
 
@@ -104,12 +104,159 @@
 | **V1.5** | **Subtype Anchor Map & Safe Resolution UX** | **기능/UX** | ✅ 완료 |
 | **V1.5-HOTFIX** | **질병명 SAFE_RESOLVED 금지** | **안정성** | ✅ 완료 |
 | **V1.5-REVERIFY** | **전 보험사 최종 봉인 검증** | **검증** | ✅ 완료 |
+| **V1.6** | **Amount Bridge (SAFE_RESOLVED + 금액 의도 → 금액 비교)** | **기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6: Amount Bridge — Subtype SAFE_RESOLVED → Amount Compare (2025-12-23)
+
+### 목적
+V1.5에서 SAFE_RESOLVED 된 Subtype-only 질의(경계성종양, 제자리암)에 금액 의도가 있을 때 Amount 비교 기능 제공
+
+### 핵심 원칙
+
+1. **V1.5 비파괴**: 금액 의도가 없으면 기존 V1.5 동작 유지
+2. **허용 Subtype 제한**: borderline_tumor, carcinoma_in_situ만 브릿지 허용
+3. **Evidence 기반만 허용**: 금액은 evidence에서 추출, LLM 추론 금지
+4. **Partial Failure 허용**: 일부 보험사가 금액 없어도 응답 가능
+
+### Amount Intent 감지
+
+**키워드 기반:**
+- 보장금액, 진단금, 보험금, 금액, 얼마, 한도, 지급금, 만원, 천만원, 가입금액
+
+**정규식 기반:**
+- `\d{1,3}(,\d{3})+원` (1,000,000원)
+- `\d+만\s*원` (600만원)
+- `\d+천만\s*원` (3천만원)
+
+### 구현
+
+**1. config/v1_6_amount_bridge.yaml**
+
+```yaml
+bridge:
+  enabled: true
+  allow_subtypes:
+    - borderline_tumor
+    - carcinoma_in_situ
+  anchor_code: A4210
+  min_evidence_count: 1
+
+amount_intent:
+  keywords: [보장금액, 진단금, 금액, 얼마, ...]
+  regex_patterns: ['\d+만\s*원', ...]
+
+condition_branch:
+  lotte:
+    enabled: true
+    branch_message: "성별에 따라 상이"
+  db:
+    enabled: true
+    branch_message: "연령 구간에 따라 상이"
+```
+
+**2. api/config_loader.py 확장**
+
+```python
+# V1.6 Loaders
+def get_amount_bridge_config() -> dict: ...
+def is_amount_bridge_enabled() -> bool: ...
+def get_amount_bridge_allow_subtypes() -> list[str]: ...
+def get_amount_bridge_anchor_code() -> str: ...
+def get_amount_intent_keywords() -> list[str]: ...
+def get_amount_intent_regex_patterns() -> list[str]: ...
+def get_condition_branch_config(insurer_code: str) -> dict: ...
+def get_partial_failure_config() -> dict: ...
+def get_amount_bridge_messages() -> dict[str, str]: ...
+```
+
+**3. api/compare.py 확장**
+
+```python
+# V1.6 Response Models
+class AmountBridgeInsurerResult(BaseModel):
+    insurer_code: str
+    amount_value: int | None = None
+    amount_text: str | None = None
+    amount_status: Literal["FOUND", "NOT_FOUND", "BRANCH"] = "NOT_FOUND"
+    branch_message: str | None = None
+    evidence_refs: list[EvidenceRefResponse] = []
+
+class AmountBridgeResponse(BaseModel):
+    enabled: bool = False
+    anchor_code: str | None = None
+    subtype_id: str | None = None
+    subtype_name: str | None = None
+    insurers: list[AmountBridgeInsurerResult] = []
+    partial_failure: bool = False
+    bridge_note: str | None = None
+
+# CompareResponseModel에 amount_bridge 필드 추가
+amount_bridge: AmountBridgeResponse | None = None
+```
+
+**4. V1.6 Helper Functions**
+
+```python
+def _detect_amount_intent(query: str) -> tuple[bool, dict[str, Any]]: ...
+def _check_amount_bridge_conditions(...) -> tuple[bool, dict[str, Any]]: ...
+def _extract_amount_from_evidence(...) -> tuple[int | None, str | None, list, str | None]: ...
+def _build_amount_bridge_response(...) -> AmountBridgeResponse: ...
+```
+
+**5. Resolution Gate 수정**
+
+```python
+# V1.5 SAFE_RESOLVED도 데이터 반환 허용
+if resolution_state not in ("RESOLVED", "SAFE_RESOLVED"):
+    # UNRESOLVED/INVALID → 결과 차단
+```
+
+### 검증 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Amount Intent + SAFE_RESOLVED | "경계성종양 보장금액" | amount_bridge.enabled=True, status=SAFE_RESOLVED ✅ |
+| No Amount Intent | "경계성종양" | amount_bridge=None, status=SAFE_RESOLVED ✅ |
+| Amount Intent Variants | "제자리암 진단금 얼마" | amount_intent=True (matched: 진단금) ✅ |
+| Explanation Context | "경계성종양이란 무엇" | amount_bridge=None, status=UNRESOLVED ✅ |
+| Disease Name (not subtype) | "갑상선암 보장금액" | amount_bridge=None, reason=not_subtype_only ✅ |
+
+### V1.5 회귀 테스트
+
+| 테스트 | 결과 |
+|--------|------|
+| 암진단비 삼성 메리츠 | UNRESOLVED, amount_bridge=None ✅ |
+| 뇌졸중진단비 비교 | RESOLVED, amount_bridge=None ✅ |
+| locked_coverage_codes 전달 | RESOLVED, amount_bridge=None ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/v1_6_amount_bridge.yaml` | (신규) Amount Bridge 설정 |
+| `api/config_loader.py` | V1.6 로더 함수 9개 추가 |
+| `api/compare.py` | AmountBridgeResponse 모델, 헬퍼 함수 4개, resolution gate 수정 |
+
+### DoD 체크리스트
+- [x] v1_6_amount_bridge.yaml 생성
+- [x] config_loader에 V1.6 로더 추가
+- [x] AmountBridgeResponse 모델 정의
+- [x] _detect_amount_intent() 구현
+- [x] _check_amount_bridge_conditions() 구현
+- [x] _extract_amount_from_evidence() 구현
+- [x] _build_amount_bridge_response() 구현
+- [x] SAFE_RESOLVED 게이트 수정
+- [x] V1.6 검증 테스트 통과
+- [x] V1.5 회귀 테스트 통과
+- [x] Docker 재빌드 및 테스트
+
+---
 
 ## V1.5-REVERIFY: 전 보험사 최종 봉인 검증 (2025-12-23)
 

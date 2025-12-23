@@ -616,3 +616,102 @@ def get_explanation_context_keywords() -> list[str]:
     """
     config = get_subtype_anchor_map_config()
     return config.get("explanation_context_keywords", [])
+
+
+# =============================================================================
+# V1.6: Amount Bridge Loaders
+# =============================================================================
+
+def get_amount_bridge_config() -> dict:
+    """
+    V1.6: Amount Bridge 설정 전체 반환
+
+    Returns:
+        {
+            "bridge": {...},
+            "amount_intent": {...},
+            "condition_branch": {...},
+            "partial_failure": {...},
+            "messages": {...}
+        }
+    """
+    return _load_yaml("v1_6_amount_bridge.yaml")
+
+
+def is_amount_bridge_enabled() -> bool:
+    """V1.6: Amount Bridge 활성화 여부 반환"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("enabled", False)
+
+
+def get_amount_bridge_allow_subtypes() -> list[str]:
+    """V1.6: Bridge 허용 subtype 목록 반환"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("allow_subtypes", [])
+
+
+def get_amount_bridge_anchor_code() -> str:
+    """V1.6: Bridge 대상 anchor 코드 반환 (신정원 canonical 고정)"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("anchor_code", "A4210")
+
+
+def get_amount_intent_keywords() -> list[str]:
+    """
+    V1.6: 금액 의도 키워드 목록 반환
+
+    Returns:
+        ["보장금액", "진단금", "얼마", ...] 등
+    """
+    config = get_amount_bridge_config()
+    return config.get("amount_intent", {}).get("keywords", [])
+
+
+def get_amount_intent_regex_patterns() -> list[str]:
+    """
+    V1.6: 금액 의도 정규식 패턴 목록 반환
+
+    Returns:
+        [r'\d{1,3}(,\d{3})+원', ...] 등
+    """
+    config = get_amount_bridge_config()
+    return config.get("amount_intent", {}).get("regex_patterns", [])
+
+
+def get_condition_branch_config(insurer_code: str) -> dict:
+    """
+    V1.6: 보험사별 조건 분기 설정 반환
+
+    Args:
+        insurer_code: "LOTTE", "DB" 등
+
+    Returns:
+        {"enabled": True, "detection_keywords": [...], "branch_message": "..."}
+    """
+    config = get_amount_bridge_config()
+    return config.get("condition_branch", {}).get(insurer_code.lower(), {})
+
+
+def get_partial_failure_config() -> dict:
+    """
+    V1.6: Partial Failure 설정 반환
+
+    Returns:
+        {"allow_partial": True, "not_found_message": "...", "not_found_status": "NOT_FOUND"}
+    """
+    config = get_amount_bridge_config()
+    return config.get("partial_failure", {
+        "allow_partial": True,
+        "not_found_status": "NOT_FOUND"
+    })
+
+
+def get_amount_bridge_messages() -> dict[str, str]:
+    """
+    V1.6: Amount Bridge 메시지 템플릿 반환
+
+    Returns:
+        {"bridge_note": "...", "amount_source_note": "..."}
+    """
+    config = get_amount_bridge_config()
+    return config.get("messages", {})
