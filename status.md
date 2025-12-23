@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.6.3-β-2: 마감 패치)
+> 최종 업데이트: 2025-12-23 (V1.6.3-β-3: Synthetic Meta Normalization)
 
 ---
 
@@ -110,12 +110,61 @@
 | **V1.6.3** | **Split Synthetic Chunk (Mixed Coverage Chunk 구조적 해결)** | **데이터/기능** | ✅ 완료 |
 | **V1.6.3-β** | **Split Synthetic Chunk 안정화 핫픽스** | **안정성** | ✅ 완료 |
 | **V1.6.3-β-2** | **Split Synthetic Chunk 마감 패치 (count-context + meta finalize)** | **안정성** | ✅ 완료 |
+| **V1.6.3-β-3** | **Synthetic Meta Normalization (meta-only)** | **데이터 정규화** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.3-β-3: Synthetic Meta Normalization (meta-only) (2025-12-23)
+
+### 목적
+기존 synthetic split chunk들의 meta 스키마를 운영 기준(β-2)으로 정규화.
+meta 혼재 제거, 운영 기준 키 통일.
+
+### 변경사항
+
+- `synthetic_method` → `v1_6_3_beta_2_split` 통일
+- `entities.amount.method` → `v1_6_3_beta_2_split` 통일
+- 원본 값 보존: `*_original` 키 추가 (기존 값이 있던 경우)
+
+### Before/After 분포
+
+| 키 | Before | After |
+|----|--------|-------|
+| synthetic_type=NULL | 278 | 0 |
+| synthetic_type=split | 129 | 407 |
+| synthetic_method=split_line_v1 | 278 | 0 |
+| synthetic_method=NULL | 129 | 0 |
+| synthetic_method=v1_6_3_beta_2_split | 0 | 407 |
+| amount.method=v1.6.3_split | 278 | 0 |
+| amount.method=v1_6_3_beta_split | 129 | 0 |
+| amount.method=v1_6_3_beta_2_split | 0 | 407 |
+
+### 수치
+
+| 항목 | 값 |
+|------|-----|
+| Total synthetic | 407 |
+| Updated | 407 |
+| Skipped | 0 |
+| Errors | 0 |
+
+### 검증
+
+- [x] Idempotent 재실행: updated=0, skipped=407 (already_normalized)
+- [x] Amount Bridge: SAMSUNG 600만원, LOTTE 2억원 FOUND 유지
+- [x] SAFE_RESOLVED: 경계성종양/제자리암 정상
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `tools/backfill_normalize_synthetic_meta_v1_6_3_beta_3.py` | (신규) Meta normalization 스크립트 |
+
+---
 
 ## V1.6.3-β-2: Split Synthetic Chunk 마감 패치 (2025-12-23)
 
