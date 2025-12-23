@@ -465,3 +465,119 @@ def get_subtype_evidence_keywords() -> dict[str, list[str]]:
     """
     config = get_subtype_config()
     return config.get("subtype_evidence_keywords", {})
+
+
+# =============================================================================
+# V1.5: Subtype Anchor Map Loaders
+# =============================================================================
+
+def get_subtype_anchor_map_config() -> dict:
+    """
+    V1.5: Subtype Anchor Map 설정 전체 반환
+
+    Returns:
+        {
+            "subtypes": {...},
+            "safe_resolution": {...}
+        }
+    """
+    return _load_yaml("subtype_anchor_map.yaml")
+
+
+def get_subtype_anchor_entries() -> dict[str, dict]:
+    """
+    V1.5: Subtype -> Anchor 매핑 전체 반환
+
+    Returns:
+        {
+            "borderline_tumor": {
+                "keywords": ["경계성종양", ...],
+                "allowed_anchors": ["A4210"],
+                "anchor_basis": "...",
+                "domain": "CANCER"
+            },
+            ...
+        }
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("subtypes", {})
+
+
+def get_safe_resolution_config() -> dict:
+    """
+    V1.5: 안전 확정(SAFE_RESOLVED) 설정 반환
+
+    Returns:
+        {
+            "enabled": True,
+            "safe_resolved_message": "...",
+            "multiple_anchors_message": "...",
+            "min_evidence_count": 1
+        }
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("safe_resolution", {
+        "enabled": True,
+        "min_evidence_count": 1
+    })
+
+
+def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]:
+    """
+    V1.5: 질의에서 subtype 키워드를 찾아 해당 subtype entry 반환
+
+    Args:
+        query: 사용자 질의
+
+    Returns:
+        (subtype_id, subtype_entry) or (None, None)
+        subtype_id: "borderline_tumor", "carcinoma_in_situ" 등
+        subtype_entry: 해당 subtype의 설정 dict
+    """
+    query_lower = query.lower()
+    entries = get_subtype_anchor_entries()
+
+    # 키워드 길이 내림차순으로 모든 키워드 수집 (긴 것 우선 매칭)
+    keyword_to_subtype: list[tuple[str, str]] = []
+    for subtype_id, entry in entries.items():
+        for keyword in entry.get("keywords", []):
+            keyword_to_subtype.append((keyword.lower(), subtype_id))
+
+    # 긴 키워드부터 매칭
+    keyword_to_subtype.sort(key=lambda x: len(x[0]), reverse=True)
+
+    for keyword, subtype_id in keyword_to_subtype:
+        if keyword in query_lower:
+            return subtype_id, entries[subtype_id]
+
+    return None, None
+
+
+def get_allowed_anchors_for_subtype(subtype_id: str) -> list[str]:
+    """
+    V1.5: 특정 subtype에 허용된 anchor coverage_code 목록 반환
+
+    Args:
+        subtype_id: "borderline_tumor", "carcinoma_in_situ" 등
+
+    Returns:
+        ["A4210"] 등 허용된 coverage_code 리스트
+    """
+    entries = get_subtype_anchor_entries()
+    entry = entries.get(subtype_id, {})
+    return entry.get("allowed_anchors", [])
+
+
+def get_anchor_basis_for_subtype(subtype_id: str) -> str | None:
+    """
+    V1.5: 특정 subtype의 anchor 근거 문구 반환
+
+    Args:
+        subtype_id: "borderline_tumor" 등
+
+    Returns:
+        "경계성종양은 유사암 범주에 포함됨" 등
+    """
+    entries = get_subtype_anchor_entries()
+    entry = entries.get(subtype_id, {})
+    return entry.get("anchor_basis")

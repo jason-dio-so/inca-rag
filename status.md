@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-22 (U-4.18-Ω-VERIFY: v1.0 Compare 안정성 최종 점검 완료)
+> 최종 업데이트: 2025-12-23 (V1.5: Subtype Anchor Map & Safe Resolution UX)
 
 ---
 
@@ -101,12 +101,127 @@
 | **U-5.0-A** | **Coverage Name Mapping Table 기반 Resolution** | **아키텍처** | ✅ 완료 |
 | **U-4.18-Ω** | **All Insurers Coverage Code Backfill** | **데이터/안정성** | ✅ 완료 |
 | **U-4.18-Ω-VERIFY** | **v1.0 Compare 안정성 최종 점검** | **검증** | ✅ 완료 |
+| **V1.5** | **Subtype Anchor Map & Safe Resolution UX** | **기능/UX** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.5: Subtype Anchor Map & Safe Resolution UX (2025-12-23)
+
+### 목적
+Subtype-only 질의 (경계성종양, 제자리암 등)에 대한 UX 개선. v1 로직을 깨지 않고 안전한 anchor 후보를 제시하여 사용자가 올바른 담보를 선택하도록 유도.
+
+### 핵심 원칙
+
+1. **v1 비파괴**: 기존 RESOLVED/UNRESOLVED/INVALID 상태 흐름 유지
+2. **자동 확정 금지**: SAFE_RESOLVED도 "안전 확정"일 뿐 사용자 확인 필요
+3. **White-list 기반**: subtype_anchor_map.yaml에 정의된 allowed_anchors만 후보로 제시
+4. **신정원 준수**: allowed_anchors는 반드시 신정원 canonical 코드만 허용
+
+### 구현
+
+**1. config/subtype_anchor_map.yaml (신규)**
+
+```yaml
+subtypes:
+  borderline_tumor:
+    keywords:
+      - 경계성종양
+      - 경계성 종양
+      - 경계성
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "경계성종양은 유사암 범주에 포함됨"
+    domain: CANCER
+
+  carcinoma_in_situ:
+    keywords:
+      - 제자리암
+      - 상피내암
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "제자리암은 유사암 범주에 포함됨"
+    domain: CANCER
+
+safe_resolution:
+  enabled: true
+  safe_resolved_message: "'{subtype}'을(를) '{coverage_name}' 담보로 안전하게 확정했습니다."
+  multiple_anchors_message: "'{subtype}' 관련 담보가 여러 개 있습니다. 하나를 선택해 주세요:"
+  min_evidence_count: 1
+```
+
+**2. api/config_loader.py 확장**
+
+```python
+# V1.5 Loaders
+def get_subtype_anchor_map_config() -> dict: ...
+def get_subtype_anchor_entries() -> dict[str, dict]: ...
+def get_safe_resolution_config() -> dict: ...
+def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]: ...
+def get_allowed_anchors_for_subtype(subtype_id: str) -> list[str]: ...
+def get_anchor_basis_for_subtype(subtype_id: str) -> str | None: ...
+```
+
+**3. api/compare.py 확장**
+
+```python
+# V1.5 Response Models
+class CandidateAnchorResponse(BaseModel):
+    coverage_code: str
+    coverage_name: str | None
+    basis: str | None = None
+
+class CoverageResolutionResponse(BaseModel):
+    status: Literal["RESOLVED", "SAFE_RESOLVED", "UNRESOLVED", "INVALID"]
+    # ...
+    candidate_anchors: list[CandidateAnchorResponse] = []
+    detected_subtype: str | None = None
+    next_action: Literal["select_anchor", "confirm", "retry", None] = None
+
+# V1.5 Resolution Flow
+if is_subtype_only_query:
+    subtype_id, subtype_entry = find_subtype_by_keyword(query)
+    allowed_anchors = subtype_entry.get("allowed_anchors", [])
+
+    # SAFE_RESOLVED 조건: allowed_anchor 1개 + evidence >= 1
+    if len(allowed_anchors) == 1 and evidence_count >= 1:
+        status = "SAFE_RESOLVED"
+        next_action = "confirm"
+    else:
+        status = "UNRESOLVED"
+        next_action = "select_anchor"
+```
+
+### 검증 결과
+
+| 테스트 케이스 | 결과 |
+|--------------|------|
+| "삼성생명의 경계성종양 암진단시 담보가 얼마야" | `SAFE_RESOLVED`, candidate_anchors=[A4210], detected_subtype=borderline_tumor ✅ |
+| "제자리암 보장 비교해줘" | `SAFE_RESOLVED`, candidate_anchors=[A4210], detected_subtype=carcinoma_in_situ ✅ |
+| "삼성 암진단비 알려줘" | `UNRESOLVED` (similarity 부족, v1 동작 유지) ✅ |
+| "삼성 뇌졸중진단비" | `UNRESOLVED` (subtype 아님, V1.5 미적용) ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/subtype_anchor_map.yaml` | (신규) Subtype → Anchor 매핑 설정 |
+| `api/config_loader.py` | V1.5 로더 함수 6개 추가 |
+| `api/compare.py` | CandidateAnchorResponse 추가, CoverageResolutionResponse 확장, SAFE_RESOLVED 로직 구현 |
+
+### DoD 체크리스트
+- [x] subtype_anchor_map.yaml 생성
+- [x] config_loader에 V1.5 로더 추가
+- [x] SAFE_RESOLVED 상태 추가 (단일 anchor + evidence 존재)
+- [x] candidate_anchors 필드 추가
+- [x] detected_subtype, next_action 필드 추가
+- [x] v1 로직 비파괴 (기존 담보 질의 동작 유지)
+- [x] Docker 재빌드 및 테스트 통과
+
+---
 
 ## U-4.18-Ω-VERIFY: v1.0 Compare 안정성 최종 점검 (2025-12-22)
 

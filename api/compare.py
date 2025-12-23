@@ -46,6 +46,11 @@ from api.config_loader import (
     get_subtype_keyword_map,
     get_subtype_display_names,
     get_suppressed_slots_in_subtype,
+    # V1.5: Subtype Anchor Map
+    find_subtype_by_keyword,
+    get_allowed_anchors_for_subtype,
+    get_anchor_basis_for_subtype,
+    get_safe_resolution_config,
 )
 
 router = APIRouter(tags=["compare"])
@@ -232,24 +237,37 @@ class SuggestedCoverageResponse(BaseModel):
     insurer_code: str | None = None
 
 
+class CandidateAnchorResponse(BaseModel):
+    """V1.5: 후보 Anchor 담보 정보"""
+    coverage_code: str
+    coverage_name: str | None
+    basis: str | None = None  # 근거 문구
+
+
 class CoverageResolutionResponse(BaseModel):
     """
     STEP 3.7-δ-β: Coverage Resolution 결과
     U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
+    V1.5: candidate_anchors 추가 - Subtype-only 질의 시 안전한 anchor 후보 제시
 
     status (resolution_state):
     - RESOLVED: 확정된 coverage_code 존재 (candidates == 1 && similarity >= confident)
+    - SAFE_RESOLVED: V1.5 subtype anchor 기반 안전 확정 (allowed_anchor 1개 + evidence 존재)
     - UNRESOLVED: 후보는 있지만 확정 불가 (candidates >= 1, 유저 선택 필요)
     - INVALID: 매핑 불가 (candidates == 0, 재입력 필요)
 
     Note: Subtype-only 질의(경계성 종양, 제자리암 등)는 상위 담보 없이
           독립적으로 비교할 수 없으므로 UNRESOLVED 처리됨
     """
-    status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    status: Literal["RESOLVED", "SAFE_RESOLVED", "UNRESOLVED", "INVALID"]
     resolved_coverage_code: str | None = None
     message: str | None = None
     suggested_coverages: list[SuggestedCoverageResponse] = []
     detected_domain: str | None = None
+    # V1.5: Subtype Anchor 후보
+    candidate_anchors: list[CandidateAnchorResponse] = []
+    detected_subtype: str | None = None  # "borderline_tumor", "carcinoma_in_situ" 등
+    next_action: Literal["select_anchor", "confirm", "retry", None] = None
 
 
 # =============================================================================
@@ -324,7 +342,8 @@ class CompareResponseModel(BaseModel):
     """비교 검색 응답"""
     # STEP 3.7-δ-β: Resolution State (최상위 게이트 필드)
     # U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
-    resolution_state: Literal["RESOLVED", "UNRESOLVED", "INVALID"]
+    # V1.5: SAFE_RESOLVED 추가 - Subtype Anchor 기반 안전 확정
+    resolution_state: Literal["RESOLVED", "SAFE_RESOLVED", "UNRESOLVED", "INVALID"]
     resolved_coverage_code: str | None = None
     # STEP 4.12-γ: Comparison Mode (COVERAGE: 금액 비교, SUBTYPE: 유사암/제자리암 정의 비교)
     comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE"
@@ -1697,51 +1716,193 @@ async def compare_insurers(request: CompareRequest) -> CompareResponseModel:
 
         # =======================================================================
         # STEP 4.1: 멀티 Subtype 감지 (Resolution 평가보다 먼저!)
+        # V1.5: Subtype-only 질의 감지 추가 (1개 이상 subtype + anchor map 매칭)
         # =======================================================================
         is_multi_subtype = is_multi_subtype_query(request.query)
         extracted_subtypes = extract_subtypes_from_query(request.query) if is_multi_subtype else []
 
+        # V1.5: Subtype-only 질의 감지 (1개 이상 subtype이 있고, anchor map에 매칭되는 경우)
+        v1_5_subtype_id, v1_5_subtype_entry = find_subtype_by_keyword(request.query)
+        is_subtype_only_query = v1_5_subtype_id is not None
+
+        # is_multi_subtype이 False여도 v1.5 subtype-only면 extracted_subtypes 가져오기
+        if is_subtype_only_query and not extracted_subtypes:
+            extracted_subtypes = extract_subtypes_from_query(request.query)
+
         # STEP 3.7: Coverage Resolution 평가
         # STEP 3.9: locked_coverage_code, insurer-only 후속 질의, explicit coverage_codes가 제공된 경우 평가 스킵
         # STEP 4.1: 멀티 Subtype인 경우 SUBTYPE_MULTI 상태 강제 (Resolution Lock 금지)
+        # V1.5: Subtype-only 질의도 anchor 후보 제시
         coverage_resolution: CoverageResolutionResponse | None = None
         resolution_debug: dict[str, Any] | None = None
 
-        if is_multi_subtype:
-            # U-4.18-β: Subtype-only 질의는 UNRESOLVED 처리
-            # Subtype은 Coverage에 종속되며 독립적으로 비교 불가
+        if is_multi_subtype or is_subtype_only_query:
+            # =================================================================
+            # V1.5: Subtype Anchor Map 기반 후보 제시
+            # U-4.18-β: Subtype-only 질의는 UNRESOLVED 처리 (v1 유지)
+            # V1.5 확장: candidate_anchors 필드 추가로 UX 개선
+            # =================================================================
             failure_messages = get_failure_messages()
-            subtype_unresolved_msg = failure_messages.get(
-                "subtype_needs_coverage",
-                "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
-            )
 
-            # 암 도메인 대표 담보를 suggested로 제공
-            domain_coverages = get_domain_representative_coverages()
-            cancer_info = domain_coverages.get("CANCER", {})
-            suggested = [
-                SuggestedCoverageResponse(
-                    coverage_code=cov["code"],
-                    coverage_name=cov["name"],
-                    similarity=0.0,
+            # V1.5: subtype_anchor_map에서 allowed_anchors 조회
+            subtype_id, subtype_entry = find_subtype_by_keyword(request.query)
+            allowed_anchors = subtype_entry.get("allowed_anchors", []) if subtype_entry else []
+            anchor_basis = subtype_entry.get("anchor_basis") if subtype_entry else None
+            detected_domain = subtype_entry.get("domain", "CANCER") if subtype_entry else "CANCER"
+
+            # V1.5: display_names에서 coverage_name 조회
+            display_names_config = get_display_names()
+            coverage_names = display_names_config.get("coverage_names", {})
+
+            # V1.5: candidate_anchors 생성
+            candidate_anchors: list[CandidateAnchorResponse] = []
+            for anchor_code in allowed_anchors:
+                candidate_anchors.append(
+                    CandidateAnchorResponse(
+                        coverage_code=anchor_code,
+                        coverage_name=coverage_names.get(anchor_code),
+                        basis=anchor_basis,
+                    )
                 )
-                for cov in cancer_info.get("coverages", [])[:get_max_recommendations()]
-            ]
 
-            coverage_resolution = CoverageResolutionResponse(
-                status="UNRESOLVED",
-                resolved_coverage_code=None,
-                message=subtype_unresolved_msg,
-                suggested_coverages=suggested,
-                detected_domain="CANCER",  # 경계성종양/제자리암은 암 계열
-            )
-            resolution_debug = {
-                "status": "UNRESOLVED",
-                "reason": "subtype_only_query",
-                "subtypes": [s.code for s in extracted_subtypes],
-                "subtype_names": [s.name for s in extracted_subtypes],
-                "subtype_needs_parent_coverage": True,
-            }
+            # V1.5: Safe Resolution 설정 확인
+            safe_resolution_config = get_safe_resolution_config()
+            safe_resolution_enabled = safe_resolution_config.get("enabled", True)
+            min_evidence_count = safe_resolution_config.get("min_evidence_count", 1)
+
+            # V1.5: SAFE_RESOLVED 조건 체크
+            # 조건: allowed_anchor가 정확히 1개 + evidence 존재
+            use_safe_resolved = False
+            if safe_resolution_enabled and len(allowed_anchors) == 1:
+                # Evidence 개수 체크 (compare_axis + policy_axis)
+                evidence_count = 0
+                for item in result.compare_axis:
+                    evidence_count += len(item.evidence)
+                for item in result.policy_axis:
+                    evidence_count += len(item.evidence)
+
+                if evidence_count >= min_evidence_count:
+                    use_safe_resolved = True
+
+            # V1.5: 메시지 및 상태 결정
+            if use_safe_resolved:
+                # SAFE_RESOLVED: 단일 anchor + evidence 존재
+                resolved_anchor_code = allowed_anchors[0]
+                resolved_anchor_name = coverage_names.get(resolved_anchor_code, resolved_anchor_code)
+                subtype_display_name = extracted_subtypes[0].name if extracted_subtypes else "subtype"
+
+                safe_msg_template = safe_resolution_config.get(
+                    "safe_resolved_message",
+                    "'{subtype}'을(를) '{coverage_name}' 담보로 안전하게 확정했습니다."
+                )
+                resolution_message = safe_msg_template.format(
+                    subtype=subtype_display_name,
+                    coverage_name=resolved_anchor_name
+                )
+
+                coverage_resolution = CoverageResolutionResponse(
+                    status="SAFE_RESOLVED",
+                    resolved_coverage_code=resolved_anchor_code,
+                    message=resolution_message,
+                    suggested_coverages=[],
+                    detected_domain=detected_domain,
+                    candidate_anchors=candidate_anchors,
+                    detected_subtype=subtype_id,
+                    next_action="confirm",
+                )
+                resolution_debug = {
+                    "status": "SAFE_RESOLVED",
+                    "reason": "subtype_anchor_safe_resolution",
+                    "subtype_id": subtype_id,
+                    "subtypes": [s.code for s in extracted_subtypes],
+                    "subtype_names": [s.name for s in extracted_subtypes],
+                    "allowed_anchors": allowed_anchors,
+                    "evidence_count": evidence_count,
+                    "v1_5_applied": True,
+                }
+            elif len(allowed_anchors) >= 1:
+                # UNRESOLVED + candidate_anchors: 후보 제시
+                if len(allowed_anchors) == 1:
+                    # 단일 anchor지만 evidence 부족
+                    subtype_unresolved_msg = failure_messages.get(
+                        "subtype_needs_coverage",
+                        "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+                    )
+                else:
+                    # 다중 anchor
+                    subtype_display_name = extracted_subtypes[0].name if extracted_subtypes else "subtype"
+                    multiple_msg_template = safe_resolution_config.get(
+                        "multiple_anchors_message",
+                        "'{subtype}' 관련 담보가 여러 개 있습니다. 하나를 선택해 주세요:"
+                    )
+                    subtype_unresolved_msg = multiple_msg_template.format(subtype=subtype_display_name)
+
+                # 암 도메인 대표 담보를 suggested로 제공 (v1 호환)
+                domain_coverages = get_domain_representative_coverages()
+                cancer_info = domain_coverages.get(detected_domain, {})
+                suggested = [
+                    SuggestedCoverageResponse(
+                        coverage_code=cov["code"],
+                        coverage_name=cov["name"],
+                        similarity=0.0,
+                    )
+                    for cov in cancer_info.get("coverages", [])[:get_max_recommendations()]
+                ]
+
+                coverage_resolution = CoverageResolutionResponse(
+                    status="UNRESOLVED",
+                    resolved_coverage_code=None,
+                    message=subtype_unresolved_msg,
+                    suggested_coverages=suggested,
+                    detected_domain=detected_domain,
+                    candidate_anchors=candidate_anchors,
+                    detected_subtype=subtype_id,
+                    next_action="select_anchor",
+                )
+                resolution_debug = {
+                    "status": "UNRESOLVED",
+                    "reason": "subtype_only_query",
+                    "subtype_id": subtype_id,
+                    "subtypes": [s.code for s in extracted_subtypes],
+                    "subtype_names": [s.name for s in extracted_subtypes],
+                    "subtype_needs_parent_coverage": True,
+                    "allowed_anchors": allowed_anchors,
+                    "v1_5_applied": True,
+                }
+            else:
+                # 기존 v1 로직: anchor map에 없는 경우
+                subtype_unresolved_msg = failure_messages.get(
+                    "subtype_needs_coverage",
+                    "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+                )
+
+                # 암 도메인 대표 담보를 suggested로 제공
+                domain_coverages = get_domain_representative_coverages()
+                cancer_info = domain_coverages.get("CANCER", {})
+                suggested = [
+                    SuggestedCoverageResponse(
+                        coverage_code=cov["code"],
+                        coverage_name=cov["name"],
+                        similarity=0.0,
+                    )
+                    for cov in cancer_info.get("coverages", [])[:get_max_recommendations()]
+                ]
+
+                coverage_resolution = CoverageResolutionResponse(
+                    status="UNRESOLVED",
+                    resolved_coverage_code=None,
+                    message=subtype_unresolved_msg,
+                    suggested_coverages=suggested,
+                    detected_domain="CANCER",
+                )
+                resolution_debug = {
+                    "status": "UNRESOLVED",
+                    "reason": "subtype_only_query",
+                    "subtypes": [s.code for s in extracted_subtypes],
+                    "subtype_names": [s.name for s in extracted_subtypes],
+                    "subtype_needs_parent_coverage": True,
+                    "v1_5_applied": False,
+                }
         elif is_coverage_locked:
             # STEP 3.9: 담보가 고정된 경우 resolution 평가 완전 스킵
             resolution_debug = {"skipped": True, "reason": "coverage_locked"}
