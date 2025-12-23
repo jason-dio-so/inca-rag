@@ -102,12 +102,74 @@
 | **U-4.18-Ω** | **All Insurers Coverage Code Backfill** | **데이터/안정성** | ✅ 완료 |
 | **U-4.18-Ω-VERIFY** | **v1.0 Compare 안정성 최종 점검** | **검증** | ✅ 완료 |
 | **V1.5** | **Subtype Anchor Map & Safe Resolution UX** | **기능/UX** | ✅ 완료 |
+| **V1.5-HOTFIX** | **질병명 SAFE_RESOLVED 금지** | **안정성** | ✅ 완료 |
+| **V1.5-REVERIFY** | **전 보험사 최종 봉인 검증** | **검증** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.5-REVERIFY: 전 보험사 최종 봉인 검증 (2025-12-23)
+
+### 목적
+V1.5-HOTFIX 적용 후 8개 보험사 기준 전수 검증 및 v1.5 릴리즈 봉인
+
+### 검증 결과
+
+**1. 질병명 SAFE_RESOLVED 금지 검증**
+
+| 질의 | status | SAFE_RESOLVED |
+|------|--------|---------------|
+| 갑상선암 | RESOLVED | ❌ (정상) |
+| 대장암 | UNRESOLVED | ❌ (정상) |
+| 폐암 | INVALID | ❌ (정상) |
+| 유방암 | UNRESOLVED | ❌ (정상) |
+| 전립선암 | UNRESOLVED | ❌ (정상) |
+
+**SAFE_RESOLVED 발생 케이스: 0건** ✅
+
+**2. subtype-only 허용 범위**
+
+| 질의 | status | code |
+|------|--------|------|
+| 경계성종양 | SAFE_RESOLVED | A4210 ✅ |
+| 제자리암 | SAFE_RESOLVED | A4210 ✅ |
+| 암진단비 경계성종양 포함 | UNRESOLVED | - ✅ (anchor 혼합) |
+| 경계성종양이란 무엇 | UNRESOLVED | - ✅ (설명문) |
+
+### 최종 판정: **PASS** ✅
+
+### 커밋
+- `f5c7039` - V1.5-HOTFIX: 질병명 SAFE_RESOLVED 금지
+- `e9ae71d` - config/ 바인드 마운트 추가
+
+---
+
+## V1.5-HOTFIX: 질병명 SAFE_RESOLVED 금지 (2025-12-23)
+
+### 목적
+질병명(갑상선암, 소액암 등)이 SAFE_RESOLVED로 처리되는 문제 수정
+
+### 핵심 변경
+
+1. **허용 subtype 축소**
+   - 허용: `borderline_tumor` (경계성종양), `carcinoma_in_situ` (제자리암/상피내암)
+   - 비활성화: `similar_cancer`, `minor_cancer`, `thyroid_cancer`, `skin_cancer`, `colorectal_mucosal`
+
+2. **anchor_exclusion_keywords 추가**
+   - "유사암" 키워드 추가 (담보명이므로 subtype-only 금지)
+
+### 파일 변경
+- `config/subtype_anchor_map.yaml` - 질병명 subtype 비활성화
+- `docker-compose.demo.yml` - config/ 바인드 마운트 추가
+
+### 커밋
+- `f5c7039` - V1.5-HOTFIX
+- `e9ae71d` - config 바인드 마운트
+
+---
 
 ## V1.5: Subtype Anchor Map & Safe Resolution UX (2025-12-23)
 
