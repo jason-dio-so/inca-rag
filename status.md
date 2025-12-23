@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-23 (V1.6.2: SAMSUNG A4210 Synthetic Chunk — Amount Bridge 완성)
+> 최종 업데이트: 2025-12-23 (V1.6.3: Split Synthetic Chunk — Mixed Coverage Chunk 구조적 해결)
 
 ---
 
@@ -107,12 +107,109 @@
 | **V1.6** | **Amount Bridge (SAFE_RESOLVED + 금액 의도 → 금액 비교)** | **기능** | ✅ 완료 |
 | **V1.6.1** | **Amount Tagging Backfill (chunk.meta.entities.amount)** | **데이터** | ✅ 완료 |
 | **V1.6.2** | **SAMSUNG A4210 Synthetic Chunk (Amount Bridge 완성)** | **데이터** | ✅ 완료 |
+| **V1.6.3** | **Split Synthetic Chunk (Mixed Coverage Chunk 구조적 해결)** | **데이터/기능** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.3: Split Synthetic Chunk (2025-12-23)
+
+### 목적
+Mixed Coverage Chunk 문제의 구조적 해결. 하나의 chunk에 여러 담보가 혼재되어 있을 때, 담보별로 분리된 synthetic chunk를 생성하여 Amount Bridge가 정확히 동작하도록 함.
+
+### 문제 분석 (V1.6.2 이후)
+- V1.6.2에서 SAMSUNG A4210 synthetic chunk 수동 생성
+- 그러나 다른 보험사들도 동일 문제 존재
+- 하드코딩 방식은 확장 불가
+
+### 핵심 원칙
+
+1. **INSERT ONLY** - 기존 chunk UPDATE/DELETE 금지
+2. **신정원 canonical만 허용** - coverage_alias → coverage_standard 검증
+3. **LLM 추론 금지** - 정규식/룰 기반만 사용
+4. **Idempotent 실행** - 동일 실행 시 중복 INSERT 방지
+
+### 구현
+
+**tools/backfill_split_synthetic_chunks.py (신규)**
+
+```python
+# 핵심 흐름
+1. scan_mixed_chunks()    # 혼합 담보 chunk 후보 스캔
+2. extract_coverage_lines()  # 담보별 라인 분해
+3. map_to_coverage_code()  # coverage_alias/standard 매핑
+4. insert_synthetic_chunk()  # 신규 chunk INSERT
+```
+
+**추출 전략:**
+- 전체 content에서 담보명 패턴 탐색
+- 담보명 주변 ±5줄에서 금액 패턴 탐색
+- coverage_alias → coverage_standard 매핑
+
+### 실행 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk (후보) | 57개 |
+| 추출된 담보 라인 | 531개 |
+| 매핑 성공 | 384개 (72.3%) |
+| 매핑 실패 | 147개 |
+| Synthetic chunk 생성 | 278개 |
+| 중복 제외 (기존 존재) | 106개 |
+
+### Synthetic Chunk 구조
+
+```json
+{
+  "meta": {
+    "entities": {
+      "coverage_code": "A4210",
+      "amount": {
+        "amount_value": 6000000,
+        "amount_text": "600만원",
+        "confidence": "high",
+        "method": "synthetic_split"
+      },
+      "is_synthetic": true,
+      "source_chunk_id": 6260
+    }
+  }
+}
+```
+
+### Amount Bridge 검증
+
+| 질의 | 보험사 | amount_status | amount_value |
+|------|--------|---------------|--------------|
+| 경계성종양 보장금액 | SAMSUNG | FOUND | 600만원 ✅ |
+| 경계성종양 보장금액 | MERITZ | NOT_FOUND | (alias 보강 필요) |
+
+### 회귀 테스트
+
+- 핵심 compare API 테스트 50개 PASS ✅
+- 기존 실패 테스트 (plan 관련, document viewer 관련)는 pre-existing issue
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `tools/backfill_split_synthetic_chunks.py` | (신규) Split Synthetic Chunk Backfill 스크립트 |
+| `artifacts/v1_6_3/` | 실행 결과 CSV (candidates, unmapped, created) |
+| `status.md` | V1.6.3 섹션 추가 |
+
+### DoD 체크리스트
+- [x] 스크립트 작성 완료 (scan/dry-run/execute 모드)
+- [x] 스캔 동작 확인 (57개 후보)
+- [x] Synthetic chunk INSERT 완료 (278개)
+- [x] Amount Bridge 검증 (SAMSUNG FOUND)
+- [x] 회귀 테스트 PASS (핵심 API 50개)
+- [x] status.md 업데이트
+- [x] 커밋
+
+---
 
 ## V1.6.2: SAMSUNG A4210 Synthetic Chunk (2025-12-23)
 
