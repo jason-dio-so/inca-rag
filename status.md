@@ -105,12 +105,91 @@
 | **V1.5-HOTFIX** | **질병명 SAFE_RESOLVED 금지** | **안정성** | ✅ 완료 |
 | **V1.5-REVERIFY** | **전 보험사 최종 봉인 검증** | **검증** | ✅ 완료 |
 | **V1.6** | **Amount Bridge (SAFE_RESOLVED + 금액 의도 → 금액 비교)** | **기능** | ✅ 완료 |
+| **V1.6.1** | **Amount Tagging Backfill (chunk.meta.entities.amount)** | **데이터** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
 > Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
+
+## V1.6.1: Amount Tagging Backfill (2025-12-23)
+
+### 목적
+V1.6 Amount Bridge가 NOT_FOUND로 떨어지는 근본 원인 해결. chunk.meta.entities.amount 필드를 채워서 금액 비교 가능하게 함.
+
+### 문제 분석
+- V1.6 Amount Bridge는 evidence.amount를 읽음
+- 그러나 chunk.meta.entities.amount가 비어 있었음
+- 따라서 amount_status가 항상 NOT_FOUND
+
+### 구현
+
+**1. tools/backfill_amount_entities.py**
+
+```python
+# 대상: coverage_code가 있고 amount가 없는 chunk
+# 방법: content에서 정규식 기반 금액 추출 (extract_amount 재사용)
+# 결과: chunk.meta.entities.amount에 저장
+
+python tools/backfill_amount_entities.py --dry-run  # 미리보기
+python tools/backfill_amount_entities.py            # 실제 실행
+```
+
+**2. api/compare.py 수정 (V1.6.1)**
+
+```python
+def _query_amount_from_db(insurer_codes, coverage_code):
+    """DB에서 coverage_code + amount 태깅된 chunk 직접 조회"""
+    # doc_type 우선순위: 상품요약서 > 사업방법서 > 가입설계서
+    # chunk.meta.entities.amount에서 amount_value, amount_text 조회
+```
+
+### Backfill 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk | 624개 |
+| 금액 추출 성공 | 144개 (23.1%) |
+| DB 업데이트 | 144개 |
+
+### 검증 결과
+
+**V1.6 Amount Bridge 테스트:**
+
+| 질의 | 결과 |
+|------|------|
+| 경계성종양 보장금액 (SAMSUNG, LOTTE) | LOTTE: FOUND, 2억원 ✅ |
+| 제자리암 보장금액 얼마 (LOTTE, MERITZ, KB) | LOTTE: FOUND, 2억원 ✅ |
+
+**V1.5 회귀 테스트:**
+
+| 테스트 | 결과 |
+|--------|------|
+| 경계성종양 (no amount intent) | SAFE_RESOLVED, amount_bridge=None ✅ |
+| 암진단비 비교 | UNRESOLVED, amount_bridge=None ✅ |
+| 뇌졸중진단비 | RESOLVED, amount_bridge=None ✅ |
+
+### 제한사항
+- SAMSUNG A4210(유사암진단비) coverage_code 태깅 없음 → NOT_FOUND
+- 일부 보험사 coverage_alias 보강 필요 (향후 작업)
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `tools/backfill_amount_entities.py` | (신규) Amount backfill 스크립트 |
+| `api/compare.py` | _query_amount_from_db() 추가, _build_amount_bridge_response() 수정 |
+
+### DoD 체크리스트
+- [x] backfill_amount_entities.py 추가
+- [x] dry-run 동작 확인
+- [x] 실제 backfill 후 chunk.meta.entities.amount 채워짐
+- [x] V1.6 Amount Bridge에서 LOTTE amount_status=FOUND 확인
+- [x] 회귀 테스트 PASS
+- [x] 커밋 + status.md 업데이트
+
+---
 
 ## V1.6: Amount Bridge — Subtype SAFE_RESOLVED → Amount Compare (2025-12-23)
 

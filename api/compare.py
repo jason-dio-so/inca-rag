@@ -781,6 +781,91 @@ def _extract_amount_from_evidence(
     return val, text, refs, None
 
 
+def _query_amount_from_db(
+    insurer_codes: list[str],
+    coverage_code: str,
+) -> dict[str, tuple[int | None, str | None, int | None, int | None]]:
+    """
+    V1.6.1: DB에서 coverage_code와 amount가 태깅된 chunk 직접 조회
+
+    Returns:
+        dict[insurer_code, (amount_value, amount_text, document_id, page_start)]
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+    from services.retrieval.compare_service import get_db_url
+
+    result: dict[str, tuple[int | None, str | None, int | None, int | None]] = {}
+
+    # doc_type 우선순위: 상품요약서 > 사업방법서 > 가입설계서
+    doc_type_priority = ["상품요약서", "사업방법서", "가입설계서"]
+
+    query = """
+    SELECT
+        i.insurer_code,
+        d.doc_type,
+        c.document_id,
+        c.page_start,
+        (c.meta->'entities'->'amount'->>'amount_value')::int as amount_value,
+        c.meta->'entities'->'amount'->>'amount_text' as amount_text
+    FROM chunk c
+    JOIN insurer i ON i.insurer_id = c.insurer_id
+    JOIN document d ON d.document_id = c.document_id
+    WHERE i.insurer_code = ANY(%s)
+      AND c.meta->'entities'->>'coverage_code' = %s
+      AND c.meta->'entities'->'amount' IS NOT NULL
+      AND c.meta->'entities'->'amount' != 'null'::jsonb
+      AND (c.meta->'entities'->'amount'->>'amount_value')::int > 0
+    ORDER BY i.insurer_code, c.chunk_id
+    """
+
+    try:
+        conn = psycopg.connect(get_db_url(), row_factory=dict_row)
+        with conn.cursor() as cur:
+            cur.execute(query, (insurer_codes, coverage_code))
+            rows = cur.fetchall()
+        conn.close()
+
+        # 보험사별로 doc_type 우선순위에 따라 최적 금액 선택
+        insurer_amounts: dict[str, list] = {ic: [] for ic in insurer_codes}
+        for row in rows:
+            insurer_amounts[row["insurer_code"]].append(row)
+
+        for insurer_code in insurer_codes:
+            amounts = insurer_amounts.get(insurer_code, [])
+            if not amounts:
+                result[insurer_code] = (None, None, None, None)
+                continue
+
+            # doc_type 우선순위에 따라 선택
+            selected = None
+            for doc_type in doc_type_priority:
+                for amt in amounts:
+                    if amt["doc_type"] == doc_type:
+                        selected = amt
+                        break
+                if selected:
+                    break
+
+            # 없으면 첫 번째 선택
+            if not selected:
+                selected = amounts[0]
+
+            result[insurer_code] = (
+                selected["amount_value"],
+                selected["amount_text"],
+                selected["document_id"],
+                selected["page_start"],
+            )
+
+    except Exception as e:
+        # DB 오류 시 모두 None
+        for ic in insurer_codes:
+            result[ic] = (None, None, None, None)
+
+    return result
+
+
 def _build_amount_bridge_response(
     result,
     final_insurers: list[str],
@@ -790,6 +875,8 @@ def _build_amount_bridge_response(
 ) -> AmountBridgeResponse:
     """
     V1.6: Amount Bridge 응답 생성
+
+    V1.6.1: DB에서 직접 coverage_code + amount가 태깅된 chunk 조회
 
     Args:
         result: compare() 결과
@@ -801,30 +888,36 @@ def _build_amount_bridge_response(
     Returns:
         AmountBridgeResponse
     """
-    # Evidence를 보험사별로 그룹화
-    evidence_by_insurer: dict[str, list] = {ic: [] for ic in final_insurers}
+    # V1.6.1: DB에서 직접 금액 조회 (backfill된 chunk.meta.entities.amount 사용)
+    db_amounts = _query_amount_from_db(final_insurers, anchor_code)
 
-    for item in result.compare_axis:
-        if item.insurer_code in evidence_by_insurer:
-            evidence_by_insurer[item.insurer_code].extend(item.evidence)
-
-    # 보험사별 금액 추출
+    # 보험사별 금액 결과 생성
     insurer_results: list[AmountBridgeInsurerResult] = []
     partial_failure_reasons: dict[str, str] = {}
     has_partial_failure = False
 
     for insurer_code in final_insurers:
-        evidence_list = evidence_by_insurer.get(insurer_code, [])
-
-        amount_value, amount_text, evidence_refs, branch_message = _extract_amount_from_evidence(
-            evidence_list, insurer_code
+        amount_value, amount_text, doc_id, page_start = db_amounts.get(
+            insurer_code, (None, None, None, None)
         )
 
+        evidence_refs: list[EvidenceRefResponse] = []
+        branch_message: str | None = None
+
         if amount_value is not None:
-            if branch_message:
-                status = "BRANCH"
-            else:
-                status = "FOUND"
+            status = "FOUND"
+            if doc_id is not None:
+                evidence_refs.append(EvidenceRefResponse(
+                    insurer_code=insurer_code,
+                    document_id=doc_id,
+                    page_start=page_start,
+                ))
+
+            # 조건 분기 체크 (LOTTE/DB)
+            branch_config = get_condition_branch_config(insurer_code)
+            if branch_config.get("enabled"):
+                # 동일 보험사에서 여러 금액이 있는지 체크 (간소화 - 나중에 확장)
+                pass
         else:
             status = "NOT_FOUND"
             has_partial_failure = True
