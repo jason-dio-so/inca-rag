@@ -1,6 +1,6 @@
 # 보험 약관 비교 RAG 시스템 - 진행 현황
 
-> 최종 업데이트: 2025-12-19 (STEP 3.7-γ)
+> 최종 업데이트: 2025-12-23 (V1.6.3-β-3: Synthetic Meta Normalization)
 
 ---
 
@@ -65,724 +65,1790 @@
 | **STEP 3.8** | **Evidence / Policy Read-Only Isolation** | **UI/아키텍처** | ✅ 완료 |
 | **STEP 3.7-β** | **Coverage 미확정 시 Results Panel UI Gating** | **UI** | ✅ 완료 |
 | **STEP 3.7-γ** | **Coverage Guide Isolation / Conversation Hygiene** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 3.7-δ-β** | **Resolution State Reclassification (FAILED→UNRESOLVED)** | **기능/UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ** | **Frontend derives UI only from resolution_state** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ2** | **Candidate selection passes coverage_codes → RESOLVED** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ** | **Resolution Lock & UNRESOLVED UI (Final)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ4** | **UNRESOLVED 후보 소스 정합화 (suggested_coverages)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ5** | **UNRESOLVED 최우선 렌더링 강제** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ6** | **UNRESOLVED 후보 전체 렌더링 (slice/filter 제거)** | **UI** | ✅ 완료 |
+| **STEP 3.7-δ-γ10** | **Insurer Anchor Lock (후보 선택 시 insurers 유지)** | **UI** | ✅ 완료 |
+| **STEP 3.9** | **Anchor Persistence / explicit coverage lock** | **기능/UI** | ✅ 완료 (A/B/C/D verified) |
+| **STEP 4.0** | **Diff Summary Text & Evidence Priority Ordering** | **UI/UX** | ✅ 완료 |
+| **BUGFIX+REFACTOR** | **normalize_query_for_coverage 헌법 준수 리팩터링** | **버그수정/리팩터링** | ✅ 완료 |
+| **STEP 4.1** | **다중 Subtype 비교 (경계성 종양/제자리암)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.2** | **DB 복구 안정화 (schema.sql 현행화 + Option A+)** | **DevOps/DB** | ✅ 완료 |
+| **STEP 4.3** | **API/Container Code Sync Audit** | **DevOps/검증** | ✅ 완료 |
+| **STEP 4.4** | **UI Contract Debug View (suggested_coverages 경로 고정)** | **UI/검증** | ✅ 완료 |
+| **STEP 4.5** | **locked_coverage_codes 확장 (멀티 subtype 지원)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.5-β** | **복수 담보 선택 UI (체크박스 + 적용 버튼)** | **UI** | ✅ 완료 |
+| **STEP 4.6** | **멀티 Subtype 비교 UX 고도화 (소비 규약 고정)** | **UI/아키텍처** | ✅ 완료 |
+| **STEP 4.7** | **Subtype Description Quality 강화 (4요소 규약)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.7-β** | **단일 회사 특정 담보 조회 결과 생성 보장** | **기능** | ✅ 완료 |
+| **STEP 4.7-γ** | **Single-Insurer Locked Coverage E2E 검증** | **검증** | ✅ 완료 |
+| **STEP 4.9** | **Single-Insurer Locked Coverage Detail View** | **UI** | ✅ 완료 |
+| **STEP 5** | **LLM Assist 도입 (Query Assist + Evidence Summary)** | **기능/UI** | ✅ 완료 |
+| **STEP 4.9-β** | **Diff / Compare / Evidence 공통 UX 규약 고정** | **UI** | ✅ 완료 |
+| **STEP 4.9-β-1** | **좌/우 독립 스크롤 UX 고정 (Layout Fix)** | **UI** | ✅ 완료 |
+| **STEP 4.10** | **Coverage Alias 확장 - 담보명 표준화 보강** | **기능** | ✅ 완료 |
+| **STEP 4.10-γ** | **전 보험사 Coverage Alias 전수 검증** | **검증** | ✅ 완료 |
+| **U-4.17** | **Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시** | **기능/UI** | ✅ 완료 |
+| **U-4.18** | **Partial Failure & Source Boundary 안정화** | **안정성/UI** | ✅ 완료 |
+| **STEP 4.12-γ** | **Subtype 비교 모드 분리 및 Coverage Lock Override** | **기능** | ⚠️ 수정됨 (U-4.18-β) |
+| **U-4.18-β** | **Subtype Coverage 종속 원칙 강제** | **기능/UI** | ✅ 완료 |
+| **U-4.18-γ** | **Evidence Source Boundary & Anti-Comparison UX** | **UI** | ✅ 완료 |
+| **U-4.18-δ** | **Slots Anti-Overreach UX (역할 제한)** | **UI** | ✅ 완료 |
+| **U-5.0-A** | **Coverage Name Mapping Table 기반 Resolution** | **아키텍처** | ✅ 완료 |
+| **U-4.18-Ω** | **All Insurers Coverage Code Backfill** | **데이터/안정성** | ✅ 완료 |
+| **U-4.18-Ω-VERIFY** | **v1.0 Compare 안정성 최종 점검** | **검증** | ✅ 완료 |
+| **V1.5** | **Subtype Anchor Map & Safe Resolution UX** | **기능/UX** | ✅ 완료 |
+| **V1.5-HOTFIX** | **질병명 SAFE_RESOLVED 금지** | **안정성** | ✅ 완료 |
+| **V1.5-REVERIFY** | **전 보험사 최종 봉인 검증** | **검증** | ✅ 완료 |
+| **V1.6** | **Amount Bridge (SAFE_RESOLVED + 금액 의도 → 금액 비교)** | **기능** | ✅ 완료 |
+| **V1.6.1** | **Amount Tagging Backfill (chunk.meta.entities.amount)** | **데이터** | ✅ 완료 |
+| **V1.6.2** | **SAMSUNG A4210 Synthetic Chunk (Amount Bridge 완성)** | **데이터** | ✅ 완료 |
+| **V1.6.3** | **Split Synthetic Chunk (Mixed Coverage Chunk 구조적 해결)** | **데이터/기능** | ✅ 완료 |
+| **V1.6.3-β** | **Split Synthetic Chunk 안정화 핫픽스** | **안정성** | ✅ 완료 |
+| **V1.6.3-β-2** | **Split Synthetic Chunk 마감 패치 (count-context + meta finalize)** | **안정성** | ✅ 완료 |
+| **V1.6.3-β-3** | **Synthetic Meta Normalization (meta-only)** | **데이터 정규화** | ✅ 완료 |
 
 ---
 
 ## 🕐 시간순 상세 내역
 
-> Step 1-42 상세 기록: [status_archive.md](status_archive.md) (U-4.8 ~ U-4.18 포함)
+> Step 1-42 + STEP 2.8~3.9 상세 기록: [status_archive.md](status_archive.md)
 
-## STEP 2.8: 하드코딩 비즈니스 규칙 YAML 외부화 (2025-12-19)
+## V1.6.3-β-3: Synthetic Meta Normalization (meta-only) (2025-12-23)
 
-### 목표
-- codebase 내 하드코딩된 비즈니스 규칙을 YAML 설정 파일로 외부화
-- 코드 수정 없이 설정 파일만으로 규칙 변경 가능
-- P0/P1/P2 분류 기반 체계적 외부화
+### 목적
+기존 synthetic split chunk들의 meta 스키마를 운영 기준(β-2)으로 정규화.
+meta 혼재 제거, 운영 기준 키 통일.
 
-### 분류 기준
+### 변경사항
 
-| 등급 | 정의 | 조치 |
-|------|------|------|
-| **P0** | 비즈니스 규칙 / 도메인 지식 | 즉시 YAML 외부화 |
-| **P1** | 품질 영향 키워드/패턴 | 권장 외부화 (향후) |
-| **P2** | 알고리즘/정규식 | 코드 유지 |
+- `synthetic_method` → `v1_6_3_beta_2_split` 통일
+- `entities.amount.method` → `v1_6_3_beta_2_split` 통일
+- 원본 값 보존: `*_original` 키 추가 (기존 값이 있던 경우)
 
-### 외부화 완료 항목 (P0)
+### Before/After 분포
 
-| 항목 | 원본 위치 | 대상 파일 |
-|------|----------|----------|
-| INSURER_ALIASES | api/compare.py | config/mappings/insurer_alias.yaml |
-| COMPARE_PATTERNS | api/compare.py | config/rules/compare_patterns.yaml |
-| POLICY_KEYWORD_PATTERNS | compare_service.py | config/mappings/policy_keyword_patterns.yaml |
-| DOC_TYPE_PRIORITY | compare_service.py | config/rules/doc_type_priority.yaml |
-| SLOT_SEARCH_KEYWORDS | compare_service.py | config/mappings/slot_search_keywords.yaml |
-| COVERAGE_CODE_GROUPS | compare_service.py | config/mappings/coverage_code_groups.yaml |
-| COVERAGE_CODE_TO_TYPE | slot_extractor.py | config/mappings/coverage_code_to_type.yaml |
+| 키 | Before | After |
+|----|--------|-------|
+| synthetic_type=NULL | 278 | 0 |
+| synthetic_type=split | 129 | 407 |
+| synthetic_method=split_line_v1 | 278 | 0 |
+| synthetic_method=NULL | 129 | 0 |
+| synthetic_method=v1_6_3_beta_2_split | 0 | 407 |
+| amount.method=v1.6.3_split | 278 | 0 |
+| amount.method=v1_6_3_beta_split | 129 | 0 |
+| amount.method=v1_6_3_beta_2_split | 0 | 407 |
+
+### 수치
+
+| 항목 | 값 |
+|------|-----|
+| Total synthetic | 407 |
+| Updated | 407 |
+| Skipped | 0 |
+| Errors | 0 |
+
+### 검증
+
+- [x] Idempotent 재실행: updated=0, skipped=407 (already_normalized)
+- [x] Amount Bridge: SAMSUNG 600만원, LOTTE 2억원 FOUND 유지
+- [x] SAFE_RESOLVED: 경계성종양/제자리암 정상
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `api/config_loader.py` | P0 로더 함수 7개 추가 |
-| `api/compare.py` | INSURER_ALIASES, COMPARE_PATTERNS → config loader |
-| `services/retrieval/compare_service.py` | POLICY_KEYWORD_PATTERNS 등 → config loader |
-| `services/extraction/slot_extractor.py` | _determine_coverage_type → config loader |
-| `config/mappings/*.yaml` | 신규 5개 파일 |
-| `config/rules/*.yaml` | 신규 2개 파일 |
-| `docs/hardcode_audit.md` | 전수 조사 + 분류 문서 |
-
-### 검증 결과
-
-```
-✅ pytest tests/test_extraction.py: 47 passed
-✅ Docker API rebuild & smoke test: healthy
-✅ /compare API 정상 응답 확인
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| P0 전수 조사 | ✅ 7개 항목 분류 |
-| YAML 외부화 | ✅ 7개 파일 생성 |
-| config_loader 확장 | ✅ 7개 함수 추가 |
-| 기존 코드 import 교체 | ✅ 3개 파일 수정 |
-| 테스트 통과 | ✅ 47 passed |
-| 기능 회귀 없음 | ✅ API 정상 동작 |
+| `tools/backfill_normalize_synthetic_meta_v1_6_3_beta_3.py` | (신규) Meta normalization 스크립트 |
 
 ---
 
-## STEP 2.9: Query Anchor / Context Locking (2025-12-19)
+## V1.6.3-β-2: Split Synthetic Chunk 마감 패치 (2025-12-23)
 
-### 목표
-- 대화형 질의에서 기준 담보(coverage)와 질의 의도를 세션 단위로 고정
-- "메리츠는?", "그럼 삼성은?" 같은 후속 질의에서 이전 coverage context 유지
-- 모든 규칙을 YAML 설정 파일로 외부화
+### 목적
+V1.6.3-β 마감 품질 확정. 3가지 추가 완결:
+1. **count-context 필터 실제 적용** - 횟수/한도 숫자 오추출 차단
+2. **synthetic meta 스키마 운영 기준 고정** - synthetic_method 키 추가
+3. **synthetic 오염 방지 범위 완비** - 벡터 검색 및 policy_axis에도 필터 적용
 
-### 핵심 개념
+### 핵심 변경
 
-**Query Anchor:**
+**tools/backfill_split_synthetic_chunks.py:**
 ```python
-class QueryAnchor(BaseModel):
-    coverage_code: str      # 대표 담보 코드 (예: A4200_1)
-    coverage_name: str | None  # 대표 담보 명칭 (예: 암진단비)
-    domain: str | None      # 담보 도메인 (CANCER, CARDIO 등)
-    original_query: str     # anchor 생성 시점의 원본 질의
-```
+# V1.6.3-β-2: count-context(횟수/한도) 필터 - 실제 적용
+if check_count_context(window_text):
+    coverage_line.reject_reason = "count_context"
+    continue
 
-**후속 질의 유형:**
-| 유형 | 설명 | 처리 |
-|------|------|------|
-| `new` | 신규 질의 (anchor 없음 또는 coverage 키워드 포함) | 새 anchor 생성 |
-| `insurer_only` | insurer만 변경하는 후속 질의 | anchor.coverage_code 유지 |
-
-### 구현 내용
-
-**1. 설정 파일 (`config/rules/query_anchor.yaml`):**
-```yaml
-# 후속 질의 판별용 coverage 키워드
-coverage_keywords:
-  - 암
-  - 암진단
-  - 뇌졸중
-  - 수술비
-  # ... 39개 키워드
-
-# insurer-only 후속 질의 패턴
-insurer_only_patterns:
-  - "은?"
-  - "는?"
-  - "그럼"
-  # ... 13개 패턴
-
-# intent 확장 키워드 (anchor 유지 + intent만 확장)
-intent_extension_keywords:
-  comparison: [비교, 대비, vs, 차이]
-  condition: [조건, 지급조건, 면책, 대기기간]
-  # ... 추가 그룹
-```
-
-**2. API 변경:**
-
-요청 (CompareRequest):
-```json
-{
-  "insurers": ["MERITZ"],
-  "query": "메리츠는?",
-  "anchor": {
-    "coverage_code": "A4200_1",
-    "coverage_name": "암진단비",
-    "domain": "CANCER",
-    "original_query": "삼성 암진단비 알려줘"
-  }
+# V1.6.3-β-2: Meta 구조 운영 기준 고정
+meta = {
+    "synthetic_type": "split",  # 운영 기준 키 (불변)
+    "synthetic_method": "v1_6_3_beta_2_split",  # 호환성 키 추가
+    "entities": {
+        "amount": {
+            "method": "v1_6_3_beta_2_split",  # 통일
+        }
+    }
 }
 ```
 
-응답 (CompareResponse):
+**services/retrieval/compare_service.py:**
+- `get_compare_axis_vector()`: synthetic 제외 필터 추가
+- `get_policy_axis()`: synthetic 제외 필터 추가 (방어적)
+
+### 실행 결과
+
+| 항목 | V1.6.3-β | V1.6.3-β-2 |
+|------|----------|------------|
+| Eligible | 278 | 163 |
+| Rejected (count_context 신규) | - | 387 |
+| 신규 생성 | 129 | 0 (idempotent) |
+
+### DoD 체크리스트
+
+- [x] count-context 필터 적용 (reject_reason=count_context 확인)
+- [x] synthetic meta 스키마 고정 (synthetic_method 추가)
+- [x] compare_service 전체 경로 synthetic 필터 완비
+- [x] Idempotent 재실행 검증 (created=0)
+- [x] Amount Bridge 핵심 케이스 FOUND 유지 (SAMSUNG/LOTTE)
+- [x] 핵심 compare API 테스트 50 passed
+
+---
+
+## V1.6.3-β: Split Synthetic Chunk 안정화 핫픽스 (2025-12-23)
+
+### 목적
+V1.6.3의 3가지 핵심 리스크 제거:
+1. **coverage_standard 부분매칭 오매칭 방지**: coverage_alias 매핑만 자동 INSERT 허용
+2. **단순 금액 regex 오추출 방지**: amount_extractor 우선 사용, payment-context 필터 적용
+3. **Synthetic chunk 비교축 오염 방지**: compare_axis에서 is_synthetic=true 제외
+
+### 핵심 원칙
+
+1. **coverage_alias ONLY INSERT** - coverage_standard 매핑은 report-only
+2. **amount_extractor 우선** - raw regex 대신 검증된 추출기 사용
+3. **payment-context 필터** - 보험료/납입 문맥 금액 제외
+4. **MIN_AMOUNT_THRESHOLD** - 10만원 미만 금액 스킵
+5. **Fail Closed** - 애매하면 생성하지 말고 reject report로 남김
+
+### 스크립트 변경 (tools/backfill_split_synthetic_chunks.py)
+
+```python
+# V1.6.3-β 핵심 변경
+@dataclass
+class CoverageLine:
+    mapping_source: str | None  # 'coverage_alias' | 'coverage_standard_candidate'
+    eligible_for_insert: bool   # coverage_alias만 True
+    reject_reason: str | None   # 거절 사유 추적
+
+# V1.6.3-β: 보험료/납입 문맥 필터
+PAYMENT_CONTEXT_KEYWORDS = ["보험료", "납입", "월납", "연납", ...]
+
+# V1.6.3-β: 최소 금액 임계값
+MIN_AMOUNT_THRESHOLD = 100_000  # 10만원
+```
+
+### Compare 오염 방지 (services/retrieval/compare_service.py)
+
+```sql
+-- V1.6.3-β: synthetic chunk 비교축 제외
+AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
+```
+
+### 실행 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk (후보) | 117개 |
+| 추출된 담보 라인 | 2971개 |
+| Eligible (coverage_alias) | 278개 (9.4%) |
+| Rejected | 2693개 (90.6%) |
+| Synthetic chunk 생성 | 129개 (신규) |
+| 중복 제외 (V1.6.3 기존) | 149개 |
+
+### Reject 사유 분포
+
+| reject_reason | 설명 |
+|---------------|------|
+| amount_not_found | 금액 미추출 |
+| no_coverage_mapping | coverage_alias 매핑 실패 |
+| amount_too_small | 10만원 미만 |
+| payment_context | 보험료/납입 문맥 |
+
+### 산출물
+
+| 파일 | 내용 |
+|------|------|
+| `artifacts/v1_6_3_beta/mixed_chunk_candidates_*.csv` | 후보 chunk 목록 |
+| `artifacts/v1_6_3_beta/rejected_lines_report_*.csv` | 거절된 라인 상세 |
+| `artifacts/v1_6_3_beta/synthetic_chunks_report_*.csv` | 생성 결과 |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `tools/backfill_split_synthetic_chunks.py` | V1.6.3-β 안정화 핫픽스 |
+| `services/retrieval/compare_service.py` | synthetic chunk 비교축 제외 |
+
+---
+
+## V1.6.3: Split Synthetic Chunk (2025-12-23)
+
+### 목적
+Mixed Coverage Chunk 문제의 구조적 해결. 하나의 chunk에 여러 담보가 혼재되어 있을 때, 담보별로 분리된 synthetic chunk를 생성하여 Amount Bridge가 정확히 동작하도록 함.
+
+### 문제 분석 (V1.6.2 이후)
+- V1.6.2에서 SAMSUNG A4210 synthetic chunk 수동 생성
+- 그러나 다른 보험사들도 동일 문제 존재
+- 하드코딩 방식은 확장 불가
+
+### 핵심 원칙
+
+1. **INSERT ONLY** - 기존 chunk UPDATE/DELETE 금지
+2. **신정원 canonical만 허용** - coverage_alias → coverage_standard 검증
+3. **LLM 추론 금지** - 정규식/룰 기반만 사용
+4. **Idempotent 실행** - 동일 실행 시 중복 INSERT 방지
+
+### 구현
+
+**tools/backfill_split_synthetic_chunks.py (신규)**
+
+```python
+# 핵심 흐름
+1. scan_mixed_chunks()    # 혼합 담보 chunk 후보 스캔
+2. extract_coverage_lines()  # 담보별 라인 분해
+3. map_to_coverage_code()  # coverage_alias/standard 매핑
+4. insert_synthetic_chunk()  # 신규 chunk INSERT
+```
+
+**추출 전략:**
+- 전체 content에서 담보명 패턴 탐색
+- 담보명 주변 ±5줄에서 금액 패턴 탐색
+- coverage_alias → coverage_standard 매핑
+
+### 실행 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk (후보) | 57개 |
+| 추출된 담보 라인 | 531개 |
+| 매핑 성공 | 384개 (72.3%) |
+| 매핑 실패 | 147개 |
+| Synthetic chunk 생성 | 278개 |
+| 중복 제외 (기존 존재) | 106개 |
+
+### Synthetic Chunk 구조
+
 ```json
 {
-  "anchor": {
-    "coverage_code": "A4200_1",
-    "coverage_name": "암진단비",
-    "domain": "CANCER",
-    "original_query": "삼성 암진단비 알려줘"
-  },
-  "debug": {
-    "anchor": {
-      "query_type": "insurer_only",
-      "has_anchor": true,
-      "has_coverage_keyword": false,
-      "extracted_insurers": ["MERITZ"],
-      "restored_from_anchor": true,
-      "anchor_coverage_code": "A4200_1"
+  "meta": {
+    "entities": {
+      "coverage_code": "A4210",
+      "amount": {
+        "amount_value": 6000000,
+        "amount_text": "600만원",
+        "confidence": "high",
+        "method": "synthetic_split"
+      },
+      "is_synthetic": true,
+      "source_chunk_id": 6260
     }
   }
 }
 ```
 
-**3. 후속 질의 판별 로직:**
-```python
-def _detect_follow_up_query_type(query: str, anchor: QueryAnchor | None) -> tuple[str, dict]:
-    # 1. anchor 없으면 → "new"
-    # 2. coverage 키워드 있으면 → "new" (anchor 재설정)
-    # 3. insurer 키워드만 있으면 → "insurer_only"
-    # 4. 그 외 → "new" (안전한 기본값)
-```
+### Amount Bridge 검증
+
+| 질의 | 보험사 | amount_status | amount_value |
+|------|--------|---------------|--------------|
+| 경계성종양 보장금액 | SAMSUNG | FOUND | 600만원 ✅ |
+| 경계성종양 보장금액 | MERITZ | NOT_FOUND | (alias 보강 필요) |
+
+### 회귀 테스트
+
+- 핵심 compare API 테스트 50개 PASS ✅
+- 기존 실패 테스트 (plan 관련, document viewer 관련)는 pre-existing issue
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `config/rules/query_anchor.yaml` | 신규 생성 (coverage_keywords, insurer_only_patterns) |
-| `api/config_loader.py` | +29 lines: get_query_anchor_config, get_coverage_keywords 등 |
-| `api/compare.py` | +140 lines: QueryAnchor 모델, 후속 질의 판별, anchor 반환 |
-| `tests/test_query_anchor.py` | 신규 생성 (21개 테스트) |
+| `tools/backfill_split_synthetic_chunks.py` | (신규) Split Synthetic Chunk Backfill 스크립트 |
+| `artifacts/v1_6_3/` | 실행 결과 CSV (candidates, unmapped, created) |
+| `status.md` | V1.6.3 섹션 추가 |
 
-### 검증 시나리오
-
-| # | 질의 | anchor 상태 | query_type | 결과 |
-|---|------|-------------|------------|------|
-| 1 | "DB손해보험 암진단비 알려줘" | 없음 | new | anchor 생성 (암진단비) |
-| 2 | "메리츠는?" | 암진단비 | insurer_only | anchor 유지, MERITZ 검색 |
-| 3 | "그럼 삼성은?" | 암진단비 | insurer_only | anchor 유지, SAMSUNG 검색 |
-| 4 | "유사암은?" | 암진단비 | new | anchor 재설정 (유사암) |
-
-### 검증 결과
-
-```
-✅ pytest tests/test_query_anchor.py: 21 passed
-✅ pytest tests/test_compare_api.py: 57 passed
-✅ API 스모크 테스트: 정상 동작
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| QueryAnchor 모델 정의 | ✅ 완료 |
-| 후속 질의 판별 로직 | ✅ 완료 |
-| API anchor 파라미터 | ✅ request/response 추가 |
-| YAML 외부화 | ✅ query_anchor.yaml |
-| 테스트 작성 | ✅ 21개 테스트 |
-| 기능 회귀 없음 | ✅ 57개 기존 테스트 통과 |
+### DoD 체크리스트
+- [x] 스크립트 작성 완료 (scan/dry-run/execute 모드)
+- [x] 스캔 동작 확인 (57개 후보)
+- [x] Synthetic chunk INSERT 완료 (278개)
+- [x] Amount Bridge 검증 (SAMSUNG FOUND)
+- [x] 회귀 테스트 PASS (핵심 API 50개)
+- [x] status.md 업데이트
+- [x] 커밋
 
 ---
 
-## STEP 3.5: Advanced 옵션 Guard / Auto-Recovery (2025-12-19)
+## V1.6.2: SAMSUNG A4210 Synthetic Chunk (2025-12-23)
 
-### 목표
-- UI Advanced 옵션에서 insurer 0개 선택해도 시스템이 정상 동작
-- insurer auto-recovery 로직으로 질의에서 추출하거나 기본 정책 적용
-- 모든 규칙을 YAML 설정 파일로 외부화 (하드코딩 금지)
+### 목적
+SAMSUNG Amount Bridge NOT_FOUND 문제 해결. 유사암진단비(A4210) 600만원 정보를 synthetic chunk로 생성하여 Amount Bridge 완성.
 
-### 핵심 원칙
-- **실행 차단 금지**: insurer 0개 상태에서도 쿼리 실행 허용
-- **Auto-Recovery 적용**:
-  1. 질의에서 insurer 추출 시도
-  2. 추출 실패 시 기본 정책 적용 (전체 보험사 비교)
-- **사용자 안내**: recovery 적용 시 안내 메시지 표시
+### 문제 분석 (V1.6.1 이후)
+- V1.6.1 backfill 후 LOTTE, MERITZ 등은 FOUND
+- SAMSUNG은 여전히 NOT_FOUND
+- 원인: SAMSUNG에 A4210으로 태깅된 chunk 없음
 
-### 구현 내용
+### Document Evidence 분석
 
-**1. 설정 파일 (`config/rules/insurer_defaults.yaml`):**
-```yaml
-# 기본 보험사 리스트
-default_insurers:
-  - SAMSUNG
-  - MERITZ
-  - LOTTE
-  - KB
-  - DB
-  - HANWHA
-  - HYUNDAI
-  - HEUNGKUK
-
-# 기본 정책 모드
-default_policy_mode: "all"  # "all" | "representative"
-
-# 대표 보험사 (mode=representative 시 사용)
-representative_insurers:
-  - SAMSUNG
-  - MERITZ
-
-# 보정 메시지 템플릿
-recovery_messages:
-  no_insurer_default: "보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
-  no_insurer_extracted: "질의에서 {insurers}를 인식하여 비교를 수행했습니다."
+**chunk_id=3 (SAMSUNG 가입설계서) 내용:**
+```
+유사암 진단비(기타피부암)(1년50%)     600만원
+유사암 진단비(갑상선암)(1년50%)       600만원
+유사암 진단비(대장점막내암)(1년50%)    600만원
+유사암 진단비(제자리암)(1년50%)       600만원
+유사암 진단비(경계성종양)(1년50%)      600만원
 ```
 
-**2. API 변경:**
+- 문서에 "유사암 진단비" 담보와 600만원 금액 명확히 존재
+- 현재 coverage_code 태깅: A4299_1 (잘못됨)
+- 해당 담보는 신정원 A4210(유사암진단비)에 해당
 
-요청 (CompareRequest):
-```python
-# min_length=1 제거 → 빈 리스트 허용
-insurers: list[str] = Field(default=[], description="비교할 보험사 코드 리스트")
+### Case A 확정
+
+**SAMSUNG에 A4210(유사암진단비) 담보 실제 존재 확인**
+
+| 근거 | 내용 |
+|------|------|
+| 문서 | 가입설계서 "유사암 진단비(경계성종양/제자리암)(1년50%)" |
+| 금액 | 600만원 |
+| coverage_alias | 이미 등록됨 (alias_id=236~240) |
+
+### 해결 전략: Synthetic Chunk INSERT
+
+**핵심 원칙:**
+- 기존 chunk(chunk_id=1,3) 수정 금지 (multi-coverage 오염 방지)
+- A4210 전용 synthetic chunk 새로 INSERT
+- is_synthetic=true 태깅
+
+**INSERT SQL:**
+```sql
+INSERT INTO chunk (document_id, insurer_id, doc_type, content, meta, page_start, page_end)
+VALUES (
+    1,  -- document_id (source chunk과 동일)
+    5,  -- insurer_id (SAMSUNG)
+    '가입설계서',
+    '유사암 진단비(경계성종양)(1년50%) 600만원
+유사암 진단비(제자리암)(1년50%) 600만원
+...[V1.6.2 Synthetic: source_chunk_id=3]',
+    '{
+        "entities": {
+            "coverage_code": "A4210",
+            "amount": {
+                "amount_value": 6000000,
+                "amount_text": "600만원",
+                "confidence": "high",
+                "method": "v1.6.2_synthetic"
+            },
+            "source_chunk_id": 3,
+            "is_synthetic": true
+        }
+    }'::jsonb,
+    5, 5
+);
+-- 결과: chunk_id=10952 생성
 ```
 
-응답 (CompareResponse):
+### 검증 결과
+
+**Amount Bridge 테스트:**
+
+| 질의 | 보험사 | amount_status | amount_value |
+|------|--------|---------------|--------------|
+| 경계성 종양 보장금액 | SAMSUNG | FOUND | 600만원 ✅ |
+| 경계성 종양 보장금액 | LOTTE | FOUND | 2억원 ✅ |
+
+**V1.6 Amount Bridge 완전 동작 확인:**
 ```json
 {
-  "recovery_message": "보험사 선택이 없어 전체 보험사 비교를 수행했습니다.",
-  "debug": {
-    "insurer_scope_method": "auto_recovery_default",
-    "recovery_applied": true,
-    "recovery_reason": "no_insurer_selected"
+  "amount_bridge": {
+    "enabled": true,
+    "anchor_code": "A4210",
+    "subtype_id": "borderline_tumor",
+    "insurers": [
+      { "insurer_code": "SAMSUNG", "amount_value": 6000000, "amount_status": "FOUND" },
+      { "insurer_code": "LOTTE", "amount_value": 200000000, "amount_status": "FOUND" }
+    ],
+    "bridge_note": "이 결과는 경계성 종양 기반으로 유사암진단비(A4210)을 비교축으로 사용했습니다."
   }
 }
 ```
 
-**3. Frontend 변경:**
-- ChatPanel: insurer 0개 체크 제거 (실행 허용)
-- page.tsx: recovery_message 채팅에 표시
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| DB: chunk 테이블 | SAMSUNG A4210 synthetic chunk INSERT (chunk_id=10952) |
+| `status.md` | V1.6.2 섹션 추가 |
+
+### DoD 체크리스트
+- [x] SAMSUNG 가입설계서에서 유사암 진단비 600만원 evidence 확인
+- [x] Case A 확정 (A4210 담보 실제 존재)
+- [x] Synthetic chunk INSERT (기존 chunk 수정 없음)
+- [x] is_synthetic=true 태깅
+- [x] Amount Bridge SAMSUNG FOUND 확인
+- [x] LOTTE, SAMSUNG 비교 정상 동작 확인
+- [x] status.md 업데이트
+- [x] 커밋
+
+---
+
+## V1.6.1: Amount Tagging Backfill (2025-12-23)
+
+### 목적
+V1.6 Amount Bridge가 NOT_FOUND로 떨어지는 근본 원인 해결. chunk.meta.entities.amount 필드를 채워서 금액 비교 가능하게 함.
+
+### 문제 분석
+- V1.6 Amount Bridge는 evidence.amount를 읽음
+- 그러나 chunk.meta.entities.amount가 비어 있었음
+- 따라서 amount_status가 항상 NOT_FOUND
+
+### 구현
+
+**1. tools/backfill_amount_entities.py**
+
+```python
+# 대상: coverage_code가 있고 amount가 없는 chunk
+# 방법: content에서 정규식 기반 금액 추출 (extract_amount 재사용)
+# 결과: chunk.meta.entities.amount에 저장
+
+python tools/backfill_amount_entities.py --dry-run  # 미리보기
+python tools/backfill_amount_entities.py            # 실제 실행
+```
+
+**2. api/compare.py 수정 (V1.6.1)**
+
+```python
+def _query_amount_from_db(insurer_codes, coverage_code):
+    """DB에서 coverage_code + amount 태깅된 chunk 직접 조회"""
+    # doc_type 우선순위: 상품요약서 > 사업방법서 > 가입설계서
+    # chunk.meta.entities.amount에서 amount_value, amount_text 조회
+```
+
+### Backfill 결과
+
+| 항목 | 수치 |
+|------|------|
+| 대상 chunk | 624개 |
+| 금액 추출 성공 | 144개 (23.1%) |
+| DB 업데이트 | 144개 |
+
+### 검증 결과
+
+**V1.6 Amount Bridge 테스트:**
+
+| 질의 | 결과 |
+|------|------|
+| 경계성종양 보장금액 (SAMSUNG, LOTTE) | LOTTE: FOUND, 2억원 ✅ |
+| 제자리암 보장금액 얼마 (LOTTE, MERITZ, KB) | LOTTE: FOUND, 2억원 ✅ |
+
+**V1.5 회귀 테스트:**
+
+| 테스트 | 결과 |
+|--------|------|
+| 경계성종양 (no amount intent) | SAFE_RESOLVED, amount_bridge=None ✅ |
+| 암진단비 비교 | UNRESOLVED, amount_bridge=None ✅ |
+| 뇌졸중진단비 | RESOLVED, amount_bridge=None ✅ |
+
+### 제한사항
+- SAMSUNG A4210(유사암진단비) coverage_code 태깅 없음 → NOT_FOUND
+- 일부 보험사 coverage_alias 보강 필요 (향후 작업)
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `config/rules/insurer_defaults.yaml` | 신규 생성 (기본 정책 설정) |
-| `api/config_loader.py` | +34 lines: get_insurer_defaults_config, get_default_insurers, get_recovery_messages |
-| `api/compare.py` | min_length 제거, recovery_message 필드 추가, auto-recovery 로직 |
-| `apps/web/src/lib/types.ts` | recovery_message 필드 추가 |
-| `apps/web/src/components/ChatPanel.tsx` | insurer 0개 체크 제거 |
-| `apps/web/src/app/page.tsx` | recovery_message 표시 로직 |
+| `tools/backfill_amount_entities.py` | (신규) Amount backfill 스크립트 |
+| `api/compare.py` | _query_amount_from_db() 추가, _build_amount_bridge_response() 수정 |
 
-### 검증 시나리오
-
-| # | 질의 | insurers | 결과 |
-|---|------|----------|------|
-| 1 | "암진단비 알려줘" | [] | auto_recovery_default, 전체 보험사 비교 |
-| 2 | "삼성 암진단비" | [] | query_single_explicit, SAMSUNG 추출 |
-| 3 | "다빈치 수술비 비교" | [] | auto_recovery_default, 전체 보험사 비교, 5 slots |
-
-### 검증 결과
-
-```
-✅ Scenario 1: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다."
-✅ Scenario 2: query_extracted_insurers=["SAMSUNG"], insurer_scope_method=query_single_explicit
-✅ Scenario 3: recovery_message="보험사 선택이 없어 전체 보험사 비교를 수행했습니다.", slots_count=5
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| insurer 0개 실행 허용 | ✅ Frontend/Backend 모두 허용 |
-| Auto-Recovery 로직 | ✅ 질의 추출 → 기본 정책 fallback |
-| YAML 외부화 | ✅ insurer_defaults.yaml |
-| recovery_message 표시 | ✅ 채팅창 안내 메시지 |
-| 검증 시나리오 통과 | ✅ 3/3 (100%) |
+### DoD 체크리스트
+- [x] backfill_amount_entities.py 추가
+- [x] dry-run 동작 확인
+- [x] 실제 backfill 후 chunk.meta.entities.amount 채워짐
+- [x] V1.6 Amount Bridge에서 LOTTE amount_status=FOUND 확인
+- [x] 회귀 테스트 PASS
+- [x] 커밋 + status.md 업데이트
 
 ---
 
-## STEP 3.6: Intent Locking / Mode Separation (2025-12-19)
+## V1.6: Amount Bridge — Subtype SAFE_RESOLVED → Amount Compare (2025-12-23)
 
-### 목표
-- 질의 Intent(lookup/compare)를 명시적으로 고정하여 임의 전환 방지
-- UI 이벤트(버튼 클릭, 연관 담보 선택)로 인한 intent 변경 차단
-- Query Anchor의 coverage / insurer / intent 일관성 보장
+### 목적
+V1.5에서 SAFE_RESOLVED 된 Subtype-only 질의(경계성종양, 제자리암)에 금액 의도가 있을 때 Amount 비교 기능 제공
 
 ### 핵심 원칙
-- **기본 Intent는 lookup** (단일 보험사 정보 조회)
-- **명시적 비교 키워드**가 있을 때만 compare로 변경
-- **UI 이벤트는 intent를 변경할 수 없음**
-- **coverage/insurer 변경은 intent 변경 사유가 아님**
 
-### Intent 정의
+1. **V1.5 비파괴**: 금액 의도가 없으면 기존 V1.5 동작 유지
+2. **허용 Subtype 제한**: borderline_tumor, carcinoma_in_situ만 브릿지 허용
+3. **Evidence 기반만 허용**: 금액은 evidence에서 추출, LLM 추론 금지
+4. **Partial Failure 허용**: 일부 보험사가 금액 없어도 응답 가능
 
-| Intent | 설명 | 트리거 |
-|--------|------|--------|
-| lookup | 단일 보험사 정보 조회 | 기본값, "알려줘", "보여줘" 등 |
-| compare | 복수 보험사 비교 | "비교", "차이", "vs" 등 명시적 키워드 |
+### Amount Intent 감지
 
-### 구현 내용
+**키워드 기반:**
+- 보장금액, 진단금, 보험금, 금액, 얼마, 한도, 지급금, 만원, 천만원, 가입금액
 
-**1. 설정 파일 (`config/rules/intent_keywords.yaml`):**
+**정규식 기반:**
+- `\d{1,3}(,\d{3})+원` (1,000,000원)
+- `\d+만\s*원` (600만원)
+- `\d+천만\s*원` (3천만원)
+
+### 구현
+
+**1. config/v1_6_amount_bridge.yaml**
+
 ```yaml
-# 비교 의도 트리거 키워드
-compare_trigger_keywords:
-  - 비교
-  - 차이
-  - " vs "
-  - 어느 쪽
-  # ...
+bridge:
+  enabled: true
+  allow_subtypes:
+    - borderline_tumor
+    - carcinoma_in_situ
+  anchor_code: A4210
+  min_evidence_count: 1
 
-# lookup 강제 유지 키워드
-lookup_force_keywords:
-  - 알려줘
-  - 보여줘
-  - 어떻게
-  # ...
+amount_intent:
+  keywords: [보장금액, 진단금, 금액, 얼마, ...]
+  regex_patterns: ['\d+만\s*원', ...]
 
-# Intent 변경 불가 UI 이벤트 타입
-ui_events_no_intent_change:
-  - coverage_button_click
-  - related_coverage_select
-  - slot_select
+condition_branch:
+  lotte:
+    enabled: true
+    branch_message: "성별에 따라 상이"
+  db:
+    enabled: true
+    branch_message: "연령 구간에 따라 상이"
 ```
 
-**2. QueryAnchor 모델 확장:**
+**2. api/config_loader.py 확장**
+
 ```python
-class QueryAnchor(BaseModel):
-    coverage_code: str
-    coverage_name: str | None
-    domain: str | None
-    original_query: str
-    # STEP 3.6: Intent Locking
-    intent: Literal["lookup", "compare"] = "lookup"
+# V1.6 Loaders
+def get_amount_bridge_config() -> dict: ...
+def is_amount_bridge_enabled() -> bool: ...
+def get_amount_bridge_allow_subtypes() -> list[str]: ...
+def get_amount_bridge_anchor_code() -> str: ...
+def get_amount_intent_keywords() -> list[str]: ...
+def get_amount_intent_regex_patterns() -> list[str]: ...
+def get_condition_branch_config(insurer_code: str) -> dict: ...
+def get_partial_failure_config() -> dict: ...
+def get_amount_bridge_messages() -> dict[str, str]: ...
 ```
 
-**3. Intent Resolution 로직:**
+**3. api/compare.py 확장**
+
 ```python
-def _resolve_intent(query, anchor, ui_event_type, query_insurers):
-    # 1. UI 이벤트인 경우 → intent 변경 금지, anchor 유지
-    # 2. anchor가 있는 경우 → 명시적 비교 키워드 없으면 유지
-    # 3. 새 질의인 경우 → 키워드 기반 판별
+# V1.6 Response Models
+class AmountBridgeInsurerResult(BaseModel):
+    insurer_code: str
+    amount_value: int | None = None
+    amount_text: str | None = None
+    amount_status: Literal["FOUND", "NOT_FOUND", "BRANCH"] = "NOT_FOUND"
+    branch_message: str | None = None
+    evidence_refs: list[EvidenceRefResponse] = []
+
+class AmountBridgeResponse(BaseModel):
+    enabled: bool = False
+    anchor_code: str | None = None
+    subtype_id: str | None = None
+    subtype_name: str | None = None
+    insurers: list[AmountBridgeInsurerResult] = []
+    partial_failure: bool = False
+    bridge_note: str | None = None
+
+# CompareResponseModel에 amount_bridge 필드 추가
+amount_bridge: AmountBridgeResponse | None = None
 ```
 
-**4. Frontend 변경:**
-- `QueryAnchor` 타입에 intent 필드 추가
-- `CompareRequestWithIntent` 타입 추가 (anchor, ui_event_type 포함)
-- 응답에서 anchor 저장 후 다음 요청에 전달
+**4. V1.6 Helper Functions**
 
-### 파일 변경
+```python
+def _detect_amount_intent(query: str) -> tuple[bool, dict[str, Any]]: ...
+def _check_amount_bridge_conditions(...) -> tuple[bool, dict[str, Any]]: ...
+def _extract_amount_from_evidence(...) -> tuple[int | None, str | None, list, str | None]: ...
+def _build_amount_bridge_response(...) -> AmountBridgeResponse: ...
+```
 
-| 파일 | 변경 내용 |
-|------|----------|
-| `config/rules/intent_keywords.yaml` | 신규 생성 (intent 키워드 설정) |
-| `api/config_loader.py` | +42 lines: get_compare_trigger_keywords 등 함수 |
-| `api/compare.py` | QueryAnchor.intent 필드, _resolve_intent 로직, ui_event_type 처리 |
-| `apps/web/src/lib/types.ts` | QueryAnchor, CompareRequestWithIntent 타입 |
-| `apps/web/src/lib/api.ts` | anchor, ui_event_type 전달 |
-| `apps/web/src/app/page.tsx` | currentAnchor 상태 관리, 요청에 anchor 포함 |
-| `apps/web/src/components/ChatPanel.tsx` | CompareRequestWithIntent 타입 사용 |
+**5. Resolution Gate 수정**
 
-### 검증 시나리오
-
-| # | 질의 | anchor 상태 | 결과 |
-|---|------|-------------|------|
-| 1 | "삼성의 암진단비 알려줘" | 없음 | intent=lookup ✅ |
-| 2 | "일반암 진단금" (UI 클릭) | lookup | intent=lookup (차단) ✅ |
-| 3 | "삼성과 메리츠 암진단비 비교" | 없음 | intent=compare ✅ |
-| 4 | "유사암은?" | compare | intent=compare (유지) ✅ |
+```python
+# V1.5 SAFE_RESOLVED도 데이터 반환 허용
+if resolution_state not in ("RESOLVED", "SAFE_RESOLVED"):
+    # UNRESOLVED/INVALID → 결과 차단
+```
 
 ### 검증 결과
 
-```
-=== Scenario 1 ===
-Expected: intent=lookup
-  anchor.intent: lookup
-Result: ✅ PASS
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Amount Intent + SAFE_RESOLVED | "경계성종양 보장금액" | amount_bridge.enabled=True, status=SAFE_RESOLVED ✅ |
+| No Amount Intent | "경계성종양" | amount_bridge=None, status=SAFE_RESOLVED ✅ |
+| Amount Intent Variants | "제자리암 진단금 얼마" | amount_intent=True (matched: 진단금) ✅ |
+| Explanation Context | "경계성종양이란 무엇" | amount_bridge=None, status=UNRESOLVED ✅ |
+| Disease Name (not subtype) | "갑상선암 보장금액" | amount_bridge=None, reason=not_subtype_only ✅ |
 
-=== Scenario 2 ===
-Expected: intent=lookup (UI 이벤트 - 차단)
-  anchor.intent: lookup
-  ui_event_blocked_change: True
-Result: ✅ PASS
+### V1.5 회귀 테스트
 
-=== Scenario 3 ===
-Expected: intent=compare
-  anchor.intent: compare
-  matched_compare_keyword: 비교
-Result: ✅ PASS
-
-=== Scenario 4 ===
-Expected: intent=compare (anchor 유지)
-  anchor.intent: compare
-  intent_locked: True
-Result: ✅ PASS
-```
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| lookup/compare 분리 원칙 | ✅ 구현 완료 |
-| UI 이벤트 intent 변경 차단 | ✅ ui_events_no_intent_change 적용 |
-| coverage/insurer 변경 시 intent 유지 | ✅ anchor intent 보존 |
-| 하드코딩 없음 | ✅ YAML 외부화 |
-| 검증 시나리오 통과 | ✅ 4/4 (100%) |
-
----
-
-## STEP 3.8: Evidence / Policy Read-Only Isolation (2025-12-19)
-
-### 목표
-- Evidence/Policy/Document 상세보기가 Query 실행이나 상태 변경을 유발하지 않도록 완전히 분리
-- 문서 열람은 Read-only 동작으로만 처리
-- Query Anchor / Intent / Insurer / Coverage 상태를 절대 변경하지 않음
-- 문서 열람 중에도 좌측 요약·우측 비교 결과가 불변으로 유지
-
-### 문제 인식
-
-**현상:**
-- Evidence 탭에서 "상품요약서 상세보기" 클릭 시 좌측 요약 영역이 재렌더링되거나 다른 상태로 변경됨
-- 마치 새로운 질의를 실행한 것처럼 화면이 흔들림
-
-**원인:**
-- Evidence 상세보기가 조회(Read)가 아닌 Query Mutation(상태 변경)으로 처리되고 있음
-- UI 이벤트가 Query Context를 침범함
-
-### 구현 내용
-
-**1. State 분류 정의 (`state-isolation.config.ts`):**
-```typescript
-// Query State: 질의 실행에 의해서만 변경되는 상태
-export const QUERY_STATE_KEYS = [
-  "messages",           // 채팅 메시지 목록
-  "currentResponse",    // 현재 비교 결과
-  "currentAnchor",      // Query Anchor (coverage, intent)
-  "isLoading",          // 질의 실행 중 여부
-] as const;
-
-// View State: Read-only UI 이벤트에 의해 변경되는 상태
-export const VIEW_STATE_KEYS = [
-  "viewingDocument",    // 현재 보고 있는 문서
-  "activeTab",          // 현재 활성 탭
-  "scrollPosition",     // 스크롤 위치
-  "expandedSections",   // 펼쳐진 섹션들
-] as const;
-```
-
-**2. Read-only View Events 정의:**
-```typescript
-export const READ_ONLY_VIEW_EVENTS = [
-  "evidence_view",              // Evidence 상세보기 클릭
-  "policy_view",                // Policy 상세보기 클릭
-  "document_view",              // 문서 상세보기 클릭
-  "document_page_change",       // 문서 페이지 이동
-  "document_zoom_change",       // 문서 확대/축소
-  "document_close",             // 문서 닫기
-  "tab_change",                 // 탭 전환
-  // ...
-] as const;
-```
-
-**3. ViewContext 생성 (`contexts/ViewContext.tsx`):**
-- Query State와 완전히 분리된 View State 전용 컨텍스트
-- viewingDocument, deepLinkDocument, activeTab 등 관리
-- openDocument(), closeDocument() 등 View State 변경 함수 제공
-- Query State 변경 불가 보장
-
-**4. page.tsx 리팩토링:**
-- ViewProvider 적용
-- Query State와 View State 명확히 분리
-- DocumentViewerLayer 컴포넌트로 뷰어 통합 관리
-- memoizedResponse로 불필요한 re-render 방지
-
-**5. EvidencePanel 수정:**
-- ViewContext.openDocument() 사용
-- 로컬 viewingEvidence 상태 제거
-- PdfPageViewer 렌더링을 page.tsx로 이동
-- Query State 변경 없이 문서 열기 보장
+| 테스트 | 결과 |
+|--------|------|
+| 암진단비 삼성 메리츠 | UNRESOLVED, amount_bridge=None ✅ |
+| 뇌졸중진단비 비교 | RESOLVED, amount_bridge=None ✅ |
+| locked_coverage_codes 전달 | RESOLVED, amount_bridge=None ✅ |
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `apps/web/src/lib/state-isolation.config.ts` | 신규: State 분류 및 격리 규칙 정의 |
-| `apps/web/src/contexts/ViewContext.tsx` | 신규: View State 전용 컨텍스트 |
-| `apps/web/src/app/page.tsx` | ViewProvider 적용, DocumentViewerLayer 추가 |
-| `apps/web/src/components/EvidencePanel.tsx` | ViewContext 사용, 로컬 상태 제거 |
-| `apps/web/src/__tests__/state-isolation.test.ts` | 신규: 격리 규칙 단위 테스트 |
+| `config/v1_6_amount_bridge.yaml` | (신규) Amount Bridge 설정 |
+| `api/config_loader.py` | V1.6 로더 함수 9개 추가 |
+| `api/compare.py` | AmountBridgeResponse 모델, 헬퍼 함수 4개, resolution gate 수정 |
 
-### 검증 시나리오
-
-| # | 시나리오 | 기대 결과 | 검증 |
-|---|----------|----------|------|
-| 1 | "삼성의 암진단비 알려줘" | 좌측 요약 정상 표시 | ✅ |
-| 2 | Evidence 탭 → 상품요약서 상세보기 클릭 | 문서 뷰어 열림, 좌측 요약 내용 변경 없음 | ✅ |
-| 3 | 문서 페이지 이동 | Query 결과 불변 | ✅ |
-| 4 | 문서 닫기 | 동일 Query 결과 유지 | ✅ |
-
-### 완료 조건 충족 여부
-
-| 조건 | 결과 |
-|------|------|
-| Evidence/Policy/Document 클릭 시 Query State 변경 0건 | ✅ 구현 완료 |
-| 좌측 요약 및 우측 비교 결과 항상 유지 | ✅ 구현 완료 |
-| Read-only View와 Query 실행 완전 분리 | ✅ ViewContext 분리 |
-| 하드코딩/임시 dict 없음 | ✅ config 기반 |
-| git 커밋 완료 | ✅ a6282d2 |
-| status.md 업데이트 완료 | ✅ 본 항목 |
+### DoD 체크리스트
+- [x] v1_6_amount_bridge.yaml 생성
+- [x] config_loader에 V1.6 로더 추가
+- [x] AmountBridgeResponse 모델 정의
+- [x] _detect_amount_intent() 구현
+- [x] _check_amount_bridge_conditions() 구현
+- [x] _extract_amount_from_evidence() 구현
+- [x] _build_amount_bridge_response() 구현
+- [x] SAFE_RESOLVED 게이트 수정
+- [x] V1.6 검증 테스트 통과
+- [x] V1.5 회귀 테스트 통과
+- [x] Docker 재빌드 및 테스트
 
 ---
 
-## STEP 3.7-β: Coverage 미확정 시 Results Panel UI Gating (2025-12-19)
+## V1.5-REVERIFY: 전 보험사 최종 봉인 검증 (2025-12-23)
 
-### 목표
-- 대표 담보가 확정되지 않은 상태(AMBIGUOUS / NOT_FOUND)에서 우측 Results Panel 렌더링 완전 차단
-- 좌측은 "선택 필요" 상태인데, 우측은 "확정된 결과"처럼 보이는 상태 불일치를 방지
+### 목적
+V1.5-HOTFIX 적용 후 8개 보험사 기준 전수 검증 및 v1.5 릴리즈 봉인
 
-### 문제 인식
+### 검증 결과
 
-**현상:**
-- "삼성 암진단금" (오타) 질의 시 "상해후유장해(3-100%)" 등 임의 담보가 대표 담보로 자동 선택됨
-- 좌측에서 담보 선택을 유도하는 동안 우측에 비교 결과가 표시됨
+**1. 질병명 SAFE_RESOLVED 금지 검증**
 
-**원인:**
-- coverage_resolution 상태와 Results Panel 렌더링이 연동되어 있지 않음
-- UI에서 EXACT/AMBIGUOUS/NOT_FOUND 상태에 따른 gating이 없음
+| 질의 | status | SAFE_RESOLVED |
+|------|--------|---------------|
+| 갑상선암 | RESOLVED | ❌ (정상) |
+| 대장암 | UNRESOLVED | ❌ (정상) |
+| 폐암 | INVALID | ❌ (정상) |
+| 유방암 | UNRESOLVED | ❌ (정상) |
+| 전립선암 | UNRESOLVED | ❌ (정상) |
 
-### 구현 내용
+**SAFE_RESOLVED 발생 케이스: 0건** ✅
 
-**1. UI Gating 설정 (`ui-gating.config.ts`):**
+**2. subtype-only 허용 범위**
+
+| 질의 | status | code |
+|------|--------|------|
+| 경계성종양 | SAFE_RESOLVED | A4210 ✅ |
+| 제자리암 | SAFE_RESOLVED | A4210 ✅ |
+| 암진단비 경계성종양 포함 | UNRESOLVED | - ✅ (anchor 혼합) |
+| 경계성종양이란 무엇 | UNRESOLVED | - ✅ (설명문) |
+
+### 최종 판정: **PASS** ✅
+
+### 커밋
+- `f5c7039` - V1.5-HOTFIX: 질병명 SAFE_RESOLVED 금지
+- `e9ae71d` - config/ 바인드 마운트 추가
+
+---
+
+## V1.5-HOTFIX: 질병명 SAFE_RESOLVED 금지 (2025-12-23)
+
+### 목적
+질병명(갑상선암, 소액암 등)이 SAFE_RESOLVED로 처리되는 문제 수정
+
+### 핵심 변경
+
+1. **허용 subtype 축소**
+   - 허용: `borderline_tumor` (경계성종양), `carcinoma_in_situ` (제자리암/상피내암)
+   - 비활성화: `similar_cancer`, `minor_cancer`, `thyroid_cancer`, `skin_cancer`, `colorectal_mucosal`
+
+2. **anchor_exclusion_keywords 추가**
+   - "유사암" 키워드 추가 (담보명이므로 subtype-only 금지)
+
+### 파일 변경
+- `config/subtype_anchor_map.yaml` - 질병명 subtype 비활성화
+- `docker-compose.demo.yml` - config/ 바인드 마운트 추가
+
+### 커밋
+- `f5c7039` - V1.5-HOTFIX
+- `e9ae71d` - config 바인드 마운트
+
+---
+
+## V1.5: Subtype Anchor Map & Safe Resolution UX (2025-12-23)
+
+### 목적
+Subtype-only 질의 (경계성종양, 제자리암 등)에 대한 UX 개선. v1 로직을 깨지 않고 안전한 anchor 후보를 제시하여 사용자가 올바른 담보를 선택하도록 유도.
+
+### 핵심 원칙
+
+1. **v1 비파괴**: 기존 RESOLVED/UNRESOLVED/INVALID 상태 흐름 유지
+2. **자동 확정 금지**: SAFE_RESOLVED도 "안전 확정"일 뿐 사용자 확인 필요
+3. **White-list 기반**: subtype_anchor_map.yaml에 정의된 allowed_anchors만 후보로 제시
+4. **신정원 준수**: allowed_anchors는 반드시 신정원 canonical 코드만 허용
+
+### 구현
+
+**1. config/subtype_anchor_map.yaml (신규)**
+
+```yaml
+subtypes:
+  borderline_tumor:
+    keywords:
+      - 경계성종양
+      - 경계성 종양
+      - 경계성
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "경계성종양은 유사암 범주에 포함됨"
+    domain: CANCER
+
+  carcinoma_in_situ:
+    keywords:
+      - 제자리암
+      - 상피내암
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "제자리암은 유사암 범주에 포함됨"
+    domain: CANCER
+
+safe_resolution:
+  enabled: true
+  safe_resolved_message: "'{subtype}'을(를) '{coverage_name}' 담보로 안전하게 확정했습니다."
+  multiple_anchors_message: "'{subtype}' 관련 담보가 여러 개 있습니다. 하나를 선택해 주세요:"
+  min_evidence_count: 1
+```
+
+**2. api/config_loader.py 확장**
+
+```python
+# V1.5 Loaders
+def get_subtype_anchor_map_config() -> dict: ...
+def get_subtype_anchor_entries() -> dict[str, dict]: ...
+def get_safe_resolution_config() -> dict: ...
+def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]: ...
+def get_allowed_anchors_for_subtype(subtype_id: str) -> list[str]: ...
+def get_anchor_basis_for_subtype(subtype_id: str) -> str | None: ...
+```
+
+**3. api/compare.py 확장**
+
+```python
+# V1.5 Response Models
+class CandidateAnchorResponse(BaseModel):
+    coverage_code: str
+    coverage_name: str | None
+    basis: str | None = None
+
+class CoverageResolutionResponse(BaseModel):
+    status: Literal["RESOLVED", "SAFE_RESOLVED", "UNRESOLVED", "INVALID"]
+    # ...
+    candidate_anchors: list[CandidateAnchorResponse] = []
+    detected_subtype: str | None = None
+    next_action: Literal["select_anchor", "confirm", "retry", None] = None
+
+# V1.5 Resolution Flow
+if is_subtype_only_query:
+    subtype_id, subtype_entry = find_subtype_by_keyword(query)
+    allowed_anchors = subtype_entry.get("allowed_anchors", [])
+
+    # SAFE_RESOLVED 조건: allowed_anchor 1개 + evidence >= 1
+    if len(allowed_anchors) == 1 and evidence_count >= 1:
+        status = "SAFE_RESOLVED"
+        next_action = "confirm"
+    else:
+        status = "UNRESOLVED"
+        next_action = "select_anchor"
+```
+
+### 검증 결과
+
+| 테스트 케이스 | 결과 |
+|--------------|------|
+| "삼성생명의 경계성종양 암진단시 담보가 얼마야" | `SAFE_RESOLVED`, candidate_anchors=[A4210], detected_subtype=borderline_tumor ✅ |
+| "제자리암 보장 비교해줘" | `SAFE_RESOLVED`, candidate_anchors=[A4210], detected_subtype=carcinoma_in_situ ✅ |
+| "삼성 암진단비 알려줘" | `UNRESOLVED` (similarity 부족, v1 동작 유지) ✅ |
+| "삼성 뇌졸중진단비" | `UNRESOLVED` (subtype 아님, V1.5 미적용) ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `config/subtype_anchor_map.yaml` | (신규) Subtype → Anchor 매핑 설정 |
+| `api/config_loader.py` | V1.5 로더 함수 6개 추가 |
+| `api/compare.py` | CandidateAnchorResponse 추가, CoverageResolutionResponse 확장, SAFE_RESOLVED 로직 구현 |
+
+### DoD 체크리스트
+- [x] subtype_anchor_map.yaml 생성
+- [x] config_loader에 V1.5 로더 추가
+- [x] SAFE_RESOLVED 상태 추가 (단일 anchor + evidence 존재)
+- [x] candidate_anchors 필드 추가
+- [x] detected_subtype, next_action 필드 추가
+- [x] v1 로직 비파괴 (기존 담보 질의 동작 유지)
+- [x] Docker 재빌드 및 테스트 통과
+
+---
+
+## U-4.18-Ω-VERIFY: v1.0 Compare 안정성 최종 점검 (2025-12-22)
+
+### 목적
+U-4.18-Ω backfill 완료 후 Compare 결과의 신뢰성을 v1.0 출시 수준으로 봉인
+
+### 점검 결과
+
+**1. coverage_code 분포 이상치 탐지**
+
+| 보험사 | Top1 Code | Top1 Count | Total | Top1 % | 판정 |
+|--------|-----------|------------|-------|--------|------|
+| HYUNDAI | A9630_1 | 21 | 26 | 80.8% | ⚠️ 정상 (다빈치 문서 다수) |
+| KB | A9617_1 | 41 | 80 | 51.3% | ⚠️ 정상 (항암치료비 문서 다수) |
+| HANWHA | A6100_1 | 26 | 73 | 35.6% | ✅ OK |
+| 기타 | - | - | - | <30% | ✅ OK |
+
+- HYUNDAI/KB 경고는 **문서 특성**(해당 담보 관련 문서 비중 높음)으로 확인
+- 오염 증거 없음, 실제 키워드 존재 확인 완료
+
+**2. 미태깅 chunk 핵심 담보 누락 샘플링**
+
+- 30개 샘플 검토
+- 대부분 정상 미태깅 (alias 미등록 변형, 목록 형태, 일반 문맥)
+- 공백 차이로 인한 미매칭 2건 발견 (v2.0 개선 대상)
+  - "암 진단비(유사암 제외)" vs "암진단비(유사암제외)"
+- **치명적 false-negative 없음**
+
+**3. Compare "근거 부족" false-negative 검증**
+
+- 주요 담보 10개 테스트 (A4200_1, A9630_1, A9617_1 등)
+- 모든 케이스에서 evidence > 0 확인
+- **false-negative 0건**
+
+### v2.0 개선 후보
+- 공백 무시 정규화 매칭 (normalize_coverage_name 개선)
+- alias 추가 등록 (Ⅱ 포함/미포함 변형)
+
+### DoD 충족
+- ✅ 분포 이상치 없음 또는 합리적 설명 가능
+- ✅ 미태깅 chunk 치명적 false-negative 없음
+- ✅ Compare "근거 부족" false-negative 0건
+- ✅ 코드/데이터 변경 없이 검증 완료
+- ✅ **v1.0 Compare 신뢰성 봉인 선언 가능**
+
+---
+
+## U-4.18-Ω: All Insurers Coverage Code Backfill (2025-12-22)
+
+### 목적
+모든 보험사의 비교 가능 문서(가입설계서/상품요약서/사업방법서)에서 coverage_code 태깅 누락 문제를 해결하여 Compare false-negative("근거 부족") 제거
+
+### 문제 분석
+- 비교 가능 문서에 담보 관련 텍스트가 존재하는데
+- chunk 단위에 `coverage_code`가 태깅되지 않아
+- Compare 탭에서 "근거 부족"으로 오인 표시되는 사례 발생
+
+### 작업 내용
+
+**1. 신정원 기준 검증**
+- coverage_alias.coverage_code → coverage_standard 매핑 전수 검증
+- 모든 284개 alias가 28개 신정원 기준 코드에 정상 매핑 확인
+
+**2. 오염 탐지 및 보완**
+- 짧은 alias(6글자 이하)의 과도 매칭 문제 탐지
+  - 예: "질병사망"(4글자), "상해수술비"(5글자) 등
+- 최소 alias 길이 7글자 필터링 적용 (47개 alias 제외)
+
+**3. Backfill 실행**
+- 대상: 8개 보험사, 1,569개 chunk
+- 결과: 624개 chunk 태깅 완료 (39.8%)
+  - SAMSUNG: 95개 (59.0%)
+  - MERITZ: 84개 (28.0%)
+  - LOTTE: 135개 (56.3%)
+  - KB: 80개 (61.1%)
+  - DB: 65개 (40.1%)
+  - HANWHA: 73개 (24.3%)
+  - HEUNGKUK: 66개 (66.7%)
+  - HYUNDAI: 26개 (14.8%)
+
+### 구현
+
+**tools/backfill_comparable_doc_coverage.py**
+- coverage_standard 기반 canonical 검증
+- 최소 alias 길이 필터링 (MIN_ALIAS_LENGTH=7)
+- 보험사별 coverage_alias 기반 매칭
+- match_source='backfill_alias' 태깅
+
+### 검증
+- Compare API 정상 동작 확인
+- SAMSUNG/MERITZ evidence 정상 표시
+- false-negative("근거 부족") 해소 확인
+
+### 파일 변경
+- `tools/backfill_comparable_doc_coverage.py` (신규)
+- `status.md` (업데이트)
+
+---
+
+## U-4.18-β: Subtype Coverage 종속 원칙 강제 (2025-12-22)
+
+### 목적
+STEP 4.12-γ의 SUBTYPE_MULTI 독립 상태를 제거하고, Subtype이 Coverage에 종속되도록 원칙 강제
+
+### 문제 분석 (STEP 4.12-γ의 문제)
+
+**As-Is (STEP 4.12-γ 구현)**:
+- "경계성 종양 / 제자리암" 질의 → `resolution_state: SUBTYPE_MULTI`
+- Subtype이 독립적으로 비교 가능한 것처럼 처리
+- Coverage 확정 없이 Subtype 탭 활성화
+
+**To-Be (U-4.18-β 수정)**:
+- "경계성 종양 / 제자리암" 질의 → `resolution_state: UNRESOLVED`
+- Subtype은 Coverage에 종속된 하위 개념
+- Coverage 확정 전에는 어떤 비교 UI도 노출 금지
+
+### 핵심 원칙
+
+1. **Coverage(담보) 확정이 모든 비교의 전제조건**
+   - `resolution_state !== "RESOLVED"` → 우측 패널 전체 차단
+   - Subtype-only 질의는 상위 담보 없이 비교 불가
+
+2. **Subtype은 Coverage의 하위 개념**
+   - 경계성 종양, 제자리암은 "암" 계열의 세부 분류
+   - 상위 담보(암진단비 등)가 확정되어야 Subtype 탭 활성화
+
+3. **UNRESOLVED 상태에서 안내 메시지 제공**
+   - "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+   - 암 도메인 대표 담보 추천 (암진단비, 유사암진단비, 재진단암진단비)
+
+### 구현
+
+**1. Backend: SUBTYPE_MULTI 제거**
+
+`api/compare.py`:
+```python
+# CoverageResolutionResponse
+status: Literal["RESOLVED", "UNRESOLVED", "INVALID"]  # SUBTYPE_MULTI 제거
+
+# 멀티 Subtype 질의 처리
+if is_multi_subtype:
+    coverage_resolution = CoverageResolutionResponse(
+        status="UNRESOLVED",  # SUBTYPE_MULTI → UNRESOLVED
+        message="담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요.",
+        suggested_coverages=cancer_domain_coverages,
+    )
+```
+
+**2. Frontend: SUBTYPE_MULTI 핸들링 제거**
+
+`ResultsPanel.tsx`:
 ```typescript
-// API status → UI display state 매핑
-export type UIResolutionState = "EXACT" | "AMBIGUOUS" | "NOT_FOUND";
+// 이전: if (resolutionState !== "RESOLVED" && !isSubtypeMulti)
+// 수정:
+if (resolutionState !== "RESOLVED") {
+  // 모든 비교 UI 차단
+}
+```
 
-export const RESOLUTION_STATUS_MAP: Record<string, UIResolutionState> = {
-  resolved: "EXACT",
-  suggest: "AMBIGUOUS",
-  clarify: "AMBIGUOUS",
-  failed: "NOT_FOUND",
+**3. Subtype 탭 조건**
+
+```typescript
+// RESOLVED 상태에서만 Subtype 탭 표시
+{response.subtype_comparison?.is_multi_subtype && (
+  <TabsTrigger value="subtype">Subtype</TabsTrigger>
+)}
+```
+
+### 설정 변경
+
+`config/rules/coverage_resolution.yaml`:
+```yaml
+failure_messages:
+  subtype_needs_coverage: "담보를 인식하지 못했습니다. 비교를 위해서는 상위 담보(예: 암진단비)를 함께 입력해 주세요."
+```
+
+### 검증 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Subtype-only 질의 | "경계성 종양 / 제자리암" | resolution_state: UNRESOLVED ✅ |
+| 메시지 확인 | 위와 동일 | "담보를 인식하지 못했습니다..." ✅ |
+| 추천 담보 | 위와 동일 | 암진단비, 유사암진단비, 재진단암진단비 ✅ |
+| 정상 담보 질의 + lock | "암진단비" + locked | resolution_state: RESOLVED ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | SUBTYPE_MULTI 제거, Subtype-only → UNRESOLVED |
+| `config/rules/coverage_resolution.yaml` | subtype_needs_coverage 메시지 추가 |
+| `apps/web/src/lib/ui-gating.config.ts` | SUBTYPE_MULTI 제거, RESOLVED만 허용 |
+| `apps/web/src/lib/types.ts` | resolution_state에서 SUBTYPE_MULTI 제거 |
+| `apps/web/src/components/ResultsPanel.tsx` | isSubtypeMulti 핸들링 제거, RESOLVED 게이트 강화 |
+
+### DoD 체크리스트
+- [x] SUBTYPE_MULTI 상태 제거 (Backend)
+- [x] Subtype-only 질의 → UNRESOLVED 반환
+- [x] UNRESOLVED 메시지에 상위 담보 안내 포함
+- [x] Frontend에서 RESOLVED 외 모든 상태 UI 차단
+- [x] Subtype 탭은 RESOLVED + is_multi_subtype일 때만 활성화
+- [x] Docker 재빌드 및 테스트 통과
+
+---
+
+## U-4.18-γ: Evidence Source Boundary & Anti-Comparison UX (2025-12-22)
+
+### 목적
+Evidence 탭이 "비교 결과"로 오인되지 않도록 시각적 경계 강화 및 Anti-Comparison UX 적용
+
+### 핵심 원칙
+
+1. **Evidence ≠ Compare**
+   - Evidence는 "근거 목록 열람" 용도
+   - 비교/판단은 Compare 탭에서만 수행
+   - Evidence에서 금액 비교 유도 금지
+
+2. **Source Level 시각화**
+   - 모든 Evidence 항목에 source_level 배지 표시
+   - COMPARABLE_DOC: 가입설계서, 상품요약서, 사업방법서 (비교 가능 문서)
+   - POLICY_ONLY: 약관 (참조용)
+   - UNKNOWN: 출처 불명
+
+3. **Anti-Comparison UX**
+   - 좌/우 배치 금지 (수직 리스트만 허용)
+   - 금액 강조(bold) 금지
+   - 보험사 간 교차참조 금지
+   - Score 표시 제거
+
+### 구현
+
+**1. Source Level 배지**
+
+`EvidencePanel.tsx`:
+```typescript
+type SourceLevel = "COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN";
+
+const SOURCE_LEVEL_CONFIG: Record<SourceLevel, {...}> = {
+  COMPARABLE_DOC: { label: "비교 문서 근거", bgColor: "bg-blue-50", ... },
+  POLICY_ONLY: { label: "약관 근거", bgColor: "bg-amber-50", ... },
+  UNKNOWN: { label: "출처 불명", bgColor: "bg-gray-50", ... },
 };
 
-// Results Panel 렌더링 허용 상태
-export const RESULTS_PANEL_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
+function getSourceLevel(docType: string): SourceLevel {
+  const comparableDocs = ["가입설계서", "상품요약서", "사업방법서"];
+  if (comparableDocs.includes(docType)) return "COMPARABLE_DOC";
+  if (docType === "약관") return "POLICY_ONLY";
+  return "UNKNOWN";
+}
 ```
 
-**2. ResultsPanel 수정:**
-- canRenderResultsPanel() 호출로 렌더링 가능 여부 확인
-- AMBIGUOUS / NOT_FOUND 상태에서 EmptyState 표시
-- Compare / Diff / Evidence / Policy 탭 접근 차단
+**2. 고정 경고 배너**
+
+```typescript
+<div className="mb-4 p-4 bg-amber-50 border-2 border-amber-300 rounded-lg sticky top-0 z-10">
+  <AlertTriangle className="h-5 w-5 text-amber-600" />
+  <p className="font-semibold">⚠️ 이 화면은 비교 결과가 아닙니다.</p>
+  <p>Evidence는 각 보험사의 관련 문서에서 발췌된 '근거 목록'...</p>
+</div>
+```
+
+**3. Anti-Comparison UX**
+- Score 표시 제거 (opacity 및 텍스트 삭제)
+- 금액 부분 일반 텍스트 처리 (강조 제거)
+- 수직 리스트 레이아웃 유지
 
 ### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `apps/web/src/lib/ui-gating.config.ts` | 신규: UI Gating 규칙 정의 |
-| `apps/web/src/components/ResultsPanel.tsx` | UI Gating 적용, EmptyState 표시 |
-| `apps/web/src/__tests__/ui-gating.test.ts` | 신규: UI Gating 단위 테스트 |
+| `apps/web/src/components/EvidencePanel.tsx` | source_level 배지, 경고 배너, Anti-Comparison UX |
 
-### 검증 시나리오
+### DoD 체크리스트
+- [x] source_level 배지 구현 (COMPARABLE_DOC, POLICY_ONLY, UNKNOWN)
+- [x] 고정 경고 배너 추가 (닫기 불가)
+- [x] Score 표시 제거
+- [x] Docker 재빌드 성공
+- [x] status.md 업데이트
 
-| # | 시나리오 | 기대 결과 | 검증 |
-|---|----------|----------|------|
-| 1 | "삼성 암" | AMBIGUOUS → Results Panel 비활성화 | ✅ |
-| 2 | "삼성 암진단비" | EXACT → Results Panel 정상 표시 | ✅ |
-| 3 | "삼성 암zz" | NOT_FOUND → Results Panel 비활성화 | ✅ |
+---
 
-### 완료 조건 충족 여부
+## U-4.18-δ: Slots Anti-Overreach UX (2025-12-22)
 
-| 조건 | 결과 |
-|------|------|
-| Coverage 미확정 시 Results Panel 렌더링 차단 | ✅ 구현 완료 |
-| EXACT 상태에서만 비교 결과 표시 | ✅ 구현 완료 |
-| 연관 담보 자동 노출 차단 | ✅ 구현 완료 |
-| 하드코딩 없음 | ✅ config 기반 |
-| git 커밋 완료 | ✅ e1052d9 |
-| status.md 업데이트 완료 | ✅ 본 항목 |
+### 목적
+Slots 탭이 Evidence 역할을 침범하지 않도록 역할 제한 강화
 
-## STEP 3.7-γ: Coverage Guide Isolation / Conversation Hygiene (2025-12-19)
+### 핵심 원칙
 
-### 목표
-- 담보 미확정(AMBIGUOUS/NOT_FOUND) 상태에서 가이드 메시지가 대화 로그에 누적되는 문제 제거
-- 담보 선택 안내를 단일 상태 패널(UI State)로 격리
-- Chat 영역은 "대화"로서의 역할만 수행
+1. **Slots 역할 제한**
+   - 비교 항목의 존재 여부
+   - 정량 값 (금액, 횟수 등)
+   - 차이 발생 사실 요약
 
-### 문제 인식
+2. **Slots 금지 사항**
+   - 조건 상세 나열 ❌
+   - 예외 조항 설명 ❌
+   - 약관 문구 직접 인용 ❌
+   - Evidence 요약/재서술 ❌
 
-**현상:**
-- "삼성 암" (모호한 질의) 입력 시 "여러 담보가 검색되었습니다..." 가이드 메시지가 ChatMessage로 누적
-- 연속 질의 시 가이드 메시지가 계속 쌓여 대화 로그가 오염됨
-- 좌측 Chat 영역과 담보 선택 안내의 역할이 혼재
+3. **길이 제한**
+   - 최대 120자 또는 2줄
+   - 초과 시: "일부 조건 요약 (자세한 내용은 Evidence에서 확인)"
 
-**원인:**
-- 담보 미확정 안내를 ChatMessage로 취급
-- AMBIGUOUS/NOT_FOUND 상태에서도 assistant 메시지가 chat log에 추가됨
+### 구현
 
-### 적용 원칙
+**1. Overreach 탐지 및 차단**
 
-| 원칙 | 설명 |
-|------|------|
-| 상태와 대화의 분리 | 담보 미확정 안내는 ChatMessage가 아님 |
-| 가이드 단일성 원칙 | 가이드는 항상 1개만 존재 (교체, 누적 금지) |
-| EXACT 상태 우선 원칙 | EXACT 상태에서만 Chat 로그에 정상 응답 추가 |
-
-### 구현 내용
-
-**1. Conversation Hygiene 설정 (`conversation-hygiene.config.ts`):**
+`SlotsTable.tsx`:
 ```typescript
-// ChatMessage로 추가 가능한 상태 (EXACT만 허용)
-export const CHAT_MESSAGE_ALLOWED_STATES: UIResolutionState[] = ["EXACT"];
+function truncateSlotValue(value: string | null): { text: string; truncated: boolean } {
+  // 조항 번호, 복수 숫자, 상세 조건 패턴 탐지
+  const hasArticleNumber = /제\s*\d+\s*조|조항|약관/i.test(value);
+  const multipleNumbers = (value.match(/\d+/g) || []).length >= 3;
+  const hasDetailedCondition = /계약일로부터|경과\s*시|소액암|50%|90일/i.test(value);
 
-// 응답이 ChatMessage로 추가될 수 있는지 확인
-export function canAddToChatLog(resolution: CoverageResolution | null | undefined): boolean {
-  const state = getUIResolutionState(resolution);
-  return CHAT_MESSAGE_ALLOWED_STATES.includes(state);
+  if (hasArticleNumber || multipleNumbers || hasDetailedCondition || value.length > 120) {
+    return { text: SLOT_OVERFLOW_FALLBACK, truncated: true };
+  }
+  return { text: value, truncated: false };
 }
-
-// Coverage Guide 상태 팩토리
-export function createCoverageGuideState(
-  resolution: CoverageResolution | null | undefined,
-  originalQuery: string
-): CoverageGuideState | null;
 ```
 
-**2. CoverageGuidePanel 컴포넌트:**
-```typescript
-// 담보 미확정 상태에서 표시되는 상태 안내 패널
-// - ChatMessage가 아님
-// - 항상 단 하나만 존재
-// - EXACT 상태에서는 자동 제거
-export function CoverageGuidePanel({
-  guide,
-  onSelectCoverage,
-}: CoverageGuidePanelProps);
-```
+**2. Source Hint 표시**
 
-**3. page.tsx 상태 분기:**
 ```typescript
-// STEP 3.7-γ: Conversation Hygiene - 상태별 분기 처리
-const canAddToChat = canAddToChatLog(response.coverage_resolution);
-
-if (!canAddToChat) {
-  // (A) AMBIGUOUS / NOT_FOUND: ChatMessage 추가 ❌, Guide Panel 표시 ✅
-  const guide = createCoverageGuideState(response.coverage_resolution, request.query);
-  setCoverageGuide(guide);
-  return;
+function SourceHint({ sourceLevel }: { sourceLevel?: string }) {
+  const label = SOURCE_HINT_LABELS[level] || "근거 부족";
+  return <span className="text-[10px] text-muted-foreground">({label})</span>;
 }
-
-// (B) EXACT: ChatMessage 정상 응답 추가 ✅, Guide Panel 제거 ✅
-setCoverageGuide(null);
-// ... 정상 응답 처리
 ```
 
-### 생성/수정된 파일
+**3. Evidence 유도 안내 (Slots 하단)**
+
+```typescript
+<div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+  ※ Slots는 비교를 위한 요약 정보입니다.
+  세부 조건 및 근거 문구는 Evidence 탭에서 확인하세요.
+</div>
+```
+
+### 파일 변경
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `apps/web/src/lib/conversation-hygiene.config.ts` | 상태와 대화 분리 규칙 정의 (신규) |
-| `apps/web/src/components/CoverageGuidePanel.tsx` | 담보 선택 가이드 UI 컴포넌트 (신규) |
-| `apps/web/src/app/page.tsx` | EXACT 상태에서만 ChatMessage 추가 |
-| `apps/web/src/components/ChatPanel.tsx` | CoverageGuidePanel 통합 |
-| `apps/web/src/__tests__/conversation-hygiene.test.ts` | 단위 테스트 (26개 케이스) |
+| `apps/web/src/components/SlotsTable.tsx` | truncateSlotValue(), SourceHint, Evidence 유도 안내 |
 
-### UI 역할 분리
+### DoD 체크리스트
+- [x] Slots에서 상세 조건 해석 불가
+- [x] 120자/2줄 초과 시 자동 치환
+- [x] Source Hint 표시 (비교 문서 기준/약관 기준/근거 부족)
+- [x] Evidence 유도 안내 문구 추가
+- [x] Build 성공
 
-| 영역 | 허용 출력 | 금지 출력 |
-|------|----------|----------|
-| Chat Log | 사용자 입력, EXACT 상태의 정상 응답 | 담보 선택 가이드, 안내 문구 |
-| Coverage Guide Panel | AMBIGUOUS/NOT_FOUND 상태 안내 | - |
-| Results Panel | EXACT 상태의 비교 결과 | AMBIGUOUS/NOT_FOUND 상태의 결과 |
+---
 
-### 검증 시나리오
+## U-5.0-A: Coverage Name Mapping Table 기반 Resolution (2025-12-22)
 
-| # | 쿼리 | 예상 동작 | 결과 |
-|---|------|----------|------|
-| 1 | "삼성 암" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
-| 2 | "삼성 암진단비" | Chat: 사용자+응답, Guide Panel: 없음 | ✅ |
-| 3 | "삼성 암zz" | Chat: 사용자 질의만, Guide Panel: 표시 | ✅ |
-| 4 | 연속 질의 | 이전 가이드 교체, 누적 없음 | ✅ |
+### 목적
+Coverage Resolution을 코드 하드코딩에서 DB 테이블(coverage_name_map) 기반으로 전환하여 Single Source of Truth 확립
 
-### 완료 조건 충족 여부
+### 핵심 원칙
 
-| 조건 | 결과 |
-|------|------|
-| 담보 가이드가 ChatMessage에 누적되지 않음 | ✅ 구현 완료 |
-| 가이드는 항상 1개만 존재 | ✅ 구현 완료 |
-| EXACT 상태에서만 Chat 로그에 응답 추가 | ✅ 구현 완료 |
-| 하드코딩 없음 | ✅ config 기반 |
-| 단위 테스트 통과 | ✅ 26/26 pass |
-| git 커밋 완료 | ✅ 58b8231 |
-| status.md 업데이트 완료 | ✅ 본 항목 |
+1. **테이블 우선 Resolution**
+   - Coverage Resolution은 coverage_alias + coverage_standard 테이블 조회 우선
+   - LLM/rule은 보조 수단 (테이블에 없을 때만 사용)
+
+2. **Subtype은 coverage_code에 종속**
+   - Subtype 판단은 coverage_code 확정 후에만 가능
+   - coverage_code 없이 Subtype만 질의 → UNRESOLVED
+
+3. **combined_score = similarity × confidence**
+   - 매칭 신뢰도(confidence) × 유사도(similarity)로 최종 순위 결정
+   - 동일 유사도라도 confidence가 높은 alias 우선
+
+### 스키마 변경
+
+**1. coverage_standard 테이블 확장**
+
+```sql
+ALTER TABLE coverage_standard
+ADD COLUMN IF NOT EXISTS semantic_scope TEXT DEFAULT 'UNKNOWN';
+-- CANCER, CARDIO, SURGERY, INJURY, DEATH, UNKNOWN
+```
+
+**2. coverage_alias 테이블 확장**
+
+```sql
+ALTER TABLE coverage_alias
+ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT false;
+ADD COLUMN IF NOT EXISTS confidence NUMERIC(3,2) DEFAULT 0.8;
+-- confidence: 1.0 (신정원), 0.95 (상품요약서), 0.85 (사업방법서), 0.7 (약관)
+```
+
+**3. coverage_name_map 뷰 생성**
+
+```sql
+CREATE OR REPLACE VIEW coverage_name_map AS
+SELECT
+    i.insurer_code,
+    ca.raw_name AS insurer_coverage_name,
+    cs.coverage_name AS standard_coverage_name,
+    ca.coverage_code,
+    cs.semantic_scope,
+    ca.is_primary,
+    ca.confidence,
+    ca.source_doc_type AS source
+FROM coverage_alias ca
+JOIN insurer i ON ca.insurer_id = i.insurer_id
+JOIN coverage_standard cs ON ca.coverage_code = cs.coverage_code;
+```
+
+### 구현
+
+**1. CoverageRecommendation 확장**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class CoverageRecommendation:
+    insurer_code: str
+    coverage_code: str
+    coverage_name: str | None
+    raw_name: str
+    source_doc_type: str
+    similarity: float
+    confidence: float = 0.8       # U-5.0-A
+    semantic_scope: str = "UNKNOWN"  # U-5.0-A
+    combined_score: float = 0.0   # U-5.0-A: similarity × confidence
+```
+
+**2. recommend_coverage_codes() SQL 수정**
+
+```sql
+SELECT
+    i.insurer_code,
+    ca.coverage_code,
+    cs.coverage_name,
+    ca.raw_name,
+    ca.source_doc_type,
+    1 - (ca.embedding <=> %s) AS similarity,
+    COALESCE(ca.confidence, 0.8) AS confidence,
+    COALESCE(cs.semantic_scope, 'UNKNOWN') AS semantic_scope,
+    (1 - (ca.embedding <=> %s)) * COALESCE(ca.confidence, 0.8) AS combined_score
+FROM coverage_alias ca
+...
+ORDER BY combined_score DESC
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `db/migrations/005_coverage_name_map_enhancement.sql` | 마이그레이션 SQL (스키마 확장 + 뷰 생성) |
+| `db/schema.sql` | coverage_standard, coverage_alias 컬럼 추가, coverage_name_map 뷰 |
+| `services/retrieval/compare_service.py` | CoverageRecommendation 확장, combined_score 기반 정렬 |
+
+### 검증 결과
+
+| 테스트 | 결과 |
+|--------|------|
+| 마이그레이션 적용 | ✅ 성공 (28 coverage_standard, 284 coverage_alias) |
+| semantic_scope 초기화 | ✅ CANCER 7건, CARDIO 7건, INJURY 3건, SURGERY 2건, DEATH 2건 |
+| confidence 초기화 | ✅ 1.0 (279건), 0.7 (5건) |
+| API 테스트 (UNRESOLVED) | ✅ similarity < threshold → UNRESOLVED |
+| API 테스트 (RESOLVED) | ✅ locked_coverage_codes 전달 → RESOLVED |
+
+### DoD 체크리스트
+- [x] coverage_standard에 semantic_scope 컬럼 추가
+- [x] coverage_alias에 is_primary, confidence 컬럼 추가
+- [x] coverage_name_map 뷰 생성
+- [x] combined_score = similarity × confidence 기반 정렬
+- [x] 마이그레이션 적용 및 검증
+- [x] API 정상 동작 확인
+
+---
+
+## STEP 4.12-γ: Subtype 비교 모드 분리 및 Coverage Lock Override (2025-12-22)
+
+> ⚠️ **이 구현은 U-4.18-β에서 수정됨**: SUBTYPE_MULTI 독립 상태 제거
+
+### 목적
+"경계성 종양/제자리암" Subtype 비교가 암진단비(A4200_1)로 자동 고정되어 금액 슬롯이 나오는 현상 차단
+
+### 문제 분석
+
+**As-Is (문제 상황)**:
+- 사용자가 "경계성 종양 / 제자리암" 비교를 요청
+- 시스템이 암진단비(유사암 제외) A4200_1로 자동 coverage lock
+- 결과: payout_amount 금액 비교 슬롯이 생성됨
+- 실제로 원하는 것: 유사암 포함/제외, 지급비율, 정의/판정문구 비교
+
+**To-Be (수정 후)**:
+- Subtype 질의는 `comparison_mode = "SUBTYPE"`로 강제
+- Coverage lock이 있어도 subtype_intent가 감지되면 lock override
+- payout_amount 등 금액 슬롯 생성 금지
+- 정의/조건 중심의 비교 결과 제공
+
+### 핵심 원칙
+
+1. **Subtype 질의는 Coverage Lock보다 우선한다**
+   - locked_coverage_codes가 있어도 subtype_intent 감지 시 무시
+
+2. **Subtype 모드에서 금액 슬롯 생성 금지**
+   - payout_amount, diagnosis_lump_sum_amount 등 suppressed_slots_in_subtype 필터링
+
+3. **comparison_mode 필드로 모드 구분**
+   - "COVERAGE": 기존 금액 비교 모드
+   - "SUBTYPE": 유사암/제자리암 정의 비교 모드
+
+### 구현
+
+**1. Subtype Intent Detection**
+
+`api/compare.py`:
+```python
+def _detect_subtype_intent(
+    query: str,
+    ui_event_type: str | None = None,
+    request_subtype_targets: list[str] | None = None,
+) -> tuple[bool, list[str], str]:
+    # 1. UI 이벤트 기반 트리거 (SUBTYPE_QUERY)
+    # 2. Request에서 명시적 subtype_targets 전달
+    # 3. Keyword 기반 트리거 (subtype_config.yaml 사용)
+```
+
+**2. Coverage Lock Override**
+
+```python
+# Subtype 모드에서는 coverage lock 강제 해제
+if is_subtype_intent and effective_locked_codes:
+    anchor_debug["previous_locked_codes"] = effective_locked_codes
+    anchor_debug["coverage_lock_overridden"] = True
+    effective_locked_codes = None  # Lock 해제
+```
+
+**3. Response Contract 변경**
+
+```python
+class CompareResponseModel(BaseModel):
+    # STEP 4.12-γ: Comparison Mode
+    comparison_mode: Literal["COVERAGE", "SUBTYPE"] = "COVERAGE"
+    subtype_targets: list[str] | None = None
+```
+
+**4. Slot Suppression**
+
+```python
+if is_subtype_intent:
+    suppressed_slot_keys = get_suppressed_slots_in_subtype()
+    final_slots = [
+        slot for slot in converted_slots
+        if slot.slot_key not in suppressed_slot_keys
+    ]
+```
+
+**5. User Summary 변경**
+
+Subtype 모드에서는 금액 비교 문구 대신:
+```
+"{보험사}의 {subtype} 보장 여부 및 감액 기준을 비교했습니다.
+금액 비교가 아닌 정의/조건 중심의 비교입니다."
+```
+
+### 설정 파일
+
+**config/subtype_config.yaml**:
+```yaml
+subtype_keyword_map:
+  경계성: borderline
+  경계성종양: borderline
+  제자리암: in_situ
+  상피내암: in_situ
+  유사암: similar_cancer
+  소액암: minor_cancer
+
+suppressed_slots_in_subtype:
+  - payout_amount
+  - diagnosis_lump_sum_amount
+  - payout_condition_summary
+
+subtype_display_names:
+  borderline: 경계성종양
+  in_situ: 제자리암(상피내암)
+  similar_cancer: 유사암
+  minor_cancer: 소액암
+```
+
+### 검증 결과
+
+| 테스트 | 입력 | 결과 |
+|--------|------|------|
+| Keyword trigger | "경계성 종양 제자리암 비교" | is_intent=True, targets=[borderline, in_situ] ✅ |
+| UI event trigger | ui_event_type="SUBTYPE_QUERY" | is_intent=True, trigger="ui_event" ✅ |
+| Normal query | "암진단비 비교" | is_intent=False, trigger="none" ✅ |
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `api/compare.py` | _detect_subtype_intent() 추가, coverage lock override, comparison_mode 필드 |
+| `api/config_loader.py` | get_subtype_keyword_map(), get_suppressed_slots_in_subtype() 추가 |
+| `config/subtype_config.yaml` | subtype 설정 (keyword_map, suppressed_slots, display_names) |
+
+### DoD 체크리스트
+- [x] subtype 키워드/ui_event로 들어온 요청은 comparison_mode="SUBTYPE"
+- [x] Subtype 모드에서 payout_amount 슬롯 생성 억제
+- [x] Subtype 모드에서 coverage lock override
+- [x] user_summary에 금액 비교 문구 없음
+- [x] 회귀: 일반 "암진단비(유사암 제외)" 비교는 기존과 동일
+
+---
+
+## U-4.18: Partial Failure & Source Boundary 안정화 (2025-12-22)
+
+### 목적
+1. Partial Failure를 사용자에게 안전하게 격리
+2. Slot/Compare 결과의 출처 경계(source_level)를 명시적으로 고정
+3. "보여주면 안 되는 상태"를 절대 화면에 노출하지 않도록 차단
+
+### 핵심 원칙
+
+1. **Partial Failure는 "결과"가 아니다**
+   - API 실패 시 부분 결과 표시 금지
+   - 명시적 상태 UI로 전환
+
+2. **Source는 절대 섞이지 않는다**
+   - `source_level`: COMPARABLE_DOC | POLICY_ONLY | UNKNOWN
+   - MIXED 상태 금지, source_level 없는 결과 렌더링 금지
+
+3. **Compare 탭은 COMPARABLE_DOC 전용**
+   - 약관 기반 정의/해석 비교 금지
+   - source_level ≠ COMPARABLE_DOC → "비교 불가" 표시
+
+### 구현
+
+**1. Backend: source_level 필드 추가**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class InsurerCompareCell:
+    # ...
+    source_level: str = "UNKNOWN"  # "COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN"
+```
+
+`services/extraction/slot_extractor.py`:
+```python
+@dataclass
+class SlotInsurerValue:
+    # ...
+    source_level: Literal["COMPARABLE_DOC", "POLICY_ONLY", "UNKNOWN"] = "UNKNOWN"
+```
+
+**2. Frontend: Global API Health Gate**
+
+`apps/web/src/app/page.tsx`:
+```typescript
+const [apiHealth, setApiHealth] = useState<{
+  isHealthy: boolean;
+  errorMessage: string | null;
+}>({ isHealthy: true, errorMessage: null });
+
+// API 실패 시 결과 표시 차단
+{!apiHealth.isHealthy ? (
+  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+    <h3>일부 데이터를 불러오지 못했습니다</h3>
+    <p>비교 결과의 신뢰성을 보장할 수 없어 표시를 중단합니다.</p>
+  </div>
+) : (
+  <ResultsPanel ... />
+)}
+```
+
+**3. Frontend: Compare 탭 source_level 렌더링**
+
+`apps/web/src/components/CompareTable.tsx`:
+```typescript
+if (sourceLevel === "POLICY_ONLY") {
+  return <td>비교 불가 (동일 기준 문서 없음)</td>;
+}
+if (sourceLevel === "UNKNOWN") {
+  return <td>근거 부족</td>;
+}
+// COMPARABLE_DOC만 정상 표시
+```
+
+**4. Frontend: Slots 탭 source_level 렌더링**
+
+`apps/web/src/components/SlotsTable.tsx`:
+```typescript
+function SourceLevelBadge({ sourceLevel }) {
+  if (sourceLevel === "POLICY_ONLY") {
+    return <Badge>⚠️ 약관 기준</Badge>;
+  }
+  return null;
+}
+```
+
+**5. API Error Message 정제**
+
+`apps/web/src/lib/api.ts`:
+```typescript
+function sanitizeErrorMessage(message: string): string {
+  if (message.includes("<html") || message.includes("<!DOCTYPE")) {
+    return "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  }
+  return message.replace(/<[^>]*>/g, "").trim();
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | InsurerCompareCell에 source_level 추가 |
+| `services/extraction/slot_extractor.py` | SlotInsurerValue에 source_level 추가 |
+| `api/compare.py` | InsurerCompareCellResponse, SlotInsurerValueResponse에 source_level 추가 |
+| `apps/web/src/app/page.tsx` | Global API Health Gate 구현 |
+| `apps/web/src/lib/api.ts` | Error message sanitization |
+| `apps/web/src/components/CompareTable.tsx` | source_level 기반 렌더링 |
+| `apps/web/src/components/SlotsTable.tsx` | source_level 배지 표시 |
+
+### DoD 체크리스트
+- [x] API 실패 시 "보여주면 안 되는 상태" 노출 없음
+- [x] source_level 없는 결과 없음 (기본값 UNKNOWN)
+- [x] Compare 탭은 COMPARABLE_DOC 전용
+- [x] 약관 기반 정보는 명확히 분리됨 (POLICY_ONLY 배지)
+- [x] HTML 에러 메시지 직접 노출 차단
+
+---
+
+## U-4.17: Compare 탭 NO_COMPARABLE_EVIDENCE 상태 표시 (2025-12-22)
+
+### 목적
+Compare 탭에서 특정 보험사가 비교 가능 문서(가입설계서/상품요약서/사업방법서)가 없고 약관만 있는 경우 이를 명시적으로 표시
+
+### 문제 분석
+
+**As-Is (문제 상황)**:
+- Summary 탭에서는 삼성 데이터가 정상 표시됨
+- Compare 탭에서는 삼성 컬럼이 비어 있음 (왜 비었는지 설명 없음)
+- 원인: A2 정책에 의해 약관 데이터는 Compare 탭에서 필터링됨
+
+**To-Be (수정 후)**:
+- Compare 탭에서 비교 가능 문서가 없는 경우 "비교 가능한 자료 없음 (약관만 존재)" 문구 표시
+- 컬럼을 삭제하지 않고 상태 설명 제공
+
+### 구현
+
+**1. Backend: compare_status 필드 추가**
+
+`services/retrieval/compare_service.py`:
+```python
+@dataclass
+class InsurerCompareCell:
+    insurer_code: str
+    doc_type_counts: dict[str, int] = field(default_factory=dict)
+    best_evidence: list[Evidence] = field(default_factory=list)
+    resolved_amount: ResolvedAmount | None = None
+    # U-4.17: 비교 가능 상태
+    compare_status: str = "COMPARABLE"  # "COMPARABLE" | "NO_COMPARABLE_EVIDENCE"
+```
+
+**2. Backend: compare_status 판정 로직**
+
+```python
+# best_evidence가 비어있지만 약관에 데이터가 있으면 NO_COMPARABLE_EVIDENCE
+compare_status = "COMPARABLE"
+if not best_evidence:
+    has_policy_evidence = "약관" in evidence_by_doc_type
+    if has_policy_evidence:
+        compare_status = "NO_COMPARABLE_EVIDENCE"
+```
+
+**3. API: InsurerCompareCellResponse 확장**
+
+`api/compare.py`:
+```python
+class InsurerCompareCellResponse(BaseModel):
+    insurer_code: str
+    doc_type_counts: dict[str, int]
+    best_evidence: list[EvidenceResponse]
+    compare_status: str = "COMPARABLE"  # U-4.17
+```
+
+**4. Frontend: CompareTable.tsx 렌더링 분기**
+
+```typescript
+// U-4.17: NO_COMPARABLE_EVIDENCE 상태 처리
+const compareStatus = (insurerData as any).compare_status as string | undefined;
+if (compareStatus === "NO_COMPARABLE_EVIDENCE") {
+  return (
+    <td key={insurer} className="p-3 text-center">
+      <div className="text-sm text-amber-600 bg-amber-50 rounded px-2 py-1">
+        비교 가능한 자료 없음
+        <br />
+        <span className="text-xs text-muted-foreground">(약관만 존재)</span>
+      </div>
+    </td>
+  );
+}
+```
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | InsurerCompareCell에 compare_status 필드 추가, 판정 로직 구현 |
+| `api/compare.py` | InsurerCompareCellResponse에 compare_status 필드 추가 |
+| `apps/web/src/components/CompareTable.tsx` | NO_COMPARABLE_EVIDENCE 상태 UI 렌더링 |
+
+### DoD 체크리스트
+- [x] compare_status 필드 Backend 추가
+- [x] API 응답에 compare_status 포함
+- [x] Frontend에서 NO_COMPARABLE_EVIDENCE 상태 렌더링
+- [x] Docker 컨테이너 재빌드 및 테스트
+- [x] status.md 업데이트
+
+---
+
+## STEP 4.10-γ: 전 보험사 Coverage Alias 전수 검증 (2025-12-21)
+
+### 목적
+모든 보험사에 대해 A9630_1(다빈치로봇암수술비) 담보의 axis 생성 가능 여부 검증
+
+### 1차 검증 결과
+
+| insurer_code | axis_len | result | 비고 |
+|--------------|----------|--------|------|
+| DB | 8 | ✅ GREEN | - |
+| HANWHA | 4 | ✅ GREEN | - |
+| HEUNGKUK | 0 | ❌ RED | alias suffix 불일치 |
+| HYUNDAI | 10 | ✅ GREEN | - |
+| KB | 0 | ❌ RED | alias suffix 불일치 |
+| LOTTE | 4 | ✅ GREEN | - |
+| MERITZ | 10 | ✅ GREEN | - |
+| SAMSUNG | 0 | ❌ RED | alias prefix/공백 불일치 |
+
+### RED 케이스 원인 분석
+
+| 보험사 | 기존 alias | chunk 실제 표현 | 원인 |
+|--------|-----------|----------------|------|
+| HEUNGKUK | `(갱신형_10년)` suffix | suffix 없음 | alias 너무 구체적 |
+| KB | `【갱신계약】` suffix | suffix 없음 | alias 너무 구체적 |
+| SAMSUNG | `[갱신형]` prefix | prefix 없음 | alias prefix 불일치 |
+
+### alias 보강
+
+| 보험사 | 추가 alias 수 | 대표 예시 |
+|--------|--------------|----------|
+| HEUNGKUK | +5건 | `다빈치및레보아이로봇 암수술비(갑상선암 및 전립선암 제외)` |
+| KB | +5건 | `다빈치로봇 암수술비(갑상선암 및 전립선암 제외)` |
+| SAMSUNG | +5건 | `다빈치로봇 수술비(1년감액)` |
+
+### 2차 검증 결과 (보강 후)
+
+| insurer_code | axis_len | result | doc_type_counts |
+|--------------|----------|--------|-----------------|
+| DB | 8 | ✅ GREEN | 가입설계서:4, 상품요약서:2, 사업방법서:2 |
+| HANWHA | 4 | ✅ GREEN | 사업방법서:3, 상품요약서:1 |
+| HEUNGKUK | 10 | ✅ GREEN | 가입설계서:6, 상품요약서:3, 사업방법서:1 |
+| HYUNDAI | 10 | ✅ GREEN | 가입설계서:4, 상품요약서:6 |
+| KB | 10 | ✅ GREEN | 가입설계서:6, 상품요약서:4 |
+| LOTTE | 4 | ✅ GREEN | 가입설계서:4 |
+| MERITZ | 10 | ✅ GREEN | 가입설계서:2, 상품요약서:3, 사업방법서:5 |
+| SAMSUNG | 10 | ✅ GREEN | 가입설계서:5, 상품요약서:5 |
+
+### 결론
+- **8개 보험사 전체 GREEN**
+- alias_text_match 전략으로 모든 보험사에서 axis 생성 성공
+- A9630_1 총 alias: 34건 (기존 19건 + 추가 15건)
+
+### DoD 체크리스트
+- [x] 모든 insurer_code에 대해 GREEN 분류 완료
+- [x] RED 케이스 3건 alias 보강
+- [x] 보강 후 전체 GREEN 확인
+- [x] coverage_locked == true 확인
+- [x] __amount_fallback__ 노출 없음 확인
+- [x] audit 문서 생성
+
+### 산출물
+- Audit 문서: `docs/audit/step_4_10_gamma_all_insurer_axis_audit.md`
+
+---
+
+## STEP 4.10: Coverage Alias 확장 - 담보명 표준화 보강 (2025-12-21)
+
+### 목적
+보험사별 담보명 불일치로 인한 False Negative (미보장 오판) 해결
+
+### 문제점 (As-Is)
+- 질의: "현대해상, DB손해보험의 다빈치로봇암수술비 비교"
+- 시스템 응답: ❌ "현대해상은(는) 해당 담보가 확인되지 않습니다"
+- 약관 기준 실제: ✅ 현대해상 보장 (로봇암수술 - 다빈치/레보아이)
+
+### 원인 분석
+| 보험사 | 약관상 담보명 |
+|------|-------------|
+| DB손해보험 | 다빈치로봇암수술비 |
+| 현대해상 | 로봇암수술(다빈치및레보아이) |
+
+- coverage_alias에 현대해상 표현 누락
+- chunk 검색 시 coverage_code 태그가 아닌 담보명 텍스트 매칭 필요
+
+### 해결 (To-Be)
+1. **compare_axis 검색 로직 확장 (STEP 4.10 핵심)**
+   - 기존: `chunk.meta->entities->coverage_code` 태그 기반 검색 → 결과 없음
+   - 확장: `coverage_alias.raw_name`을 사용한 content ILIKE 텍스트 매칭
+
+2. **coverage_alias 확장**
+   - HYUNDAI A9630_1 alias 5건 추가:
+     - 로봇암수술(다빈치및레보아이)(연간1회한)(갱신형)담보
+     - 로봇암수술(다빈치및레보아이)(연간1회한)
+     - 다빈치로봇암수술
+     - 레보아이로봇암수술
+     - 등
+
+3. **coverage_standard 명칭 표준화**
+   - A9630_1: "다빈치로봇암수술비" → "로봇/다빈치 암수술비"
+
+### 파일 변경
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `services/retrieval/compare_service.py` | get_compare_axis() alias 기반 ILIKE 검색 로직 추가 |
+| DB: coverage_alias | HYUNDAI A9630_1 alias 5건 추가 |
+| DB: coverage_standard | A9630_1 coverage_name 표준화 |
+
+### 검증 결과
+
+| 시나리오 | 이전 | 이후 |
+|----------|------|------|
+| DB+HYUNDAI 다빈치로봇암수술비 | ❌ HYUNDAI 미보장 | ✅ 모든 보험사 보장 |
+| compare_axis counts (HYUNDAI) | 0건 | 12건 |
+| A9630_1 evidence | 없음 | 10건 |
+
+### DoD 체크리스트
+- [x] coverage_alias에 현대해상 표현 추가
+- [x] 동일 질의에서 현대해상 보장 판정 성공
+- [x] 기존 삼성/한화/롯데 결과 영향 없음
+- [x] status.md STEP 4.10 완료 반영
+- [x] 관련 커밋 생성
+
+---
+
+
+
+
+
+

@@ -48,6 +48,8 @@ class SlotInsurerValue:
     reason: str | None = None
     evidence_refs: list[SlotEvidenceRef] = field(default_factory=list)
     trace: LLMTrace | None = None  # LLM usage trace
+    # U-4.18: Source Level ("COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN")
+    source_level: Literal["COMPARABLE_DOC", "POLICY_ONLY", "UNKNOWN"] = "UNKNOWN"
 
 
 @dataclass
@@ -323,6 +325,7 @@ def extract_diagnosis_lump_sum_slot(evidence_list: list, insurer_code: str) -> S
             confidence="high" if best_doc_priority >= 2 else "medium",
             evidence_refs=best_refs,
             trace=trace,
+            source_level="COMPARABLE_DOC",  # U-4.18: 비교 가능 문서에서 추출
         )
 
     # U-4.10: 일당/특약 금액만 발견된 경우 명확한 사유 제공
@@ -333,6 +336,7 @@ def extract_diagnosis_lump_sum_slot(evidence_list: list, insurer_code: str) -> S
             confidence="not_found",
             reason="진단비 일시금 금액 미확인 (일당/특약 금액만 존재)",
             trace=trace,
+            source_level="UNKNOWN",  # U-4.18
         )
 
     return SlotInsurerValue(
@@ -341,6 +345,7 @@ def extract_diagnosis_lump_sum_slot(evidence_list: list, insurer_code: str) -> S
         confidence="not_found",
         reason="가입설계서/상품요약서/사업방법서에서 진단비 일시금 미확인",
         trace=trace,
+        source_level="UNKNOWN",  # U-4.18
     )
 
 

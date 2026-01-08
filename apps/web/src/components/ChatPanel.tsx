@@ -2,12 +2,14 @@
 
 /**
  * STEP 3.7-γ: ChatPanel with Coverage Guide Isolation
+ * STEP 5: Query Assist Integration
  *
  * Chat 영역은 "대화"로서의 역할만 수행
  * 담보 선택 가이드는 CoverageGuidePanel로 분리되어 표시
+ * Query Assist 힌트는 선택적 적용 (자동 적용 금지)
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -19,10 +21,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChatMessage, CompareRequestWithIntent, SuggestedCoverage } from "@/lib/types";
-import { ChevronDown, ChevronUp, Send } from "lucide-react";
+import { ChatMessage, CompareRequestWithIntent, SuggestedCoverage, QueryAssistResponse } from "@/lib/types";
+import { ChevronDown, ChevronUp, Send, Sparkles } from "lucide-react";
 import { CoverageGuidePanel } from "./CoverageGuidePanel";
 import { CoverageGuideState } from "@/lib/conversation-hygiene.config";
+import { QueryAssistHint } from "./QueryAssistHint";
+import { queryAssist } from "@/lib/api";
 
 const ALL_INSURERS = [
   "SAMSUNG",
@@ -52,8 +56,17 @@ interface ChatPanelProps {
   isLoading: boolean;
   /** STEP 3.7-γ: Coverage Guide State (UI State) */
   coverageGuide?: CoverageGuideState | null;
-  /** STEP 3.7-γ: 담보 선택 핸들러 */
+  /** STEP 3.7-γ: 담보 선택 핸들러 (단일) */
   onSelectCoverage?: (coverage: SuggestedCoverage) => void;
+  /** STEP 4.5-β: 담보 선택 핸들러 (복수) */
+  onSelectCoverages?: (coverages: SuggestedCoverage[]) => void;
+  /** STEP 3.7-δ-γ10: Lifted insurer selection state */
+  selectedInsurers: string[];
+  onInsurersChange: (insurers: string[]) => void;
+  /** STEP 3.9: Locked coverage state */
+  lockedCoverage?: { code: string; name: string } | null;
+  /** STEP 3.9: Unlock coverage handler */
+  onUnlockCoverage?: () => void;
 }
 
 export function ChatPanel({
@@ -62,18 +75,25 @@ export function ChatPanel({
   isLoading,
   coverageGuide,
   onSelectCoverage,
+  onSelectCoverages,
+  selectedInsurers,
+  onInsurersChange,
+  lockedCoverage,
+  onUnlockCoverage,
 }: ChatPanelProps) {
   const [query, setQuery] = useState("");
-  const [selectedInsurers, setSelectedInsurers] = useState<string[]>([
-    "SAMSUNG",
-    "MERITZ",
-  ]);
+  // STEP 3.7-δ-γ10: selectedInsurers lifted to parent (page.tsx)
   const [age, setAge] = useState<string>("");
   const [gender, setGender] = useState<"M" | "F" | "">("");
   const [topK, setTopK] = useState<number>(5);
   const [coverageCodes, setCoverageCodes] = useState("");
   const [policyKeywords, setPolicyKeywords] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // STEP 5: Query Assist state
+  const [assistResponse, setAssistResponse] = useState<QueryAssistResponse | null>(null);
+  const [isAssistLoading, setIsAssistLoading] = useState(false);
+  const [showAssistHint, setShowAssistHint] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -89,13 +109,75 @@ export function ChatPanel({
     }
   }, [messages]);
 
+  // STEP 3.7-δ-γ10: Use lifted state callback
   const toggleInsurer = (insurer: string) => {
-    setSelectedInsurers((prev) =>
-      prev.includes(insurer)
-        ? prev.filter((i) => i !== insurer)
-        : [...prev, insurer]
-    );
+    const newInsurers = selectedInsurers.includes(insurer)
+      ? selectedInsurers.filter((i) => i !== insurer)
+      : [...selectedInsurers, insurer];
+    onInsurersChange(newInsurers);
   };
+
+  // STEP 5: Query Assist - AI 힌트 요청
+  const handleRequestAssist = useCallback(async () => {
+    if (!query.trim() || isAssistLoading) return;
+
+    setIsAssistLoading(true);
+    setShowAssistHint(false);
+
+    try {
+      const response = await queryAssist({
+        query: query.trim(),
+        insurers: selectedInsurers,
+        context: {
+          has_anchor: !!lockedCoverage,
+          locked_coverage_codes: lockedCoverage ? [lockedCoverage.code] : null,
+        },
+      });
+
+      if (response) {
+        setAssistResponse(response);
+        setShowAssistHint(true);
+      }
+    } catch (error) {
+      console.warn("Query assist error:", error);
+    } finally {
+      setIsAssistLoading(false);
+    }
+  }, [query, selectedInsurers, lockedCoverage, isAssistLoading]);
+
+  // STEP 5: Apply assist hint
+  const handleApplyAssist = useCallback((normalizedQuery: string, keywords: string[]) => {
+    // 정규화된 질의로 교체 후 검색
+    setQuery(normalizedQuery);
+    setShowAssistHint(false);
+
+    // 자동으로 검색 실행
+    const request: CompareRequestWithIntent = {
+      insurers: selectedInsurers,
+      query: normalizedQuery,
+      top_k_per_insurer: topK,
+    };
+
+    if (age) {
+      request.age = parseInt(age, 10);
+    }
+    if (gender) {
+      request.gender = gender;
+    }
+    if (keywords.length > 0) {
+      request.policy_keywords = keywords;
+    }
+
+    onSendMessage(request);
+    setQuery("");
+  }, [selectedInsurers, topK, age, gender, onSendMessage]);
+
+  // STEP 5: Ignore assist hint
+  const handleIgnoreAssist = useCallback(() => {
+    setShowAssistHint(false);
+    // 원본 질의로 검색 진행
+    handleSend();
+  }, []);
 
   const handleSend = () => {
     // STEP 3.5: insurer 0개도 허용 (서버에서 auto-recovery 적용)
@@ -106,6 +188,12 @@ export function ChatPanel({
       query: query.trim(),
       top_k_per_insurer: topK,
     };
+
+    // STEP 3.9: Debug logging for SSOT verification
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[ChatPanel] UI selectedInsurers(state):", selectedInsurers);
+      console.log("[ChatPanel] Outbound payload insurers:", request.insurers);
+    }
 
     if (age) {
       request.age = parseInt(age, 10);
@@ -128,6 +216,9 @@ export function ChatPanel({
 
     onSendMessage(request);
     setQuery("");
+    // STEP 5: 검색 시 assist 힌트 초기화
+    setShowAssistHint(false);
+    setAssistResponse(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -138,9 +229,10 @@ export function ChatPanel({
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Messages Area - STEP 2.5: 스크롤 버그 수정 */}
-      <div className="flex-1 overflow-hidden" ref={scrollContainerRef}>
+    // STEP 4.9-β-1: ChatPanel 레이아웃 - 메시지 영역만 스크롤, 입력창 고정
+    <div className="flex flex-col h-full">
+      {/* STEP 4.9-β-1: 메시지 영역 - flex-1 overflow-y-auto (스크롤 책임자) */}
+      <div className="flex-1 min-h-0 overflow-y-auto" ref={scrollContainerRef}>
         <ScrollArea className="h-full">
           <div className="p-4 space-y-4">
             {messages.length === 0 && (
@@ -182,18 +274,19 @@ export function ChatPanel({
               </div>
             ))}
 
-            {/* STEP 3.7-γ: Coverage Guide Panel (UI State, NOT Chat State) */}
-            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재 */}
+            {/* STEP 3.7-γ + 4.5-β: Coverage Guide Panel (UI State, NOT Chat State) */}
+            {/* 담보 미확정 상태에서만 표시, 항상 1개만 존재, 복수 선택 가능 */}
             <CoverageGuidePanel
               guide={coverageGuide ?? null}
               onSelectCoverage={onSelectCoverage}
+              onSelectCoverages={onSelectCoverages}
             />
           </div>
         </ScrollArea>
       </div>
 
-      {/* Input Area */}
-      <div className="border-t bg-background p-4 space-y-3">
+      {/* STEP 4.9-β-1: 입력 영역 - shrink-0 (항상 하단 고정) */}
+      <div className="shrink-0 border-t bg-background p-4 space-y-3">
         {/* Advanced Options */}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger asChild>
@@ -305,6 +398,26 @@ export function ChatPanel({
           </CollapsibleContent>
         </Collapsible>
 
+        {/* STEP 3.9: Locked Coverage Display + UNLOCK Button */}
+        {lockedCoverage && (
+          <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+            <Badge variant="default" className="bg-amber-500">
+              🔒 {lockedCoverage.name}
+            </Badge>
+            <span className="text-xs text-amber-700">담보 고정됨</span>
+            {onUnlockCoverage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onUnlockCoverage}
+                className="ml-auto text-xs h-6 px-2"
+              >
+                담보 변경
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Selected Insurers Display (when advanced is closed) */}
         {!advancedOpen && (
           <div className="flex flex-wrap gap-1">
@@ -314,6 +427,17 @@ export function ChatPanel({
               </Badge>
             ))}
           </div>
+        )}
+
+        {/* STEP 5: Query Assist Hint Card */}
+        {showAssistHint && assistResponse && (
+          <QueryAssistHint
+            assistResponse={assistResponse}
+            originalQuery={query}
+            onApply={handleApplyAssist}
+            onIgnore={handleIgnoreAssist}
+            isLoading={isLoading}
+          />
         )}
 
         {/* Message Input */}
@@ -327,6 +451,16 @@ export function ChatPanel({
             className="min-h-[60px] resize-none"
             disabled={isLoading}
           />
+          {/* STEP 5: AI 힌트 버튼 */}
+          <Button
+            variant="outline"
+            onClick={handleRequestAssist}
+            disabled={!query.trim() || isLoading || isAssistLoading}
+            className="px-3"
+            title="AI 힌트"
+          >
+            <Sparkles className={`h-4 w-4 ${isAssistLoading ? "animate-pulse" : ""}`} />
+          </Button>
           <Button
             onClick={handleSend}
             disabled={!query.trim() || isLoading}

@@ -138,20 +138,26 @@ COMMENT ON COLUMN chunk.meta IS 'entities: {coverage_code, coverage_name, ...}, 
 -- 담보 표준 코드 (coverage_standard)
 -- 신정원 기준 표준 담보 코드
 -- ----------------------------------------------------------------------------
+-- U-5.0-A: Coverage Name Mapping Table - Single Source of Truth for Coverage Resolution
+-- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS coverage_standard (
     coverage_code   TEXT PRIMARY KEY,               -- 신정원 코드 (예: A4200_1)
     coverage_name   TEXT NOT NULL,                  -- 표준 담보명 (예: 암진단비(유사암제외))
+    -- U-5.0-A: 의미적 범위 (도메인 분류)
+    semantic_scope  TEXT DEFAULT 'UNKNOWN',         -- CANCER/CARDIO/SURGERY/INJURY/DEATH/UNKNOWN
     meta            JSONB DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON TABLE coverage_standard IS '신정원 기준 담보 표준 코드';
+COMMENT ON TABLE coverage_standard IS '신정원 기준 담보 표준 코드 (U-5.0-A: Coverage Resolution SSOT)';
 COMMENT ON COLUMN coverage_standard.coverage_code IS '신정원 담보 코드 (cre_cvr_cd)';
+COMMENT ON COLUMN coverage_standard.semantic_scope IS 'U-5.0-A: 의미적 범위 (CANCER/CARDIO/SURGERY/INJURY/DEATH/UNKNOWN)';
 
 -- ----------------------------------------------------------------------------
 -- 담보 별칭 (coverage_alias)
 -- 보험사별 실제 담보명 → 표준코드 매핑
+-- U-5.0-A: Coverage Resolution의 primary data source
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS coverage_alias (
     alias_id        BIGSERIAL PRIMARY KEY,
@@ -160,6 +166,9 @@ CREATE TABLE IF NOT EXISTS coverage_alias (
     raw_name        TEXT NOT NULL,                  -- 원본 담보명 (가입설계서 기준)
     raw_name_norm   TEXT NOT NULL,                  -- 정규화된 담보명 (검색용, 소문자/공백정리)
     source_doc_type TEXT NOT NULL DEFAULT '가입설계서',  -- 출처 문서 유형
+    -- U-5.0-A: Resolution 강화 필드
+    is_primary      BOOLEAN DEFAULT false,          -- 해당 보험사의 대표 담보명 여부
+    confidence      NUMERIC(3,2) DEFAULT 0.8,       -- 매핑 신뢰도 (0.00 ~ 1.00)
     meta            JSONB DEFAULT '{}'::jsonb,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -167,8 +176,10 @@ CREATE TABLE IF NOT EXISTS coverage_alias (
     UNIQUE(insurer_id, raw_name_norm, source_doc_type)
 );
 
-COMMENT ON TABLE coverage_alias IS '보험사별 담보명 → 표준코드 매핑';
+COMMENT ON TABLE coverage_alias IS 'U-5.0-A: 보험사별 담보명 → 표준코드 매핑 (Coverage Resolution SSOT)';
 COMMENT ON COLUMN coverage_alias.raw_name_norm IS '정규화된 담보명 (검색 매칭용). 특수문자→공백, 소문자, 공백정리';
+COMMENT ON COLUMN coverage_alias.is_primary IS 'U-5.0-A: 해당 보험사의 대표 담보명 여부';
+COMMENT ON COLUMN coverage_alias.confidence IS 'U-5.0-A: 매핑 신뢰도 (1.0=신정원, 0.9=수기, 0.7=추정)';
 
 -- ============================================================================
 -- 3. INDEXES
@@ -249,6 +260,32 @@ CREATE INDEX IF NOT EXISTS idx_coverage_alias_raw_name_norm ON coverage_alias(ra
 -- Coverage Alias: pg_trgm 기반 유사 검색 (퍼지 매칭)
 CREATE INDEX IF NOT EXISTS idx_coverage_alias_raw_name_trgm
     ON coverage_alias USING gin (raw_name_norm gin_trgm_ops);
+
+-- U-5.0-A: Additional indexes for Coverage Resolution
+CREATE INDEX IF NOT EXISTS idx_coverage_standard_semantic_scope
+    ON coverage_standard(semantic_scope);
+CREATE INDEX IF NOT EXISTS idx_coverage_alias_confidence
+    ON coverage_alias(confidence);
+CREATE INDEX IF NOT EXISTS idx_coverage_alias_is_primary
+    ON coverage_alias(is_primary) WHERE is_primary = true;
+
+-- ----------------------------------------------------------------------------
+-- Chunk: pg_trgm 인덱스 (ILIKE 키워드 검색 성능 개선)
+-- 출처: db/migrations/20251217_add_trgm_indexes.sql
+-- ----------------------------------------------------------------------------
+
+-- 전체 chunk.content에 대한 trigram 인덱스
+CREATE INDEX IF NOT EXISTS idx_chunk_content_trgm
+    ON chunk USING gin (content gin_trgm_ops);
+
+-- 약관(doc_type='약관')에 대한 부분 인덱스 (policy_axis 검색용)
+CREATE INDEX IF NOT EXISTS idx_chunk_content_trgm_policy
+    ON chunk USING gin (content gin_trgm_ops)
+    WHERE doc_type = '약관';
+
+-- 복합 조건 검색용 인덱스 (insurer_id + doc_type)
+CREATE INDEX IF NOT EXISTS idx_chunk_insurer_doctype
+    ON chunk (insurer_id, doc_type);
 
 -- ============================================================================
 -- 4. TRIGGERS (updated_at 자동 갱신)
@@ -349,6 +386,67 @@ LEFT JOIN insurer i ON c.insurer_id = i.insurer_id
 LEFT JOIN document d ON c.document_id = d.document_id;
 
 COMMENT ON VIEW v_chunk_with_coverage IS '청크 + coverage_code 추출 뷰';
+
+-- ----------------------------------------------------------------------------
+-- U-5.0-A: Coverage Name Mapping View (Coverage Resolution SSOT)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE VIEW coverage_name_map AS
+SELECT
+    i.insurer_code,
+    ca.raw_name AS insurer_coverage_name,
+    cs.coverage_name AS standard_coverage_name,
+    ca.coverage_code,
+    cs.semantic_scope,
+    ca.is_primary,
+    ca.confidence,
+    ca.source_doc_type AS source
+FROM coverage_alias ca
+JOIN insurer i ON ca.insurer_id = i.insurer_id
+JOIN coverage_standard cs ON ca.coverage_code = cs.coverage_code;
+
+COMMENT ON VIEW coverage_name_map IS
+'U-5.0-A: Coverage Resolution의 Single Source of Truth 뷰. 보험사별 담보명 → 표준 담보명 매핑';
+
+-- ============================================================================
+-- 7. COMPARISON SLOT CACHE (선택적 캐싱)
+-- 출처: db/migrations/20251218_add_comparison_slots.sql
+-- ============================================================================
+
+-- 슬롯 결과 캐시 테이블 (on-the-fly 계산 우선, 선택적 캐싱용)
+CREATE TABLE IF NOT EXISTS comparison_slot_cache (
+    cache_id        BIGSERIAL PRIMARY KEY,
+    insurer_id      BIGINT NOT NULL REFERENCES insurer(insurer_id) ON DELETE CASCADE,
+    product_id      BIGINT REFERENCES product(product_id) ON DELETE SET NULL,
+    plan_id         BIGINT REFERENCES product_plan(plan_id) ON DELETE SET NULL,
+    coverage_code   TEXT NOT NULL,
+    slot_key        TEXT NOT NULL,
+    slot_value      TEXT,
+    slot_unit       TEXT,
+    normalized_value NUMERIC,
+    confidence      TEXT DEFAULT 'medium',
+    evidence_refs   JSONB DEFAULT '[]'::jsonb,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT uq_slot_cache UNIQUE (insurer_id, product_id, plan_id, coverage_code, slot_key)
+);
+
+COMMENT ON TABLE comparison_slot_cache IS '슬롯 결과 캐시 (선택적, on-the-fly 계산 우선)';
+COMMENT ON COLUMN comparison_slot_cache.slot_key IS '슬롯 키 (payout_amount, existence_status 등)';
+COMMENT ON COLUMN comparison_slot_cache.evidence_refs IS '근거 참조 [{document_id, page_start, chunk_id}]';
+
+-- Comparison Slot Cache 인덱스
+CREATE INDEX IF NOT EXISTS idx_slot_cache_insurer_coverage
+    ON comparison_slot_cache(insurer_id, coverage_code);
+
+CREATE INDEX IF NOT EXISTS idx_slot_cache_slot_key
+    ON comparison_slot_cache(slot_key);
+
+-- Comparison Slot Cache 트리거
+DROP TRIGGER IF EXISTS trg_slot_cache_updated_at ON comparison_slot_cache;
+CREATE TRIGGER trg_slot_cache_updated_at
+    BEFORE UPDATE ON comparison_slot_cache
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
 -- END OF SCHEMA

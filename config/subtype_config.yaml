@@ -1,0 +1,127 @@
+# STEP 4.12-γ: Subtype Intent Detection & Slot Configuration
+#
+# 경계성종양/제자리암 등 Subtype 질의 처리를 위한 설정
+# 코드 하드코딩 금지 원칙에 따라 테이블/설정으로 분리
+
+# =============================================================================
+# 1. Subtype Keyword → Target Mapping
+# =============================================================================
+subtype_keyword_map:
+  # 경계성종양 관련
+  경계성: borderline
+  경계성종양: borderline
+  경계성 종양: borderline
+
+  # 제자리암 관련
+  제자리암: in_situ
+  상피내암: in_situ
+  제자리 암: in_situ
+  상피내 암: in_situ
+
+  # 유사암 관련
+  유사암: similar_cancer
+  유사 암: similar_cancer
+
+  # 소액암 관련
+  소액암: minor_cancer
+  소액 암: minor_cancer
+
+  # 특수 암 유형 (유사암 범주로 분류되는 경우 많음)
+  갑상선암: thyroid_cancer
+  기타피부암: skin_cancer
+
+# =============================================================================
+# 2. Subtype Target → Display Name
+# =============================================================================
+subtype_display_names:
+  borderline: 경계성종양
+  in_situ: 제자리암(상피내암)
+  similar_cancer: 유사암
+  minor_cancer: 소액암
+  thyroid_cancer: 갑상선암
+  skin_cancer: 기타피부암
+
+# =============================================================================
+# 3. Subtype Slot Definitions
+# =============================================================================
+subtype_slots:
+  # 보장 여부 슬롯 (comparable=true)
+  - slot_key: subtype_in_situ_covered
+    label: 제자리암 보장 여부
+    comparable: true
+    targets: [in_situ]
+    extractor: subtype_coverage_status
+
+  - slot_key: subtype_borderline_covered
+    label: 경계성종양 보장 여부
+    comparable: true
+    targets: [borderline]
+    extractor: subtype_coverage_status
+
+  - slot_key: subtype_similar_cancer_covered
+    label: 유사암 보장 여부
+    comparable: true
+    targets: [similar_cancer]
+    extractor: subtype_coverage_status
+
+  # 지급비율 슬롯 (comparable=true)
+  - slot_key: subtype_payment_ratio
+    label: 지급비율(감액)
+    comparable: true
+    targets: [in_situ, borderline, similar_cancer, minor_cancer]
+    extractor: subtype_payment_ratio
+
+  # 정의 슬롯 (comparable=false - 참고용)
+  - slot_key: subtype_definition_excerpt
+    label: 정의/판정 문구
+    comparable: false
+    targets: [in_situ, borderline, similar_cancer]
+    extractor: subtype_definition
+
+  # 조건 슬롯 (comparable=false - 참고용)
+  - slot_key: subtype_condition_excerpt
+    label: 특이 조건
+    comparable: false
+    targets: [in_situ, borderline, similar_cancer]
+    extractor: subtype_condition
+
+# =============================================================================
+# 4. Suppressed Slots in Subtype Mode
+# =============================================================================
+# Subtype 모드에서 생성 금지되는 슬롯
+suppressed_slots_in_subtype:
+  - payout_amount
+  - diagnosis_lump_sum_amount
+  - payout_condition_summary
+  - surgery_benefit_amount
+  - surgery_count_limit
+
+# =============================================================================
+# 5. Policy Keywords for Subtype Evidence
+# =============================================================================
+# 약관/요약서에서 Subtype 관련 근거를 찾을 때 사용할 키워드
+subtype_evidence_keywords:
+  borderline:
+    - 경계성종양
+    - 경계성 종양
+    - borderline
+
+  in_situ:
+    - 제자리암
+    - 상피내암
+    - 제자리 암
+    - 상피내 암
+    - carcinoma in situ
+
+  similar_cancer:
+    - 유사암
+    - 유사 암
+    - 소액암
+    - 경계성종양
+    - 제자리암
+    - 갑상선암
+    - 기타피부암
+
+  minor_cancer:
+    - 소액암
+    - 소액 암

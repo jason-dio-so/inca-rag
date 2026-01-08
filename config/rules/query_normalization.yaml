@@ -1,0 +1,45 @@
+# Query Normalization Rules for Coverage Recommendation
+# SSOT for normalize_query_for_coverage() in services/retrieval/compare_service.py
+#
+# 헌법 준수: 코드 내 하드코딩 금지, 이 파일에서만 규칙 관리
+
+# 의도 표현 suffix (긴 것부터 정렬 필수 - greedy match)
+intent_suffixes:
+  - "를비교해줘"
+  - "을비교해줘"
+  - "비교해줘"
+  - "비교해"
+  - "비교"
+  - "를알려줘"
+  - "을알려줘"
+  - "알려줘"
+  - "알려"
+  - "를찾아줘"
+  - "을찾아줘"
+  - "찾아줘"
+  - "찾아"
+  - "어떻게되나요"
+  - "어떻게돼"
+  - "뭐야"
+  - "뭐가있어"
+  - "좀"
+  - "요"
+  - "해줘"
+  - "해"
+
+# 끝에 남은 조사 제거 (regex 패턴)
+trailing_particles_pattern: "[를을의에]$"
+
+# 보험사명 제거 후 남은 중간 조사 제거 (regex 패턴)
+intermediate_particles:
+  # 문자열 시작/끝의 조사
+  boundary_pattern: "^[과와의를을에서]|[과와의를을에서]$"
+  # 연결 조사 (한글 앞에 오는 "과", "와")
+  conjunction_pattern: "[과와](?=[가-힣])"
+
+# 특수문자 제거 패턴
+punctuation_pattern: "[,\\.;:!?]"
+
+# 처리 옵션
+options:
+  strip_whitespace: true  # 공백 제거 여부

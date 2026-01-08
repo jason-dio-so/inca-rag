@@ -101,13 +101,9 @@ export function CompareTable({ data }: CompareTableProps) {
           <tbody>
             {data.map((item, idx) => (
               <tr key={idx} className="border-b">
+                {/* STEP 4.9-β: coverage_code 노출 금지, display name만 표시 */}
                 <td className="p-3 font-medium">
-                  <div>{item.coverage_name || item.coverage_code}</div>
-                  {item.coverage_name && (
-                    <div className="text-xs text-muted-foreground">
-                      {item.coverage_code}
-                    </div>
-                  )}
+                  <div>{item.coverage_name || "담보"}</div>
                 </td>
                 {insurerList.map((insurer) => {
                   // insurers is a list, find by insurer_code
@@ -122,7 +118,34 @@ export function CompareTable({ data }: CompareTableProps) {
                     );
                   }
 
-                  // A2 Policy: Filter out 약관 from best_evidence
+                  // U-4.18: source_level 기반 렌더링 규칙
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const sourceLevel = (insurerData as any).source_level as string | undefined;
+
+                  // COMPARABLE_DOC이 아닌 경우 비교 불가 표시
+                  if (sourceLevel === "POLICY_ONLY") {
+                    return (
+                      <td key={insurer} className="p-3 text-center">
+                        <div className="text-sm text-amber-600 bg-amber-50 rounded px-2 py-1">
+                          비교 불가
+                          <br />
+                          <span className="text-xs text-muted-foreground">(동일 기준 문서 없음)</span>
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  if (sourceLevel === "UNKNOWN" || !sourceLevel) {
+                    return (
+                      <td key={insurer} className="p-3 text-center">
+                        <div className="text-sm text-gray-500 bg-gray-50 rounded px-2 py-1">
+                          근거 부족
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  // COMPARABLE_DOC: A2 Policy - Filter out 약관 from best_evidence
                   const filteredEvidence = filterNonPolicy(
                     insurerData.best_evidence || []
                   );

@@ -2,6 +2,9 @@
 
 /**
  * STEP 3.8: Evidence Panel with View State Isolation
+ * STEP 4.0: Evidence Priority Ordering (P1/P2/P3)
+ * STEP 5: Evidence Summary Integration (비판단 요약)
+ * U-4.18-γ: Evidence Source Boundary & Anti-Comparison UX
  *
  * Evidence/Policy 상세보기는 ViewContext를 통해 처리되며,
  * Query State(messages, currentResponse, anchor)에 영향을 주지 않습니다.
@@ -10,9 +13,16 @@
  * - Evidence 클릭 = Read-only View Event
  * - Query State 변경 없음
  * - View State만 업데이트
+ * - STEP 4.0: P1(결정근거) → P2(해석근거) → P3(보조근거) 순서 정렬
+ * - STEP 5: Evidence Summary는 비판단 요약만 제공
+ *
+ * U-4.18-γ 원칙:
+ * - Evidence는 '검증용 열람 창'이지, '비교·판단·결론 도출 창'이 아니다
+ * - 모든 Evidence에 source_level 배지 표시
+ * - 비교 인상 금지 (나란히 배치 ❌, 수치 강조 ❌, 결론 유도 ❌)
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,10 +37,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef } from "@/lib/types";
+import { CompareAxisItem, PolicyAxisItem, Evidence, ComparisonSlot, SlotEvidenceRef, EvidenceItem } from "@/lib/types";
 import { copyToClipboard, formatEvidenceRef } from "@/lib/api";
-import { Copy, Check, Eye, ChevronDown, Star, FileText } from "lucide-react";
+import { Copy, Check, Eye, ChevronDown, Star, FileText, AlertTriangle } from "lucide-react";
 import { useViewContext } from "@/contexts/ViewContext";
+import {
+  determineEvidencePriority,
+  sortEvidenceByPriority,
+  PRIORITY_DEFINITIONS,
+  PRIORITY_STYLES,
+  EvidencePriority,
+} from "@/lib/evidence-priority.config";
+import { EvidenceSummaryPanel } from "./EvidenceSummaryPanel";
 
 const INSURER_NAMES: Record<string, string> = {
   SAMSUNG: "삼성",
@@ -49,6 +67,55 @@ const DOC_TYPE_COLORS: Record<string, string> = {
   사업방법서: "bg-purple-100 text-purple-800",
   약관: "bg-orange-100 text-orange-800",
 };
+
+// =============================================================================
+// U-4.18-γ: Source Level Configuration
+// =============================================================================
+
+type SourceLevel = "COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN";
+
+const SOURCE_LEVEL_CONFIG: Record<SourceLevel, {
+  label: string;
+  bgColor: string;
+  textColor: string;
+  borderColor: string;
+}> = {
+  COMPARABLE_DOC: {
+    label: "비교 문서 근거",
+    bgColor: "bg-blue-50",
+    textColor: "text-blue-700",
+    borderColor: "border-blue-200",
+  },
+  POLICY_ONLY: {
+    label: "약관 근거",
+    bgColor: "bg-amber-50",
+    textColor: "text-amber-700",
+    borderColor: "border-amber-200",
+  },
+  UNKNOWN: {
+    label: "출처 불명",
+    bgColor: "bg-gray-50",
+    textColor: "text-gray-500",
+    borderColor: "border-gray-200",
+  },
+};
+
+/**
+ * U-4.18-γ: Determine source_level from doc_type
+ * - 가입설계서, 상품요약서, 사업방법서 → COMPARABLE_DOC
+ * - 약관 → POLICY_ONLY
+ * - 기타 → UNKNOWN
+ */
+function getSourceLevel(docType: string): SourceLevel {
+  const comparableDocs = ["가입설계서", "상품요약서", "사업방법서"];
+  if (comparableDocs.includes(docType)) {
+    return "COMPARABLE_DOC";
+  }
+  if (docType === "약관") {
+    return "POLICY_ONLY";
+  }
+  return "UNKNOWN";
+}
 
 interface EvidencePanelProps {
   data: CompareAxisItem[] | PolicyAxisItem[];
@@ -127,6 +194,38 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
     );
   }
 
+  // STEP 5: Evidence Summary를 위한 데이터 준비
+  // 대표 근거들을 EvidenceItem 형식으로 변환
+  const evidenceItemsForSummary: EvidenceItem[] = useMemo(() => {
+    const items: EvidenceItem[] = [];
+
+    insurerList.forEach((insurer) => {
+      const allEvidence = groupedByInsurer.get(insurer) || [];
+      const repSet = buildRepresentativeEvidenceSet(slots, insurer);
+
+      // 대표 근거만 요약에 포함 (없으면 처음 2개)
+      const representativeEvidence = allEvidence.filter((ev) => {
+        const key = `${ev.document_id}-${ev.page_start ?? 0}`;
+        return repSet.has(key);
+      });
+
+      const evidenceToSummarize = representativeEvidence.length > 0
+        ? representativeEvidence.slice(0, 3)
+        : allEvidence.slice(0, 2);
+
+      evidenceToSummarize.forEach((ev) => {
+        items.push({
+          insurer_code: insurer,
+          doc_type: ev.doc_type,
+          page: ev.page_start ?? undefined,
+          excerpt: ev.preview?.slice(0, 500) || "",
+        });
+      });
+    });
+
+    return items;
+  }, [insurerList, groupedByInsurer, slots]);
+
   const handleCopy = async (evidence: Evidence) => {
     const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
     const success = await copyToClipboard(ref);
@@ -160,17 +259,34 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
       {/* STEP 3.8: PdfPageViewer는 이제 DocumentViewerLayer (page.tsx)에서 관리됨 */}
       {/* ViewContext.openDocument()를 통해 View State만 변경하고, Query State는 불변 */}
 
-      {/* U-4.9: Evidence Tab Clarification Notice */}
+      {/* =================================================================
+          U-4.18-γ: Evidence 경고 배너 (필수, 닫기 불가, 고정)
+          Evidence는 '검증용 열람 창'이지, '비교·판단·결론 도출 창'이 아니다
+          ================================================================= */}
       {!isPolicyMode && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="flex items-start gap-2">
-            <FileText className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-            <div className="text-sm text-blue-800 space-y-1">
-              <p>※ Evidence는 비교 계산에 사용된 &apos;대표 근거&apos;가 아니라,</p>
-              <p className="ml-3">관련 문서에서 발견된 전체 근거 목록입니다.</p>
+        <div className="mb-4 p-4 bg-amber-50 border-2 border-amber-300 rounded-lg sticky top-0 z-10">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="text-sm text-amber-800 space-y-2">
+              <p className="font-semibold">⚠️ 이 화면은 비교 결과가 아닙니다.</p>
+              <p>
+                Evidence는 각 보험사의 관련 문서에서 발췌된 &apos;근거 목록&apos;을 보여주는 용도이며,
+                보험사 간 조건을 직접 비교하거나 결론을 도출하기 위한 화면이 아닙니다.
+              </p>
+              <p className="text-xs text-amber-600">
+                비교 결과는 Compare 탭을 확인해 주세요.
+              </p>
             </div>
           </div>
         </div>
+      )}
+
+      {/* STEP 5: Evidence Summary Panel (비판단 요약) */}
+      {!isPolicyMode && evidenceItemsForSummary.length > 0 && (
+        <EvidenceSummaryPanel
+          evidenceItems={evidenceItemsForSummary}
+          isLoading={false}
+        />
       )}
 
       {isPolicyMode && (
@@ -226,6 +342,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
               <AccordionContent>
                 <div className="space-y-4 pt-2">
                   {/* U-4.9: Section 1 - 비교에 사용된 대표 근거 */}
+                  {/* STEP 4.0: Sort by priority within section */}
                   {slots && representativeEvidence.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-sm font-medium text-amber-700">
@@ -233,7 +350,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                         비교에 사용된 대표 근거
                       </div>
                       <div className="space-y-2">
-                        {representativeEvidence.map((ev, idx) => (
+                        {sortEvidenceByPriority(representativeEvidence).map((ev, idx) => (
                           <EvidenceCard
                             key={`rep-${ev.document_id}-${ev.page_start}-${idx}`}
                             evidence={ev}
@@ -241,6 +358,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                             onView={handleView}
                             copiedRef={copiedRef}
                             isRepresentative={true}
+                            showPriority={true}
                           />
                         ))}
                       </div>
@@ -271,8 +389,9 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                         </Button>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
+                        {/* STEP 4.0: Sort by priority within section */}
                         <div className="space-y-2 pt-2">
-                          {additionalEvidence.map((ev, idx) => (
+                          {sortEvidenceByPriority(additionalEvidence).map((ev, idx) => (
                             <EvidenceCard
                               key={`add-${ev.document_id}-${ev.page_start}-${idx}`}
                               evidence={ev}
@@ -280,6 +399,7 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                               onView={handleView}
                               copiedRef={copiedRef}
                               isRepresentative={false}
+                              showPriority={true}
                             />
                           ))}
                         </div>
@@ -288,13 +408,15 @@ export function EvidencePanel({ data, isPolicyMode = false, slots }: EvidencePan
                   )}
 
                   {/* Fallback: No slots, show all evidence normally */}
-                  {!slots && allEvidence.map((ev, idx) => (
+                  {/* STEP 4.0: Sort by priority */}
+                  {!slots && sortEvidenceByPriority(allEvidence).map((ev, idx) => (
                     <EvidenceCard
                       key={`${ev.document_id}-${ev.page_start}-${idx}`}
                       evidence={ev}
                       onCopy={handleCopy}
                       onView={handleView}
                       copiedRef={copiedRef}
+                      showPriority={true}
                     />
                   ))}
                 </div>
@@ -313,6 +435,7 @@ interface EvidenceCardProps {
   onView: (evidence: Evidence) => void;
   copiedRef: string | null;
   isRepresentative?: boolean; // U-4.9: true = 대표 근거, false = 참고 근거
+  showPriority?: boolean; // STEP 4.0: show P1/P2/P3 priority badge
 }
 
 function EvidenceCard({
@@ -321,16 +444,32 @@ function EvidenceCard({
   onView,
   copiedRef,
   isRepresentative,
+  showPriority = false,
 }: EvidenceCardProps) {
   const ref = formatEvidenceRef(evidence.document_id, evidence.page_start);
   const isCopied = copiedRef === ref;
 
+  // STEP 4.0: Determine priority
+  const priority = useMemo(() => determineEvidencePriority(evidence), [evidence]);
+  const priorityDef = PRIORITY_DEFINITIONS[priority];
+  const priorityStyle = PRIORITY_STYLES[priority];
+
+  // U-4.18-γ: Determine source_level
+  const sourceLevel = useMemo(() => getSourceLevel(evidence.doc_type), [evidence.doc_type]);
+  const sourceLevelConfig = SOURCE_LEVEL_CONFIG[sourceLevel];
+
   return (
     <Card className={isRepresentative ? "border-amber-300 bg-amber-50/30" : ""}>
       <CardContent className="p-3">
+        {/* U-4.18-γ: Source Level Badge (최상단, 필수) */}
+        <div className={`mb-2 px-2 py-1 rounded text-xs font-medium inline-flex items-center gap-1 ${sourceLevelConfig.bgColor} ${sourceLevelConfig.textColor} border ${sourceLevelConfig.borderColor}`}>
+          {sourceLevel === "POLICY_ONLY" && <AlertTriangle className="h-3 w-3" />}
+          {sourceLevelConfig.label}
+        </div>
+
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 space-y-1">
-            {/* Doc Type Badge + Representative Badge */}
+            {/* Doc Type Badge + Representative Badge + Priority Badge */}
             <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 className={
@@ -340,6 +479,21 @@ function EvidenceCard({
               >
                 {evidence.doc_type}
               </Badge>
+              {/* STEP 4.0: Priority badge */}
+              {showPriority && (
+                <Badge
+                  variant="outline"
+                  className={`${priorityStyle.bgColor} ${priorityStyle.textColor} ${priorityStyle.borderColor}`}
+                >
+                  <span className="flex items-center gap-1">
+                    {/* Stars based on priority */}
+                    {Array.from({ length: priorityDef.stars }).map((_, i) => (
+                      <Star key={i} className="h-2.5 w-2.5 fill-current" />
+                    ))}
+                    <span className="ml-0.5">{priorityDef.name}</span>
+                  </span>
+                </Badge>
+              )}
               {/* U-4.9: 대표/참고 근거 badge */}
               {isRepresentative !== undefined && (
                 <Badge
@@ -359,11 +513,6 @@ function EvidenceCard({
                     "참고 근거"
                   )}
                 </Badge>
-              )}
-              {evidence.score !== undefined && (
-                <span className="text-xs text-muted-foreground">
-                  score: {evidence.score.toFixed(2)}
-                </span>
               )}
             </div>
 

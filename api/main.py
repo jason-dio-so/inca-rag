@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.compare import router as compare_router
 from api.document_viewer import router as document_viewer_router
+from api.assist import router as assist_router
 
 app = FastAPI(
     title="Insurance Comparison RAG API",
@@ -28,6 +29,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(compare_router)
 app.include_router(document_viewer_router)
+app.include_router(assist_router)  # STEP 5: LLM Assist
 
 
 @app.get("/health")
@@ -46,6 +48,8 @@ async def root():
             {"path": "/compare", "method": "POST", "description": "2-Phase Retrieval 비교 검색"},
             {"path": "/documents/{id}/page/{page}", "method": "GET", "description": "PDF 페이지 이미지"},
             {"path": "/documents/{id}/info", "method": "GET", "description": "문서 정보 조회"},
+            {"path": "/assist/query", "method": "POST", "description": "Query Assist - 질의 정규화/힌트"},
+            {"path": "/assist/summary", "method": "POST", "description": "Evidence Summary - 비판단 요약"},
             {"path": "/health", "method": "GET", "description": "헬스 체크"},
         ],
     }

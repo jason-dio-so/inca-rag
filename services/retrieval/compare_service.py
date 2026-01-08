@@ -7,13 +7,16 @@ policy_axis: 약관에서 키워드 기반 검색 (A2 정책: 약관은 비교�
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
+import yaml
 from psycopg.rows import dict_row
 
 from services.extraction.amount_extractor import extract_amount, AmountExtract
@@ -118,29 +121,137 @@ def get_hybrid_vector_top_k() -> int:
     return int(os.environ.get("COMPARE_AXIS_VECTOR_TOP_K", "20"))
 
 
+_logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Query Normalization (헌법 준수: 설정 파일에서만 규칙 로드)
+# ============================================================================
+
+_CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
+
+
+def _load_insurer_aliases() -> list[str]:
+    """
+    insurer_alias.yaml에서 모든 보험사 alias 로드 (긴 것부터 정렬)
+
+    헌법 준수: 하드코딩 fallback 금지. 설정 파일이 SSOT.
+    로드 실패 시 빈 리스트 반환 + 경고 로그.
+    """
+    config_path = _CONFIG_DIR / "mappings" / "insurer_alias.yaml"
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+            # 모든 key (alias)를 가져와서 긴 것부터 정렬 (greedy match)
+            aliases = list(data.keys())
+            aliases.sort(key=lambda x: len(x), reverse=True)
+            return aliases
+    except FileNotFoundError:
+        _logger.error(f"[CRITICAL] insurer_alias.yaml not found: {config_path}")
+        return []
+    except Exception as e:
+        _logger.error(f"[CRITICAL] Failed to load insurer_alias.yaml: {e}")
+        return []
+
+
+def _load_normalization_rules() -> dict:
+    """
+    query_normalization.yaml에서 정규화 규칙 로드
+
+    헌법 준수: 하드코딩 금지. 설정 파일이 SSOT.
+    """
+    config_path = _CONFIG_DIR / "rules" / "query_normalization.yaml"
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        _logger.error(f"[CRITICAL] query_normalization.yaml not found: {config_path}")
+        return {}
+    except Exception as e:
+        _logger.error(f"[CRITICAL] Failed to load query_normalization.yaml: {e}")
+        return {}
+
+
+# 모듈 로드 시 한 번만 로드 (캐시)
+_INSURER_ALIASES: list[str] | None = None
+_NORMALIZATION_RULES: dict | None = None
+
+
+def _get_insurer_aliases() -> list[str]:
+    """캐시된 보험사 alias 리스트 반환"""
+    global _INSURER_ALIASES
+    if _INSURER_ALIASES is None:
+        _INSURER_ALIASES = _load_insurer_aliases()
+    return _INSURER_ALIASES
+
+
+def _get_normalization_rules() -> dict:
+    """캐시된 정규화 규칙 반환"""
+    global _NORMALIZATION_RULES
+    if _NORMALIZATION_RULES is None:
+        _NORMALIZATION_RULES = _load_normalization_rules()
+    return _NORMALIZATION_RULES
+
+
 def normalize_query_for_coverage(query: str) -> str:
     """
     coverage 추천을 위한 query 정규화
+
+    헌법 준수: 모든 규칙은 config/rules/query_normalization.yaml에서 로드
+    - 보험사명 제거 (config/mappings/insurer_alias.yaml)
+    - 질의 의도 표현 제거
     - 공백 제거
     - 특수문자 제거
-    - 소문자 변환은 하지 않음 (한글이므로)
     """
-    # 공백 제거
-    normalized = query.replace(" ", "")
-    # 일반적인 특수문자 제거 (괄호, 하이픈 등 유지)
-    normalized = re.sub(r"[,\.;:!?]", "", normalized)
+    rules = _get_normalization_rules()
+    normalized = query
+
+    # 1. 보험사명/alias 제거 (긴 것부터 제거하여 부분 매칭 방지)
+    for alias in _get_insurer_aliases():
+        normalized = normalized.replace(alias, "")
+
+    # 2. 중간 조사 제거 (보험사명 제거 후 남은 조사)
+    intermediate = rules.get("intermediate_particles", {})
+    if boundary_pattern := intermediate.get("boundary_pattern"):
+        normalized = re.sub(boundary_pattern, "", normalized)
+    if conjunction_pattern := intermediate.get("conjunction_pattern"):
+        normalized = re.sub(conjunction_pattern, "", normalized)
+
+    # 3. 공백 제거
+    if rules.get("options", {}).get("strip_whitespace", True):
+        normalized = normalized.replace(" ", "")
+
+    # 4. 질의 의도 표현 제거 (긴 것부터)
+    intent_suffixes = rules.get("intent_suffixes", [])
+    for suffix in intent_suffixes:
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)]
+            break
+
+    # 5. 끝에 남은 조사 제거
+    if trailing_pattern := rules.get("trailing_particles_pattern"):
+        normalized = re.sub(trailing_pattern, "", normalized)
+
+    # 6. 특수문자 제거
+    if punctuation_pattern := rules.get("punctuation_pattern"):
+        normalized = re.sub(punctuation_pattern, "", normalized)
+
     return normalized
 
 
 @dataclass
 class CoverageRecommendation:
-    """coverage_code 추천 결과"""
+    """coverage_code 추천 결과 (U-5.0-A: confidence 추가)"""
     insurer_code: str
     coverage_code: str
     coverage_name: str | None
     raw_name: str
     source_doc_type: str
     similarity: float
+    # U-5.0-A: 매핑 신뢰도 (테이블 기반)
+    confidence: float = 0.8
+    semantic_scope: str = "UNKNOWN"
+    # U-5.0-A: Combined score (similarity * confidence)
+    combined_score: float = 0.0
 
 
 def recommend_coverage_codes(
@@ -173,7 +284,7 @@ def recommend_coverage_codes(
     with conn.cursor() as cur:
         # 보험사별로 추천 (쏠림 방지)
         for insurer_code in insurers:
-            # pg_trgm similarity 기반 검색
+            # U-5.0-A: pg_trgm similarity * confidence 기반 검색
             # source_doc_type 우선순위 적용 (가입설계서 > 상품요약서 > 사업방법서)
             query_sql = """
                 WITH ranked AS (
@@ -184,6 +295,11 @@ def recommend_coverage_codes(
                         ca.raw_name,
                         ca.source_doc_type,
                         similarity(ca.raw_name_norm, %s) AS sim,
+                        -- U-5.0-A: confidence 및 semantic_scope 추가
+                        COALESCE(ca.confidence, 0.8) AS confidence,
+                        COALESCE(cs.semantic_scope, 'UNKNOWN') AS semantic_scope,
+                        -- U-5.0-A: combined score = similarity * confidence
+                        similarity(ca.raw_name_norm, %s) * COALESCE(ca.confidence, 0.8) AS combined_score,
                         CASE ca.source_doc_type
                             WHEN '가입설계서' THEN 3
                             WHEN '상품요약서' THEN 2
@@ -193,13 +309,14 @@ def recommend_coverage_codes(
                         ROW_NUMBER() OVER (
                             PARTITION BY ca.coverage_code
                             ORDER BY
+                                -- U-5.0-A: combined score 우선 정렬
+                                similarity(ca.raw_name_norm, %s) * COALESCE(ca.confidence, 0.8) DESC,
                                 CASE ca.source_doc_type
                                     WHEN '가입설계서' THEN 3
                                     WHEN '상품요약서' THEN 2
                                     WHEN '사업방법서' THEN 1
                                     ELSE 0
-                                END DESC,
-                                similarity(ca.raw_name_norm, %s) DESC
+                                END DESC
                         ) AS rn
                     FROM coverage_alias ca
                     JOIN insurer i ON ca.insurer_id = i.insurer_id
@@ -207,15 +324,16 @@ def recommend_coverage_codes(
                     WHERE i.insurer_code = %s
                       AND similarity(ca.raw_name_norm, %s) >= %s
                 )
-                SELECT insurer_code, coverage_code, coverage_name, raw_name, source_doc_type, sim
+                SELECT insurer_code, coverage_code, coverage_name, raw_name, source_doc_type,
+                       sim, confidence, semantic_scope, combined_score
                 FROM ranked
                 WHERE rn = 1
-                ORDER BY sim DESC, doc_priority DESC
+                ORDER BY combined_score DESC, doc_priority DESC
                 LIMIT %s
             """
             cur.execute(
                 query_sql,
-                (q_norm, q_norm, insurer_code, q_norm, min_similarity, top_n_per_insurer),
+                (q_norm, q_norm, q_norm, insurer_code, q_norm, min_similarity, top_n_per_insurer),
             )
             rows = cur.fetchall()
 
@@ -228,6 +346,10 @@ def recommend_coverage_codes(
                         raw_name=row["raw_name"],
                         source_doc_type=row["source_doc_type"],
                         similarity=float(row["sim"]),
+                        # U-5.0-A: 테이블 기반 필드
+                        confidence=float(row["confidence"]),
+                        semantic_scope=row["semantic_scope"],
+                        combined_score=float(row["combined_score"]),
                     )
                 )
 
@@ -350,6 +472,13 @@ class InsurerCompareCell:
     doc_type_counts: dict[str, int] = field(default_factory=dict)
     best_evidence: list[Evidence] = field(default_factory=list)
     resolved_amount: ResolvedAmount | None = None  # H-1.8: 대표 금액
+    # U-4.17: 비교 가능 상태 ("COMPARABLE" | "NO_COMPARABLE_EVIDENCE")
+    compare_status: str = "COMPARABLE"
+    # U-4.18: Source Level ("COMPARABLE_DOC" | "POLICY_ONLY" | "UNKNOWN")
+    # - COMPARABLE_DOC: 가입설계서/상품요약서/사업방법서 기반
+    # - POLICY_ONLY: 약관 단독
+    # - UNKNOWN: evidence 부족
+    source_level: str = "UNKNOWN"
 
 
 @dataclass
@@ -461,6 +590,8 @@ def get_compare_axis_vector(
                   AND c.doc_type = ANY(%s::text[])
                   AND c.embedding IS NOT NULL
                   AND {plan_condition}
+                  -- V1.6.3-β-2: synthetic chunk 오염 방지 (비교축에서 제외)
+                  AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                 ORDER BY c.embedding <=> %s::vector
                 LIMIT %s
             """
@@ -787,6 +918,10 @@ def get_compare_axis(
     """
     Compare Axis 검색: 담보(coverage_code) 기반 근거 수집
 
+    STEP 4.10: coverage_alias 기반 텍스트 매칭으로 확장
+    - 기존: chunk.meta->entities->coverage_code 태그 기반 검색
+    - 확장: coverage_alias.raw_name을 사용한 content 텍스트 매칭
+
     Args:
         conn: DB 연결
         insurers: 보험사 코드 리스트
@@ -809,44 +944,89 @@ def get_compare_axis(
             # Step I: plan_id 조건 생성
             plan_id = plan_ids.get(insurer_code) if plan_ids else None
             if plan_id is not None:
-                plan_condition = "(c.plan_id = %s OR c.plan_id IS NULL)"
+                plan_condition = "(c.plan_id = %(plan_id)s OR c.plan_id IS NULL)"
                 plan_params = (plan_id,)
             else:
                 plan_condition = "c.plan_id IS NULL"
                 plan_params = ()
 
             if coverage_codes:
+                # STEP 4.10: coverage_alias 기반 텍스트 매칭
+                # 1. 먼저 해당 보험사의 alias raw_name 목록 조회
+                # 2. chunk content에서 해당 raw_name 포함 여부로 검색
+                # Note: CONCAT 사용으로 psycopg3 % 이스케이프 문제 해결
                 query = f"""
-                    WITH ranked AS (
+                    WITH alias_patterns AS (
+                        -- 해당 coverage_codes에 대한 alias raw_name 조회
+                        SELECT DISTINCT
+                            ca.coverage_code,
+                            cs.coverage_name,
+                            ca.raw_name,
+                            ca.raw_name_norm  -- U-5.0-A: 공백 제거 정규화 이름
+                        FROM coverage_alias ca
+                        JOIN insurer i ON ca.insurer_id = i.insurer_id
+                        LEFT JOIN coverage_standard cs ON cs.coverage_code = ca.coverage_code
+                        WHERE i.insurer_code = %(insurer_code)s
+                          AND ca.coverage_code = ANY(%(coverage_codes)s::text[])
+                    ),
+                    matched_chunks AS (
+                        -- alias raw_name을 포함하는 chunk 검색
                         SELECT
                             c.chunk_id,
                             c.document_id,
                             c.doc_type,
                             c.page_start,
                             LEFT(c.content, 1000) AS preview,
-                            c.meta->'entities'->>'coverage_code' AS coverage_code,
-                            c.meta->'entities'->>'coverage_name' AS coverage_name,
+                            ap.coverage_code,
+                            ap.coverage_name,
                             i.insurer_code,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY c.meta->'entities'->>'coverage_code'
-                                ORDER BY c.chunk_id
-                            ) AS rn
+                            -- doc_type 우선순위
+                            CASE c.doc_type
+                                WHEN '가입설계서' THEN 3
+                                WHEN '상품요약서' THEN 2
+                                WHEN '사업방법서' THEN 1
+                                ELSE 0
+                            END AS doc_priority
                         FROM chunk c
                         JOIN insurer i ON c.insurer_id = i.insurer_id
-                        WHERE i.insurer_code = %s
-                          AND c.doc_type = ANY(%s::text[])
-                          AND c.meta->'entities'->>'coverage_code' IS NOT NULL
-                          AND c.meta->'entities'->>'coverage_code' = ANY(%s::text[])
+                        CROSS JOIN alias_patterns ap
+                        WHERE i.insurer_code = %(insurer_code)s
+                          AND c.doc_type = ANY(%(doc_types)s::text[])
+                          -- U-5.0-A: 공백 무시 매칭 (raw_name_norm 사용)
+                          AND REGEXP_REPLACE(LOWER(c.content), '[[:space:]]', '', 'g')
+                              LIKE CONCAT(chr(37), ap.raw_name_norm, chr(37))
                           AND {plan_condition}
+                          -- V1.6.3-β: synthetic chunk 오염 방지 (비교축에서 제외)
+                          AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
+                    ),
+                    ranked AS (
+                        SELECT *,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY coverage_code
+                                ORDER BY doc_priority DESC, chunk_id
+                            ) AS rn
+                        FROM matched_chunks
                     )
-                    SELECT *
+                    SELECT chunk_id, document_id, doc_type, page_start, preview,
+                           coverage_code, coverage_name, insurer_code
                     FROM ranked
-                    WHERE rn <= %s
+                    WHERE rn <= %(top_k)s
                     ORDER BY coverage_code, rn
                 """
-                params = (insurer_code, compare_doc_types, coverage_codes) + plan_params + (top_k_per_insurer,)
-                cur.execute(query, params)
+                # Named parameters for clarity and to avoid % escaping issues
+                params_dict = {
+                    "insurer_code": insurer_code,
+                    "coverage_codes": coverage_codes,
+                    "doc_types": compare_doc_types,
+                    "top_k": top_k_per_insurer,
+                }
+                # Add plan_id if needed
+                if plan_id is not None:
+                    params_dict["plan_id"] = plan_id
+
+                cur.execute(query, params_dict)
             else:
+                # coverage_codes 없으면 기존 로직 유지 (전체 검색)
                 query = f"""
                     WITH ranked AS (
                         SELECT
@@ -868,6 +1048,8 @@ def get_compare_axis(
                           AND c.doc_type = ANY(%s::text[])
                           AND c.meta->'entities'->>'coverage_code' IS NOT NULL
                           AND {plan_condition}
+                          -- V1.6.3-β: synthetic chunk 오염 방지 (비교축에서 제외)
+                          AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                     )
                     SELECT *
                     FROM ranked
@@ -954,6 +1136,8 @@ def get_policy_axis(
                     WHERE i.insurer_code = %s
                       AND c.doc_type = ANY(%s::text[])
                       AND c.content ILIKE %s
+                      -- V1.6.3-β-2: synthetic chunk 오염 방지 (방어적 적용)
+                      AND COALESCE((c.meta->>'is_synthetic')::boolean, false) = false
                     ORDER BY c.page_start
                     LIMIT %s
                 """
@@ -1135,12 +1319,35 @@ def build_coverage_compare_result(
                 # H-1.8: resolved_amount 선택
                 resolved_amount = _resolve_amount_from_evidence(best_evidence)
 
+                # U-4.17: compare_status 결정
+                # U-4.18: source_level 결정
+                # - best_evidence가 비어있지만 약관에 데이터가 있으면 NO_COMPARABLE_EVIDENCE
+                # - Compare는 가입설계서/상품요약서/사업방법서만 사용 (약관 제외)
+                compare_status = "COMPARABLE"
+                source_level = "UNKNOWN"
+                has_policy_evidence = "약관" in evidence_by_doc_type
+
+                if best_evidence:
+                    # 비교 가능 문서(가입설계서/상품요약서/사업방법서) 기반
+                    compare_status = "COMPARABLE"
+                    source_level = "COMPARABLE_DOC"
+                elif has_policy_evidence:
+                    # 약관만 존재
+                    compare_status = "NO_COMPARABLE_EVIDENCE"
+                    source_level = "POLICY_ONLY"
+                else:
+                    # evidence 없음
+                    compare_status = "NO_COMPARABLE_EVIDENCE"
+                    source_level = "UNKNOWN"
+
                 cells.append(
                     InsurerCompareCell(
                         insurer_code=insurer_code,
                         doc_type_counts=item.doc_type_counts.copy(),
                         best_evidence=best_evidence,
                         resolved_amount=resolved_amount,
+                        compare_status=compare_status,
+                        source_level=source_level,
                     )
                 )
             else:
@@ -1151,6 +1358,8 @@ def build_coverage_compare_result(
                         doc_type_counts={},
                         best_evidence=[],
                         resolved_amount=None,
+                        compare_status="NO_COMPARABLE_EVIDENCE",
+                        source_level="UNKNOWN",
                     )
                 )
 
@@ -1378,12 +1587,14 @@ async def refine_amount_with_llm_if_needed(
             source_document_id=target_evidence.document_id,
         )
 
-        # cell 업데이트
+        # cell 업데이트 (U-4.17/U-4.18: compare_status, source_level 유지)
         updated_cell = InsurerCompareCell(
             insurer_code=cell.insurer_code,
             doc_type_counts=cell.doc_type_counts,
             best_evidence=cell.best_evidence,
             resolved_amount=new_resolved_amount,
+            compare_status=cell.compare_status,
+            source_level=cell.source_level,
         )
 
         debug_info["upgraded"] = True
@@ -1611,6 +1822,7 @@ def compare(
     db_url: str | None = None,
     age: int | None = None,
     gender: Literal["M", "F"] | None = None,
+    locked_coverage_codes: list[str] | None = None,  # STEP 4.7: 고정된 담보 코드
 ) -> CompareResponse:
     """
     2-Phase Retrieval 비교 검색
@@ -1798,6 +2010,15 @@ def compare(
         slot_type_for_retrieval = determine_slot_type_from_codes(resolved_coverage_codes)
         debug["slot_type_for_retrieval"] = slot_type_for_retrieval
 
+        # STEP 4.7: locked_coverage_codes가 있으면 effective_locked_code 결정
+        # fallback 시 coverage_code로 사용 (단일 insurer 기준)
+        effective_locked_code: str | None = None
+        if locked_coverage_codes and len(locked_coverage_codes) > 0:
+            effective_locked_code = locked_coverage_codes[0]
+
+        # STEP 4.7: retrieval fallback 추적용
+        retrieval_debug: dict[str, Any] = {}
+
         for insurer_code in insurers:
             # Find insurer's compare_axis entries
             insurer_evidence = []
@@ -1848,10 +2069,25 @@ def compare(
                     )
                     if existing_result is None:
                         # Create new CompareAxisResult for this insurer
+                        # STEP 4.7: locked_coverage_codes가 있으면 해당 코드 사용
+                        # "__amount_fallback__"은 locked 상태에서 절대 금지
+                        fallback_coverage_code = (
+                            effective_locked_code
+                            if effective_locked_code
+                            else "__amount_fallback__"
+                        )
+
+                        # STEP 4.7: fallback 사용 여부 debug에 기록
+                        if effective_locked_code:
+                            retrieval_debug["fallback_used"] = True
+                            retrieval_debug["fallback_reason"] = "no_tagged_chunks_for_locked_code"
+                            retrieval_debug["fallback_source"] = "amount_pass_2"
+                            retrieval_debug["effective_locked_code"] = effective_locked_code
+
                         compare_axis.append(
                             CompareAxisResult(
                                 insurer_code=insurer_code,
-                                coverage_code="__amount_fallback__",
+                                coverage_code=fallback_coverage_code,
                                 coverage_name=None,
                                 doc_type_counts={},
                                 evidence=amount_evidence,
@@ -1871,6 +2107,10 @@ def compare(
 
         debug["timing_ms"]["amount_retrieval_2pass"] = round((time.time() - start) * 1000, 2)
         debug["amount_retrieval_used"] = amount_retrieval_used
+
+        # STEP 4.7: retrieval fallback debug 정보 추가
+        if retrieval_debug:
+            debug["retrieval"] = retrieval_debug
 
         # Policy Axis (resolved_policy_keywords 사용)
         start = time.time()

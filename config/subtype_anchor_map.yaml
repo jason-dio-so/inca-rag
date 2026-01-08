@@ -1,0 +1,109 @@
+# V1.5 PATCH: Subtype Anchor Map
+#
+# 목적: Subtype-only 질의 시 "안전한 상위 담보 후보"를 제시
+#
+# 핵심 원칙:
+# - 자동 확정 금지 (결정권은 사용자에게)
+# - allowed_anchors는 신정원 canonical 코드만 허용
+# - 이 파일은 화이트리스트이며 자동 확정 권한 없음
+#
+# V1.5 안전 확정(SAFE_RESOLVED) 조건:
+# - allowed_anchor 정확히 1개
+# - 해당 coverage_code에 evidence >= 1
+# - 사용자에게 "subtype 기반 안전 확정"임을 명시
+#
+# V1.5-HOTFIX: 질병명(갑상선암, 소액암 등)은 SAFE_RESOLVED 금지
+# - 허용 subtype: borderline_tumor, carcinoma_in_situ만
+# - 질병명 → 담보코드 자동 승격은 v1 철학 위반
+
+# =============================================================================
+# Subtype → Allowed Anchors Mapping
+# =============================================================================
+
+subtypes:
+  # -------------------------------------------------------------------------
+  # 경계성종양 (Borderline Tumor)
+  # -------------------------------------------------------------------------
+  borderline_tumor:
+    keywords:
+      - 경계성종양
+      - 경계성 종양
+      - 경계성
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "경계성종양은 유사암 범주에 포함됨"
+    domain: CANCER
+
+  # -------------------------------------------------------------------------
+  # 제자리암 (Carcinoma in Situ)
+  # -------------------------------------------------------------------------
+  carcinoma_in_situ:
+    keywords:
+      - 제자리암
+      - 상피내암
+      - 제자리 암
+      - 상피내 암
+    allowed_anchors:
+      - A4210      # 유사암진단비 (신정원)
+    anchor_basis: "제자리암은 유사암 범주에 포함됨"
+    domain: CANCER
+
+  # =========================================================================
+  # V1.5-HOTFIX: 아래 subtype들은 질병명/암종명이므로 비활성화
+  # SAFE_RESOLVED 금지 대상 - 기존 coverage resolution flow 따름
+  # =========================================================================
+
+  # [DISABLED] similar_cancer - "유사암"은 담보명이므로 anchor_exclusion_keywords로 처리
+  # [DISABLED] minor_cancer - 소액암은 질병 분류명
+  # [DISABLED] thyroid_cancer - 갑상선암은 질병명
+  # [DISABLED] skin_cancer - 기타피부암은 질병명
+  # [DISABLED] colorectal_mucosal - 대장점막내암은 질병명
+
+# =============================================================================
+# 안전 확정(SAFE_RESOLVED) 설정
+# =============================================================================
+safe_resolution:
+  # 안전 확정 활성화 여부
+  enabled: true
+
+  # 안전 확정 메시지 템플릿
+  safe_resolved_message: "'{subtype}'을(를) '{coverage_name}' 담보로 안전하게 확정했습니다."
+
+  # 안전 확정 불가 시 안내 메시지 (후보가 여러 개)
+  multiple_anchors_message: "'{subtype}' 관련 담보가 여러 개 있습니다. 하나를 선택해 주세요:"
+
+  # Evidence 최소 개수 (안전 확정 조건)
+  min_evidence_count: 1
+
+# =============================================================================
+# V1.5-PRECHECK: Anchor 담보 키워드 (Subtype-only 판정 제외 조건)
+# =============================================================================
+# 이 키워드가 질의에 포함되면 subtype-only가 아닌 것으로 판정
+# → 기존 coverage resolution flow를 따름
+anchor_exclusion_keywords:
+  - 암진단비
+  - 암 진단비
+  - 유사암진단비
+  - 유사암 진단비
+  - 유사암  # V1.5-HOTFIX: "유사암"은 담보명이므로 subtype-only 금지
+  - 재진단암진단비
+  - 재진단암 진단비
+  - 암수술비
+  - 암 수술비
+  - 다빈치
+  - 로봇수술
+  - 진단비  # V1.5-PRECHECK: "제자리암 진단비" 등 담보 요청 시 anchor로 취급
+
+# 설명/조건 문맥 키워드 (SAFE_RESOLVED 금지)
+# 이 키워드가 포함되면 정보 질의로 판단하여 SAFE_RESOLVED 하지 않음
+explanation_context_keywords:
+  - 제외
+  - 않는
+  - 아닌
+  - 안되
+  - 뜻
+  - 이란
+  - 무엇
+  - 설명
+  - 정의
+  - 경우

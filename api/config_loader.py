@@ -391,3 +391,327 @@ def get_max_recommendations() -> int:
     """추천 최대 개수 반환"""
     config = get_coverage_resolution_config()
     return config.get("max_recommendations", 5)
+
+
+# =============================================================================
+# STEP 4.12-γ: Subtype Config Loaders
+# =============================================================================
+
+def get_subtype_config() -> dict:
+    """
+    Subtype 설정 전체 반환
+
+    Returns:
+        {
+            "subtype_keyword_map": {...},
+            "subtype_display_names": {...},
+            "subtype_slots": [...],
+            ...
+        }
+    """
+    return _load_yaml("subtype_config.yaml")
+
+
+def get_subtype_keyword_map() -> dict[str, str]:
+    """
+    Subtype 키워드 -> Target 매핑 반환
+
+    Returns:
+        {"경계성": "borderline", "제자리암": "in_situ", ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_keyword_map", {})
+
+
+def get_subtype_display_names() -> dict[str, str]:
+    """
+    Subtype Target -> 표시명 매핑 반환
+
+    Returns:
+        {"borderline": "경계성종양", "in_situ": "제자리암(상피내암)", ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_display_names", {})
+
+
+def get_subtype_slot_definitions() -> list[dict]:
+    """
+    Subtype 슬롯 정의 리스트 반환
+
+    Returns:
+        [{"slot_key": "subtype_in_situ_covered", ...}, ...]
+    """
+    config = get_subtype_config()
+    return config.get("subtype_slots", [])
+
+
+def get_suppressed_slots_in_subtype() -> list[str]:
+    """
+    Subtype 모드에서 생성 금지되는 슬롯 키 리스트 반환
+
+    Returns:
+        ["payout_amount", "diagnosis_lump_sum_amount", ...]
+    """
+    config = get_subtype_config()
+    return config.get("suppressed_slots_in_subtype", [])
+
+
+def get_subtype_evidence_keywords() -> dict[str, list[str]]:
+    """
+    Subtype별 Evidence 검색 키워드 반환
+
+    Returns:
+        {"borderline": ["경계성종양", ...], "in_situ": ["제자리암", ...], ...}
+    """
+    config = get_subtype_config()
+    return config.get("subtype_evidence_keywords", {})
+
+
+# =============================================================================
+# V1.5: Subtype Anchor Map Loaders
+# =============================================================================
+
+def get_subtype_anchor_map_config() -> dict:
+    """
+    V1.5: Subtype Anchor Map 설정 전체 반환
+
+    Returns:
+        {
+            "subtypes": {...},
+            "safe_resolution": {...}
+        }
+    """
+    return _load_yaml("subtype_anchor_map.yaml")
+
+
+def get_subtype_anchor_entries() -> dict[str, dict]:
+    """
+    V1.5: Subtype -> Anchor 매핑 전체 반환
+
+    Returns:
+        {
+            "borderline_tumor": {
+                "keywords": ["경계성종양", ...],
+                "allowed_anchors": ["A4210"],
+                "anchor_basis": "...",
+                "domain": "CANCER"
+            },
+            ...
+        }
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("subtypes", {})
+
+
+def get_safe_resolution_config() -> dict:
+    """
+    V1.5: 안전 확정(SAFE_RESOLVED) 설정 반환
+
+    Returns:
+        {
+            "enabled": True,
+            "safe_resolved_message": "...",
+            "multiple_anchors_message": "...",
+            "min_evidence_count": 1
+        }
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("safe_resolution", {
+        "enabled": True,
+        "min_evidence_count": 1
+    })
+
+
+def find_subtype_by_keyword(query: str) -> tuple[str | None, dict | None]:
+    """
+    V1.5: 질의에서 subtype 키워드를 찾아 해당 subtype entry 반환
+    V1.5-PRECHECK: anchor 담보 키워드가 있으면 subtype-only로 판정하지 않음
+
+    Args:
+        query: 사용자 질의
+
+    Returns:
+        (subtype_id, subtype_entry) or (None, None)
+        subtype_id: "borderline_tumor", "carcinoma_in_situ" 등
+        subtype_entry: 해당 subtype의 설정 dict
+    """
+    query_lower = query.lower()
+
+    # V1.5-PRECHECK: anchor 담보 키워드가 있으면 subtype-only 아님
+    config = get_subtype_anchor_map_config()
+    anchor_exclusion_keywords = config.get("anchor_exclusion_keywords", [])
+    for kw in anchor_exclusion_keywords:
+        if kw.lower() in query_lower:
+            return None, None  # anchor 키워드가 있으면 subtype-only 아님
+
+    entries = get_subtype_anchor_entries()
+
+    # 키워드 길이 내림차순으로 모든 키워드 수집 (긴 것 우선 매칭)
+    keyword_to_subtype: list[tuple[str, str]] = []
+    for subtype_id, entry in entries.items():
+        for keyword in entry.get("keywords", []):
+            keyword_to_subtype.append((keyword.lower(), subtype_id))
+
+    # 긴 키워드부터 매칭
+    keyword_to_subtype.sort(key=lambda x: len(x[0]), reverse=True)
+
+    for keyword, subtype_id in keyword_to_subtype:
+        if keyword in query_lower:
+            return subtype_id, entries[subtype_id]
+
+    return None, None
+
+
+def get_allowed_anchors_for_subtype(subtype_id: str) -> list[str]:
+    """
+    V1.5: 특정 subtype에 허용된 anchor coverage_code 목록 반환
+
+    Args:
+        subtype_id: "borderline_tumor", "carcinoma_in_situ" 등
+
+    Returns:
+        ["A4210"] 등 허용된 coverage_code 리스트
+    """
+    entries = get_subtype_anchor_entries()
+    entry = entries.get(subtype_id, {})
+    return entry.get("allowed_anchors", [])
+
+
+def get_anchor_basis_for_subtype(subtype_id: str) -> str | None:
+    """
+    V1.5: 특정 subtype의 anchor 근거 문구 반환
+
+    Args:
+        subtype_id: "borderline_tumor" 등
+
+    Returns:
+        "경계성종양은 유사암 범주에 포함됨" 등
+    """
+    entries = get_subtype_anchor_entries()
+    entry = entries.get(subtype_id, {})
+    return entry.get("anchor_basis")
+
+
+def get_anchor_exclusion_keywords() -> list[str]:
+    """
+    V1.5-PRECHECK: Anchor 담보 키워드 목록 반환
+
+    이 키워드가 질의에 포함되면 subtype-only가 아닌 것으로 판정
+
+    Returns:
+        ["암진단비", "유사암진단비", ...] 등
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("anchor_exclusion_keywords", [])
+
+
+def get_explanation_context_keywords() -> list[str]:
+    """
+    V1.5-PRECHECK: 설명/조건 문맥 키워드 목록 반환
+
+    이 키워드가 포함되면 정보 질의로 판단하여 SAFE_RESOLVED 하지 않음
+
+    Returns:
+        ["제외", "않는", "뜻", ...] 등
+    """
+    config = get_subtype_anchor_map_config()
+    return config.get("explanation_context_keywords", [])
+
+
+# =============================================================================
+# V1.6: Amount Bridge Loaders
+# =============================================================================
+
+def get_amount_bridge_config() -> dict:
+    """
+    V1.6: Amount Bridge 설정 전체 반환
+
+    Returns:
+        {
+            "bridge": {...},
+            "amount_intent": {...},
+            "condition_branch": {...},
+            "partial_failure": {...},
+            "messages": {...}
+        }
+    """
+    return _load_yaml("v1_6_amount_bridge.yaml")
+
+
+def is_amount_bridge_enabled() -> bool:
+    """V1.6: Amount Bridge 활성화 여부 반환"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("enabled", False)
+
+
+def get_amount_bridge_allow_subtypes() -> list[str]:
+    """V1.6: Bridge 허용 subtype 목록 반환"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("allow_subtypes", [])
+
+
+def get_amount_bridge_anchor_code() -> str:
+    """V1.6: Bridge 대상 anchor 코드 반환 (신정원 canonical 고정)"""
+    config = get_amount_bridge_config()
+    return config.get("bridge", {}).get("anchor_code", "A4210")
+
+
+def get_amount_intent_keywords() -> list[str]:
+    """
+    V1.6: 금액 의도 키워드 목록 반환
+
+    Returns:
+        ["보장금액", "진단금", "얼마", ...] 등
+    """
+    config = get_amount_bridge_config()
+    return config.get("amount_intent", {}).get("keywords", [])
+
+
+def get_amount_intent_regex_patterns() -> list[str]:
+    """
+    V1.6: 금액 의도 정규식 패턴 목록 반환
+
+    Returns:
+        [r'\d{1,3}(,\d{3})+원', ...] 등
+    """
+    config = get_amount_bridge_config()
+    return config.get("amount_intent", {}).get("regex_patterns", [])
+
+
+def get_condition_branch_config(insurer_code: str) -> dict:
+    """
+    V1.6: 보험사별 조건 분기 설정 반환
+
+    Args:
+        insurer_code: "LOTTE", "DB" 등
+
+    Returns:
+        {"enabled": True, "detection_keywords": [...], "branch_message": "..."}
+    """
+    config = get_amount_bridge_config()
+    return config.get("condition_branch", {}).get(insurer_code.lower(), {})
+
+
+def get_partial_failure_config() -> dict:
+    """
+    V1.6: Partial Failure 설정 반환
+
+    Returns:
+        {"allow_partial": True, "not_found_message": "...", "not_found_status": "NOT_FOUND"}
+    """
+    config = get_amount_bridge_config()
+    return config.get("partial_failure", {
+        "allow_partial": True,
+        "not_found_status": "NOT_FOUND"
+    })
+
+
+def get_amount_bridge_messages() -> dict[str, str]:
+    """
+    V1.6: Amount Bridge 메시지 템플릿 반환
+
+    Returns:
+        {"bridge_note": "...", "amount_source_note": "..."}
+    """
+    config = get_amount_bridge_config()
+    return config.get("messages", {})

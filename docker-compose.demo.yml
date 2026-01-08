@@ -50,6 +50,8 @@ services:
     volumes:
       # PDF 파일 접근을 위한 data 폴더 마운트
       - ./data:/app/data:ro
+      # 설정 파일 마운트 (V1.5-HOTFIX: 런타임 config 변경 반영)
+      - ./config:/app/config:ro
       # 페이지 캐시
       - api_page_cache:/app/artifacts/page_cache
     depends_on:

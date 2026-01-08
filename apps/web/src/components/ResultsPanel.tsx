@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * STEP 3.7-β: Results Panel with UI Gating
+ * STEP 3.7-δ-β: Results Panel with Resolution State Gate
+ * U-4.18-β: SUBTYPE_MULTI 제거 - Subtype은 Coverage 종속
  *
- * Coverage Resolution 상태에 따른 렌더링 제어:
- * - EXACT (resolved): Results Panel 전체 활성화
- * - AMBIGUOUS (suggest/clarify): Results Panel 렌더링 차단
- * - NOT_FOUND (failed): Results Panel 렌더링 차단
+ * Resolution State에 따른 렌더링 제어:
+ * - RESOLVED: Results Panel 전체 활성화
+ * - UNRESOLVED: Results Panel 렌더링 차단 (담보 선택 필요)
+ * - INVALID: Results Panel 렌더링 차단 (재입력 필요)
  *
- * 원칙: 대표 담보 미확정 상태에서 우측 패널은 비어 있어야 함
+ * 원칙:
+ * - resolution_state !== "RESOLVED"일 때 우측 패널은 비어 있어야 함
+ * - Subtype-only 질의(경계성 종양, 제자리암)는 UNRESOLVED 처리
  */
 
 import { useState, useMemo } from "react";
@@ -26,16 +29,12 @@ import { CompareTable } from "./CompareTable";
 import { DiffSummary } from "./DiffSummary";
 import { EvidencePanel } from "./EvidencePanel";
 import { SlotsTable } from "./SlotsTable";
-import { CompareResponseWithSlots, CoverageCompareItem } from "@/lib/types";
+import { SubtypeComparePanel } from "./SubtypeComparePanel";
+import { CompareResponseWithSubtype, CoverageCompareItem } from "@/lib/types";
 import { ChevronDown, ChevronUp, Info, AlertCircle } from "lucide-react";
-import {
-  canRenderResultsPanel,
-  getResolutionMessage,
-  getUIResolutionState,
-} from "@/lib/ui-gating.config";
 
 interface ResultsPanelProps {
-  response: CompareResponseWithSlots | null;
+  response: CompareResponseWithSubtype | null;
 }
 
 export function ResultsPanel({ response }: ResultsPanelProps) {
@@ -92,23 +91,54 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
   }
 
   // ===========================================================================
-  // STEP 3.7-β: UI Gating - Coverage Resolution 상태 확인
+  // STEP 3.7-δ-β: Resolution State Gate
+  // U-4.18-β: resolution_state !== "RESOLVED"이면 Results Panel 렌더링 차단
+  // Subtype-only 질의도 UNRESOLVED로 처리되어 차단됨
   // ===========================================================================
-  const resolutionState = getUIResolutionState(response.coverage_resolution);
-  const canRender = canRenderResultsPanel(response.coverage_resolution);
+  const resolutionState = response.resolution_state;
 
-  // 대표 담보 미확정 상태 (AMBIGUOUS / NOT_FOUND) → Results Panel 렌더링 차단
-  if (!canRender) {
-    const message = getResolutionMessage(response.coverage_resolution);
+  // ===========================================================================
+  // STEP 3.7-δ-γ3: resolution_state 직접 사용 (UNRESOLVED 우선)
+  // U-4.18-β: coverage_resolution.message를 사용하여 동적 메시지 표시
+  // - UNRESOLVED → "담보 선택 필요" (coverage_resolution.message 우선)
+  // - INVALID → "담보 미확정"
+  // ===========================================================================
+  if (resolutionState !== "RESOLVED") {
+    const isUnresolved = resolutionState === "UNRESOLVED";
+    const title = isUnresolved ? "담보 선택 필요" : "담보 미확정";
+    // U-4.18-β: coverage_resolution.message가 있으면 사용 (Subtype-only 질의 메시지)
+    const message = isUnresolved
+      ? (response.coverage_resolution?.message || "담보를 선택해 주세요. 선택 후 비교 결과가 표시됩니다.")
+      : "담보가 확정되면 비교 결과가 표시됩니다.";
+
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        <div className="text-center max-w-md">
-          <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-          <p className="text-lg font-medium mb-2">
-            {resolutionState === "AMBIGUOUS" ? "담보 선택 필요" : "담보 미확정"}
-          </p>
-          <p className="text-sm">{message}</p>
-          {/* STEP 3.7-β: 연관 담보 / 문서 / 결과 표시 완전 차단 */}
+      <div className="h-full flex flex-col">
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="text-center max-w-md">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+            <p className="text-lg font-medium mb-2">{title}</p>
+            <p className="text-sm">{message}</p>
+          </div>
+        </div>
+        {/* STEP 4.4: Contract Debug View (UNRESOLVED/INVALID 상태에서도 표시) */}
+        <div className="border-t p-3 bg-purple-50">
+          <h4 className="text-xs font-medium text-purple-800 mb-2">Contract Debug (STEP 4.4):</h4>
+          <div className="text-xs text-purple-700 space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">resolution_state:</span>
+              <Badge variant="destructive" className="text-xs">
+                {resolutionState}
+              </Badge>
+            </div>
+            <div>
+              <span className="font-medium">coverage_resolution.status:</span>{" "}
+              {response.coverage_resolution?.status ?? "(null)"}
+            </div>
+            <div>
+              <span className="font-medium">suggested_coverages.length:</span>{" "}
+              {response.coverage_resolution?.suggested_coverages?.length ?? 0}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -118,23 +148,24 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
   const hasRelatedCoverages = relatedCoverageData.length > 0;
 
   return (
+    // STEP 4.9-β-1: ResultsPanel은 부모에서 스크롤 처리, 내부는 자연스럽게 확장
     <div className="h-full flex flex-col">
-      {/* STEP 2.5: 대표 담보 헤더 */}
+      {/* STEP 4.9-β: 대표 담보 헤더 - display name만 표시 (coverage_code 노출 금지) */}
+      {/* STEP 4.9-β-1: shrink-0으로 헤더 고정 */}
       {hasPrimaryCoverage && (
-        <div className="px-4 py-3 border-b bg-muted/30">
+        <div className="shrink-0 px-4 py-3 border-b bg-muted/30">
           <div className="flex items-center gap-2">
             <Badge variant="default" className="text-sm">
               {response.primary_coverage_name}
             </Badge>
-            <span className="text-xs text-muted-foreground">
-              ({response.primary_coverage_code})
-            </span>
           </div>
         </div>
       )}
 
-      <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col">
-        <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0">
+      {/* U-4.18-β: Subtype 탭은 RESOLVED + is_multi_subtype일 때만 표시 */}
+      <Tabs defaultValue={response.slots && response.slots.length > 0 ? "slots" : "compare"} className="flex-1 flex flex-col min-h-0">
+        {/* STEP 4.9-β-1: 탭 목록 고정 */}
+        <TabsList className="shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0">
           {/* U-4.8: Slots tab (first if available) */}
           {response.slots && response.slots.length > 0 && (
             <TabsTrigger
@@ -168,9 +199,19 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           >
             Policy(약관)
           </TabsTrigger>
+          {/* U-4.18-β: Subtype Tab - RESOLVED 상태에서 is_multi_subtype일 때만 표시 */}
+          {response.subtype_comparison?.is_multi_subtype && (
+            <TabsTrigger
+              value="subtype"
+              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent"
+            >
+              Subtype
+            </TabsTrigger>
+          )}
         </TabsList>
 
-        <ScrollArea className="flex-1">
+        {/* STEP 4.9-β-1: 콘텐츠 영역 - flex-1 min-h-0으로 스크롤 영역 확보 */}
+        <ScrollArea className="flex-1 min-h-0">
           {/* U-4.8: Slots content */}
           {response.slots && response.slots.length > 0 && (
             <TabsContent value="slots" className="m-0 p-4">
@@ -221,16 +262,30 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           </TabsContent>
 
           <TabsContent value="evidence" className="m-0 p-4">
-            <EvidencePanel data={response.compare_axis} isPolicyMode={false} slots={response.slots} />
+            <EvidencePanel data={response.compare_axis} isPolicyMode={false} slots={response.slots ?? undefined} />
           </TabsContent>
 
           <TabsContent value="policy" className="m-0 p-4">
             <EvidencePanel data={response.policy_axis} isPolicyMode={true} />
           </TabsContent>
+
+          {/* U-4.18-β: Subtype Comparison content - RESOLVED + is_multi_subtype일 때만 */}
+          {response.subtype_comparison?.is_multi_subtype && (
+            <TabsContent value="subtype" className="m-0 p-4">
+              <SubtypeComparePanel
+                comparison={response.subtype_comparison}
+                insurers={
+                  response.compare_axis?.map((item) => item.insurer_code).filter(
+                    (v, i, a) => a.indexOf(v) === i
+                  ) || []
+                }
+              />
+            </TabsContent>
+          )}
         </ScrollArea>
       </Tabs>
 
-      {/* Debug Section */}
+      {/* STEP 4.6: Debug Section - 개발자/QA 전용 (사용자 UX에서 분리) */}
       <div className="border-t">
         <Collapsible open={debugOpen} onOpenChange={setDebugOpen}>
           <CollapsibleTrigger asChild>
@@ -239,7 +294,7 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
               size="sm"
               className="w-full justify-between rounded-none"
             >
-              <span className="text-xs text-muted-foreground">Debug</span>
+              <span className="text-xs text-muted-foreground">🔧 Debug (개발자 전용)</span>
               {debugOpen ? (
                 <ChevronDown className="h-3 w-3" />
               ) : (
@@ -250,6 +305,56 @@ export function ResultsPanel({ response }: ResultsPanelProps) {
           <CollapsibleContent>
             <ScrollArea className="h-[300px]">
               <div className="p-4 space-y-4">
+                {/* STEP 4.6: 개발자 전용 경고 */}
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                  ⚠️ 이 섹션은 개발자/QA 전용입니다. 사용자 UX 판단 기준으로 사용하지 마세요.
+                </div>
+                {/* STEP 4.4 + 4.6: Contract Debug View (정답 경로 표시) */}
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-purple-800 mb-2">Contract Debug (정답 경로):</h4>
+                  <div className="text-xs text-purple-700 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">resolution_state:</span>
+                      <Badge variant={resolutionState === "RESOLVED" ? "default" : "destructive"} className="text-xs">
+                        {resolutionState}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="font-medium">coverage_resolution.status:</span>{" "}
+                      {response.coverage_resolution?.status ?? "(null)"}
+                    </div>
+                    <div>
+                      <span className="font-medium">suggested_coverages.length:</span>{" "}
+                      {response.coverage_resolution?.suggested_coverages?.length ?? 0}
+                    </div>
+                    {(() => {
+                      // STEP 4.6: 정답 경로 - debug.anchor.* 사용 (최상위 필드 참조 금지)
+                      const debug = response.debug as Record<string, unknown> | undefined;
+                      const anchor = debug?.anchor as {
+                        coverage_locked?: boolean;
+                        locked_coverage_codes?: string[];
+                      } | undefined;
+                      const coverageLocked = anchor?.coverage_locked;
+                      const lockedCodes = anchor?.locked_coverage_codes;
+                      return (
+                        <>
+                          <div>
+                            <span className="font-medium">debug.anchor.coverage_locked:</span>{" "}
+                            <span className={coverageLocked ? "text-green-700" : "text-gray-500"}>
+                              {coverageLocked === true ? "true" : coverageLocked === false ? "false" : "(undefined)"}
+                            </span>
+                          </div>
+                          {lockedCodes && lockedCodes.length > 0 && (
+                            <div>
+                              <span className="font-medium">debug.anchor.locked_coverage_codes:</span>{" "}
+                              <span className="text-green-700">{lockedCodes.join(", ")}</span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
                 {/* Evidence Count by Insurer */}
                 {(() => {
                   const compareAxis = response.compare_axis || [];

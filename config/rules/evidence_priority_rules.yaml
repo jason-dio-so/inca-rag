@@ -1,0 +1,77 @@
+# STEP 4.0: Evidence Priority Rules
+#
+# Evidence 우선순위 분류 규칙
+# - Evidence 내용을 수정/요약/재작성 금지
+# - 분류만 수행하여 UI 정렬에 활용
+
+# 우선순위 정의
+priorities:
+  P1:
+    name: "결정 근거"
+    description: "비교 값이 직접 추출된 문장"
+    icon: "star-3"  # ⭐⭐⭐
+    expanded: true  # 기본 펼침
+
+  P2:
+    name: "해석 근거"
+    description: "정의/조건 설명 문장"
+    icon: "star-2"  # ⭐⭐
+    expanded: false  # 기본 접힘
+
+  P3:
+    name: "보조 근거"
+    description: "요약/설명성 문장"
+    icon: "star-1"  # ⭐
+    expanded: false  # 기본 접힘
+
+# 분류 규칙 (우선순위 순서대로 매칭)
+classification_rules:
+  # P1: 결정 근거 - 금액/값이 직접 포함된 경우
+  - priority: "P1"
+    conditions:
+      - type: "has_extracted_value"
+        description: "amount, limit, slot_value가 추출된 evidence"
+      - type: "doc_type"
+        values: ["가입설계서"]
+        description: "가입설계서에서 추출된 근거"
+      - type: "has_amount_pattern"
+        patterns:
+          - "\\d+[만천백]?\\s*원"
+          - "\\d+%"
+          - "\\d+일"
+        description: "금액/비율/기간 패턴 포함"
+
+  # P2: 해석 근거 - 정의/조건 설명
+  - priority: "P2"
+    conditions:
+      - type: "doc_type"
+        values: ["약관", "사업방법서"]
+        description: "약관/사업방법서에서 추출된 근거"
+      - type: "has_definition_pattern"
+        patterns:
+          - "정의"
+          - "말합니다"
+          - "의미합니다"
+          - "적용됩니다"
+          - "해당합니다"
+        description: "정의/조건 설명 패턴"
+
+  # P3: 보조 근거 - 그 외 모든 것
+  - priority: "P3"
+    conditions:
+      - type: "default"
+        description: "위 조건에 해당하지 않는 모든 evidence"
+
+# doc_type별 기본 우선순위
+doc_type_priority:
+  가입설계서: "P1"
+  상품요약서: "P2"
+  사업방법서: "P2"
+  약관: "P2"
+
+# UI 표시 설정
+ui_settings:
+  show_priority_label: true
+  show_priority_icon: true
+  group_by_priority: true
+  collapse_low_priority: true
